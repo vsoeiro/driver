@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driver</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+</head>
+
+<body>
+    <div id="app">
+        <!-- Sidebar / Navigation -->
+        <aside class="sidebar">
+            <div class="logo">
+                <i class="ri-cloud-windy-line"></i>
+                <span>Driver</span>
+            </div>
+            <nav>
+                <button class="nav-item active" data-view="accounts">
+                    <i class="ri-dashboard-line"></i> Accounts
+                </button>
+                <div id="account-nav-list">
+                    <!-- Dynamic Account Links will go here -->
+                </div>
+            </nav>
+            <div class="user-profile">
+                <!-- Future User Profile Info -->
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="top-bar">
+                <div class="breadcrumbs" id="breadcrumbs">
+                    <span>Home</span>
+                </div>
+                <div class="actions">
+                    <button class="btn btn-primary" id="link-account-btn">
+                        <i class="ri-add-line"></i> Link Account
+                    </button>
+                    <button class="btn btn-icon" id="theme-toggle">
+                        <i class="ri-moon-line"></i>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Views -->
+            <div id="view-container" class="content-area">
+
+                <!-- Accounts View -->
+                <div id="view-accounts" class="view-section active">
+                    <div class="section-header">
+                        <h2>Connected Accounts</h2>
+                        <p>Manage your linked OneDrive accounts.</p>
+                    </div>
+                    <div class="accounts-grid" id="accounts-list">
+                        <!-- Account Cards Injected Here -->
+                        <div class="loading-spinner">Loading accounts...</div>
+                    </div>
+                </div>
+
+                <!-- Files View -->
+                <div id="view-files" class="view-section hidden">
+                    <div class="section-header">
+                        <h2 id="current-account-name">Files</h2>
+                        <div class="file-actions">
+                            <button class="btn btn-sm" id="upload-btn"><i class="ri-upload-cloud-2-line"></i>
+                                Upload</button>
+                            <button class="btn btn-sm" id="create-folder-btn"><i class="ri-folder-add-line"></i> New
+                                Folder</button>
+                        </div>
+                    </div>
+
+                    <div class="file-list-header">
+                        <div class="col-icon"></div>
+                        <div class="col-name">Name</div>
+                        <div class="col-size">Size</div>
+                        <div class="col-date">Modified</div>
+                        <div class="col-actions">Actions</div>
+                    </div>
+                    <div class="file-list" id="file-list">
+                        <!-- File Items Injected Here -->
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- Scripts -->
+    <script type="module" src="/static/js/api.js"></script>
+    <script type="module" src="/static/js/app.js"></script>
+</body>
+
+</html>

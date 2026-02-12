@@ -14,3 +14,9 @@ wheels/
 
 # Database
 *.db
+
+# Node.js
+node_modules/
+frontend-app/node_modules/
+frontend-app/dist/
+frontend-app/.env
