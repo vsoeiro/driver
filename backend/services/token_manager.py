@@ -134,6 +134,11 @@ class TokenManager:
 
         result = self._auth_service.refresh_access_token(refresh_token)
         if not result:
+            logger.error(
+                "Token refresh failed for account %s. Result was None. Refresh token (masked): %s...",
+                locked_account.id,
+                refresh_token[:10] if refresh_token else "None"
+            )
             logger.error("Token refresh failed for account %s", locked_account.id)
             await self._mark_account_inactive(locked_account)
             raise TokenRefreshError("Token refresh failed")

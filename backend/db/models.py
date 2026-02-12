@@ -22,53 +22,6 @@ class Base(DeclarativeBase):
     pass
 
 
-class User(Base):
-    """User model representing an application user.
-
-    A user can have multiple linked Microsoft accounts.
-
-    Attributes
-    ----------
-    id : UUID
-        Primary key.
-    email : str
-        User email address, unique.
-    name : str
-        User display name.
-    created_at : datetime
-        Account creation timestamp.
-    updated_at : datetime
-        Last update timestamp.
-    linked_accounts : list[LinkedAccount]
-        Related Microsoft accounts.
-    """
-
-    __tablename__ = "users"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-    )
-    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(UTC),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(UTC),
-        onupdate=lambda: datetime.now(UTC),
-    )
-
-    linked_accounts: Mapped[list["LinkedAccount"]] = relationship(
-        "LinkedAccount",
-        back_populates="user",
-        cascade="all, delete-orphan",
-    )
-
-
 class LinkedAccount(Base):
     """Linked Microsoft account model.
 
@@ -79,8 +32,6 @@ class LinkedAccount(Base):
     ----------
     id : UUID
         Primary key.
-    user_id : UUID
-        Foreign key to the parent user.
     provider : str
         OAuth provider name (e.g., 'microsoft').
     provider_account_id : str
@@ -101,8 +52,6 @@ class LinkedAccount(Base):
         Account link creation timestamp.
     updated_at : datetime
         Last update timestamp.
-    user : User
-        Parent user relationship.
     """
 
     __tablename__ = "linked_accounts"
@@ -111,11 +60,6 @@ class LinkedAccount(Base):
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
-    )
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
     )
     provider: Mapped[str] = mapped_column(String(50), nullable=False, default="microsoft")
     provider_account_id: Mapped[str] = mapped_column(
@@ -141,8 +85,6 @@ class LinkedAccount(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
-
-    user: Mapped["User"] = relationship("User", back_populates="linked_accounts")
 
 
 

@@ -29,7 +29,7 @@ from backend.schemas.drive import (
 )
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/drive", tags=["OneDrive"])
+router = APIRouter(prefix="/drive")
 
 MAX_SIMPLE_UPLOAD_SIZE = 4 * 1024 * 1024  # 4MB
 
@@ -55,7 +55,7 @@ def _ensure_unique_name(name: str, used_names: set[str]) -> str:
     return candidate
 
 
-@router.get("/{account_id}/files", response_model=DriveListResponse)
+@router.get("/{account_id}/files", response_model=DriveListResponse, tags=["Files"])
 async def list_root_files(
     account: LinkedAccountDep,
     graph_client: GraphClientDep,
@@ -64,7 +64,7 @@ async def list_root_files(
     return await graph_client.list_root_items(account)
 
 
-@router.get("/{account_id}/files/{item_id}", response_model=DriveListResponse)
+@router.get("/{account_id}/files/{item_id}", response_model=DriveListResponse, tags=["Files"])
 async def list_folder_files(
     account: LinkedAccountDep,
     graph_client: GraphClientDep,
@@ -74,7 +74,7 @@ async def list_folder_files(
     return await graph_client.list_folder_items(account, item_id)
 
 
-@router.get("/{account_id}/file/{item_id}", response_model=DriveItem)
+@router.get("/{account_id}/file/{item_id}", response_model=DriveItem, tags=["Files"])
 async def get_file_metadata(
     account: LinkedAccountDep,
     graph_client: GraphClientDep,
@@ -84,7 +84,7 @@ async def get_file_metadata(
     return await graph_client.get_item_metadata(account, item_id)
 
 
-@router.get("/{account_id}/download/{item_id}")
+@router.get("/{account_id}/download/{item_id}", tags=["Downloads"])
 async def get_download_url(
     account: LinkedAccountDep,
     graph_client: GraphClientDep,
@@ -95,7 +95,7 @@ async def get_download_url(
     return {"download_url": download_url}
 
 
-@router.get("/{account_id}/download/{item_id}/redirect")
+@router.get("/{account_id}/download/{item_id}/redirect", tags=["Downloads"])
 async def download_redirect(
     account: LinkedAccountDep,
     graph_client: GraphClientDep,
@@ -106,7 +106,7 @@ async def download_redirect(
     return RedirectResponse(url=download_url)
 
 
-@router.post("/{account_id}/download/zip")
+@router.post("/{account_id}/download/zip", tags=["Downloads"])
 async def download_zip(
     account: LinkedAccountDep,
     graph_client: GraphClientDep,
@@ -152,11 +152,15 @@ async def download_zip(
              shutil.rmtree(temp_dir)
              raise HTTPException(status_code=400, detail="Failed to download any of the selected files")
 
-        # Create ZIP file
+        # Create ZIP file in a separate thread to avoid blocking the event loop
+        def create_zip_sync(path: str, files: list[tuple[str, str]]):
+            with zipfile.ZipFile(path, mode="w", compression=zipfile.ZIP_DEFLATED) as zip_file:
+                for f_path, arcname in files:
+                    zip_file.write(f_path, arcname=arcname)
+
         zip_path = os.path.join(temp_dir, "archive.zip")
-        with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zip_file:
-            for file_path, arcname in files_to_zip:
-                zip_file.write(file_path, arcname=arcname)
+        from starlette.concurrency import run_in_threadpool
+        await run_in_threadpool(create_zip_sync, zip_path, files_to_zip)
 
         if request.archive_name:
             archive_name = _sanitize_zip_name(request.archive_name)
@@ -186,7 +190,7 @@ async def download_zip(
         raise
 
 
-@router.get("/{account_id}/search", response_model=DriveListResponse)
+@router.get("/{account_id}/search", response_model=DriveListResponse, tags=["Search & Organize"])
 async def search_files(
     account: LinkedAccountDep,
     graph_client: GraphClientDep,
@@ -196,7 +200,7 @@ async def search_files(
     return await graph_client.search_items(account, q)
 
 
-@router.get("/{account_id}/quota", response_model=DriveQuota)
+@router.get("/{account_id}/quota", response_model=DriveQuota, tags=["Usage"])
 async def get_quota(
     account: LinkedAccountDep,
     graph_client: GraphClientDep,
@@ -206,7 +210,7 @@ async def get_quota(
     return DriveQuota(**quota_data)
 
 
-@router.get("/{account_id}/recent", response_model=DriveListResponse)
+@router.get("/{account_id}/recent", response_model=DriveListResponse, tags=["Search & Organize"])
 async def get_recent_files(
     account: LinkedAccountDep,
     graph_client: GraphClientDep,
@@ -215,7 +219,7 @@ async def get_recent_files(
     return await graph_client.get_recent_items(account)
 
 
-@router.get("/{account_id}/shared", response_model=DriveListResponse)
+@router.get("/{account_id}/shared", response_model=DriveListResponse, tags=["Search & Organize"])
 async def get_shared_files(
     account: LinkedAccountDep,
     graph_client: GraphClientDep,
@@ -224,7 +228,7 @@ async def get_shared_files(
     return await graph_client.get_shared_with_me(account)
 
 
-@router.get("/{account_id}/path/{item_id}", response_model=PathResponse)
+@router.get("/{account_id}/path/{item_id}", response_model=PathResponse, tags=["Files"])
 async def get_item_path(
     account: LinkedAccountDep,
     graph_client: GraphClientDep,
@@ -236,7 +240,7 @@ async def get_item_path(
     return PathResponse(breadcrumb=breadcrumb)
 
 
-@router.post("/{account_id}/upload", response_model=DriveItem)
+@router.post("/{account_id}/upload", response_model=DriveItem, tags=["Uploads"])
 async def upload_file(
     account: LinkedAccountDep,
     graph_client: GraphClientDep,
@@ -272,7 +276,7 @@ async def upload_file(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/{account_id}/upload/session", response_model=UploadSession)
+@router.post("/{account_id}/upload/session", response_model=UploadSession, tags=["Uploads"])
 async def create_upload_session(
     account: LinkedAccountDep,
     graph_client: GraphClientDep,
@@ -291,7 +295,7 @@ async def create_upload_session(
     )
 
 
-@router.put("/{account_id}/upload/chunk")
+@router.put("/{account_id}/upload/chunk", tags=["Uploads"])
 async def upload_chunk(
     graph_client: GraphClientDep,
     upload_url: str = Query(..., description="Upload session URL"),
@@ -312,7 +316,7 @@ async def upload_chunk(
     return result
 
 
-@router.post("/{account_id}/folders", response_model=DriveItem, status_code=201)
+@router.post("/{account_id}/folders", response_model=DriveItem, status_code=201, tags=["File Management"])
 async def create_folder(
     account: LinkedAccountDep,
     graph_client: GraphClientDep,
@@ -327,7 +331,7 @@ async def create_folder(
     )
 
 
-@router.patch("/{account_id}/items/{item_id}", response_model=DriveItem)
+@router.patch("/{account_id}/items/{item_id}", response_model=DriveItem, tags=["File Management"])
 async def update_item(
     account: LinkedAccountDep,
     graph_client: GraphClientDep,
@@ -343,7 +347,7 @@ async def update_item(
     )
 
 
-@router.post("/{account_id}/items/{item_id}/copy", status_code=202)
+@router.post("/{account_id}/items/{item_id}/copy", status_code=202, tags=["File Management"])
 async def copy_item(
     account: LinkedAccountDep,
     graph_client: GraphClientDep,
@@ -360,7 +364,7 @@ async def copy_item(
     return {"monitor_url": monitor_url}
 
 
-@router.delete("/{account_id}/items/{item_id}", status_code=204)
+@router.delete("/{account_id}/items/{item_id}", status_code=204, tags=["File Management"])
 async def delete_item(
     account: LinkedAccountDep,
     graph_client: GraphClientDep,

@@ -7,7 +7,7 @@ import logging
 
 from fastapi import APIRouter, status
 
-from backend.api.dependencies import CurrentUser, DBSession, LinkedAccountDep
+from backend.api.dependencies import DBSession, LinkedAccountDep
 from backend.schemas.account import LinkedAccountList, LinkedAccountResponse
 
 logger = logging.getLogger(__name__)
@@ -17,9 +17,8 @@ router = APIRouter(prefix="/accounts", tags=["Accounts"])
 @router.get("", response_model=LinkedAccountList)
 async def list_linked_accounts(
     db: DBSession,
-    current_user: CurrentUser,
 ) -> LinkedAccountList:
-    """List linked Microsoft accounts for the authenticated user.
+    """List all linked Microsoft accounts.
 
     Parameters
     ----------
@@ -29,14 +28,13 @@ async def list_linked_accounts(
     Returns
     -------
     LinkedAccountList
-        List of linked accounts for the authenticated user.
+        List of all linked accounts.
     """
     from sqlalchemy import select
     from backend.db.models import LinkedAccount
 
     result = await db.execute(
         select(LinkedAccount).where(
-            LinkedAccount.user_id == current_user.id,
             LinkedAccount.is_active.is_(True),
         )
     )
