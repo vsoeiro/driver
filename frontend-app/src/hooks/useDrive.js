@@ -41,12 +41,11 @@ export function useDrive(accountId, folderId) {
     }, [fetchFiles]);
 
     const handleDelete = async (itemId) => {
-        if (!window.confirm('Delete this item?')) return;
         try {
             await deleteItem(accountId, itemId);
             fetchFiles();
         } catch (e) {
-            alert(e.message);
+            throw e;
         }
     };
 
@@ -55,7 +54,7 @@ export function useDrive(accountId, folderId) {
             await createFolder(accountId, folderId || 'root', name);
             fetchFiles();
         } catch (e) {
-            alert(e.message);
+            throw e;
         }
     };
 

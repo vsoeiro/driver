@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useDrive } from '../hooks/useDrive';
 import { useUpload } from '../hooks/useUpload';
@@ -7,11 +7,18 @@ import {
     Folder, File, MoreVertical, Download, Trash2,
     UploadCloud, FolderPlus, ArrowLeft, Loader2, Home
 } from 'lucide-react';
+import Modal from '../components/Modal';
 
 export default function FileBrowser() {
     const { accountId, folderId } = useParams();
     const { files, breadcrumbs, loading, error, refresh, handleDelete, handleCreateFolder } = useDrive(accountId, folderId);
     const { upload, uploading, progress: uploadProgress } = useUpload(accountId, folderId, refresh);
+
+    // Modal State
+    const [deleteModal, setDeleteModal] = useState({ isOpen: false, item: null });
+    const [createFolderModal, setCreateFolderModal] = useState(false);
+    const [newFolderName, setNewFolderName] = useState('');
+    const [actionLoading, setActionLoading] = useState(false);
 
     // Helper to format date
     const formatDate = (dateString) => {
@@ -39,6 +46,38 @@ export default function FileBrowser() {
             } catch (e) {
                 alert('Download failed');
             }
+        }
+    };
+
+    const confirmDelete = (item) => {
+        setDeleteModal({ isOpen: true, item });
+    };
+
+    const executeDelete = async () => {
+        if (!deleteModal.item) return;
+        setActionLoading(true);
+        try {
+            await handleDelete(deleteModal.item.id);
+            setDeleteModal({ isOpen: false, item: null });
+        } catch (e) {
+            alert(e.message);
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const executeCreateFolder = async (e) => {
+        e.preventDefault();
+        if (!newFolderName.trim()) return;
+        setActionLoading(true);
+        try {
+            await handleCreateFolder(newFolderName);
+            setCreateFolderModal(false);
+            setNewFolderName('');
+        } catch (e) {
+            alert(e.message);
+        } finally {
+            setActionLoading(false);
         }
     };
 
@@ -72,10 +111,7 @@ export default function FileBrowser() {
 
                 <div className="flex items-center gap-2">
                     <button
-                        onClick={() => {
-                            const name = prompt("Folder Name:");
-                            if (name) handleCreateFolder(name);
-                        }}
+                        onClick={() => setCreateFolderModal(true)}
                         className="flex items-center gap-2 px-3 py-2 text-sm font-medium hover:bg-accent rounded-md"
                     >
                         <FolderPlus size={16} />
@@ -165,7 +201,7 @@ export default function FileBrowser() {
                                                 </button>
                                             )}
                                             <button
-                                                onClick={() => handleDelete(file.id)}
+                                                onClick={() => confirmDelete(file)}
                                                 className="p-1.5 hover:bg-destructive/10 hover:text-destructive rounded-md text-muted-foreground transition-colors"
                                                 title="Delete"
                                             >
@@ -179,6 +215,70 @@ export default function FileBrowser() {
                     </div>
                 )}
             </main>
+
+            {/* Modals */}
+            <Modal
+                isOpen={deleteModal.isOpen}
+                onClose={() => setDeleteModal({ ...deleteModal, isOpen: false })}
+                title="Confirm Deletion"
+            >
+                <div className="space-y-4">
+                    <p>Are you sure you want to delete <strong>{deleteModal.item?.name}</strong>?</p>
+                    <div className="flex justify-end gap-2">
+                        <button
+                            onClick={() => setDeleteModal({ ...deleteModal, isOpen: false })}
+                            className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={executeDelete}
+                            disabled={actionLoading}
+                            className="px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {actionLoading && <Loader2 className="animate-spin" size={14} />}
+                            Delete
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+
+            <Modal
+                isOpen={createFolderModal}
+                onClose={() => setCreateFolderModal(false)}
+                title="Create New Folder"
+            >
+                <form onSubmit={executeCreateFolder} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Folder Name</label>
+                        <input
+                            type="text"
+                            className="w-full border rounded-md p-2 bg-background"
+                            value={newFolderName}
+                            onChange={e => setNewFolderName(e.target.value)}
+                            placeholder="My Folder"
+                            autoFocus
+                        />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setCreateFolderModal(false)}
+                            className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={actionLoading || !newFolderName.trim()}
+                            className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {actionLoading && <Loader2 className="animate-spin" size={14} />}
+                            Create
+                        </button>
+                    </div>
+                </form>
+            </Modal>
         </div>
     );
 }
