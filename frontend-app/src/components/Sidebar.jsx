@@ -1,9 +1,11 @@
+```
 import React, { useEffect, useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useParams } from 'react-router-dom';
 import { getAccounts, getQuota } from '../services/api';
-import { HardDrive, Plus, Cloud, Loader2 } from 'lucide-react';
+import { HardDrive, Plus, Cloud, Loader2, User } from 'lucide-react';
 
 export default function Sidebar() {
+    const { accountId } = useParams();
     const [accounts, setAccounts] = useState([]);
     const [quotas, setQuotas] = useState({});
 
@@ -17,7 +19,7 @@ export default function Sidebar() {
                     const q = await getQuota(acc.id);
                     quotaMap[acc.id] = q;
                 } catch (e) {
-                    console.error(`Failed to fetch quota for ${acc.id}`, e);
+                    console.error(`Failed to fetch quota for ${ acc.id }`, e);
                 }
             }));
             setQuotas(quotaMap);
@@ -36,6 +38,9 @@ export default function Sidebar() {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     };
 
+    const activeAccount = accounts.find(a => a.id === accountId);
+    const activeQuota = activeAccount ? quotas[activeAccount.id] : null;
+
     return (
         <aside className="w-64 border-r bg-muted/10 flex flex-col h-screen sticky top-0">
             <div className="p-4 border-b flex items-center gap-2">
@@ -49,56 +54,56 @@ export default function Sidebar() {
                 <div className="text-xs font-semibold text-muted-foreground mb-3 text-center uppercase tracking-wider">
                     Accounts
                 </div>
-                <nav className="space-y-4">
-                    {accounts.map(acc => {
-                        const quota = quotas[acc.id];
-                        const usedPct = quota ? (quota.used / quota.total) * 100 : 0;
-
-                        return (
-                            <div key={acc.id} className="flex flex-col gap-1">
-                                <NavLink
-                                    to={`/drive/${acc.id}`}
-                                    className={({ isActive }) => `
-                                        flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
-                                        ${isActive
-                                            ? 'bg-primary text-primary-foreground shadow-sm'
-                                            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                                        }
-                                    `}
-                                >
-                                    <HardDrive size={18} />
-                                    <div className="flex-1 min-w-0">
-                                        <div className="truncate">{acc.display_name}</div>
-                                    </div>
-                                </NavLink>
-
-                                {quota && (
-                                    <div className="px-3 text-xs text-muted-foreground">
-                                        <div className="flex justify-between mb-1">
-                                            <span>{formatBytes(quota.used)}</span>
-                                            <span>{formatBytes(quota.total)}</span>
-                                        </div>
-                                        <div className="h-1.5 w-full bg-secondary rounded-full overflow-hidden">
-                                            <div
-                                                className="h-full bg-primary/70 rounded-full transition-all duration-500"
-                                                style={{ width: `${usedPct}%` }}
-                                            />
-                                        </div>
-                                    </div>
-                                )}
+                <nav className="space-y-2">
+                    {accounts.map(acc => (
+                        <NavLink
+                            key={acc.id}
+                            to={`/ drive / ${ acc.id }`}
+                            className={({ isActive }) => `
+                                flex items - center gap - 3 px - 3 py - 2 rounded - md text - sm font - medium transition - colors
+                                ${
+    isActive
+        ? 'bg-primary text-primary-foreground shadow-sm'
+        : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+}
+`}
+                        >
+                            <User size={18} className="shrink-0" />
+                            <div className="flex-1 min-w-0 flex flex-col">
+                                <span className="truncate font-medium leading-none">{acc.display_name}</span>
+                                <span className={`text - xs truncate ${ acc.id === accountId ? 'text-primary-foreground/80' : 'text-muted-foreground' } `}>
+                                    {acc.email}
+                                </span>
                             </div>
-                        );
-                    })}
+                        </NavLink>
+                    ))}
                 </nav>
             </div>
 
-            <div className="p-4 border-t">
+            <div className="p-4 border-t space-y-4">
+                {activeQuota && (
+                    <div className="bg-card p-3 rounded-md border shadow-sm">
+                        <div className="text-xs font-semibold text-muted-foreground mb-2 flex justify-between">
+                            <span>Storage</span>
+                            <span>{Math.round((activeQuota.used / activeQuota.total) * 100)}%</span>
+                        </div>
+                        <div className="flex justify-between text-xs mb-1">
+                            <span>{formatBytes(activeQuota.used)}</span>
+                            <span className="text-muted-foreground">of {formatBytes(activeQuota.total)}</span>
+                        </div>
+                        <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
+                            <div 
+                                className={`h - full rounded - full transition - all duration - 500 ${
+    (activeQuota.used / activeQuota.total) > 0.9 ? 'bg-destructive' : 'bg-primary'
+} `}
+                                style={{ width: `${ (activeQuota.used / activeQuota.total) * 100 }% ` }}
+                            />
+                        </div>
+                    </div>
+                )}
+
                 <button
                     onClick={handleLinkAccount}
-                    className="flex w-full items-center justify-center gap-2 bg-primary/10 text-primary hover:bg-primary/20 px-4 py-2 rounded-md text-sm font-medium transition-colors"
-                >
-                    <Plus size={16} />
-                    Link Account
                 </button>
             </div>
         </aside>
