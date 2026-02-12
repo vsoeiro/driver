@@ -1,4 +1,3 @@
-```
 import React, { useEffect, useState } from 'react';
 import { NavLink, useParams } from 'react-router-dom';
 import { getAccounts, getQuota } from '../services/api';
@@ -12,14 +11,13 @@ export default function Sidebar() {
     useEffect(() => {
         getAccounts().then(async (data) => {
             setAccounts(data);
-            // Fetch quota for each account
             const quotaMap = {};
             await Promise.all(data.map(async (acc) => {
                 try {
                     const q = await getQuota(acc.id);
                     quotaMap[acc.id] = q;
                 } catch (e) {
-                    console.error(`Failed to fetch quota for ${ acc.id }`, e);
+                    console.error(`Failed to fetch quota for ${acc.id}`, e);
                 }
             }));
             setQuotas(quotaMap);
@@ -58,20 +56,19 @@ export default function Sidebar() {
                     {accounts.map(acc => (
                         <NavLink
                             key={acc.id}
-                            to={`/ drive / ${ acc.id }`}
+                            to={`/drive/${acc.id}`}
                             className={({ isActive }) => `
-                                flex items - center gap - 3 px - 3 py - 2 rounded - md text - sm font - medium transition - colors
-                                ${
-    isActive
-        ? 'bg-primary text-primary-foreground shadow-sm'
-        : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-}
-`}
+                                flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
+                                ${isActive
+                                    ? 'bg-primary text-primary-foreground shadow-sm'
+                                    : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                                }
+                            `}
                         >
                             <User size={18} className="shrink-0" />
                             <div className="flex-1 min-w-0 flex flex-col">
                                 <span className="truncate font-medium leading-none">{acc.display_name}</span>
-                                <span className={`text - xs truncate ${ acc.id === accountId ? 'text-primary-foreground/80' : 'text-muted-foreground' } `}>
+                                <span className={`text-xs truncate ${acc.id === accountId ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>
                                     {acc.email}
                                 </span>
                             </div>
@@ -92,11 +89,10 @@ export default function Sidebar() {
                             <span className="text-muted-foreground">of {formatBytes(activeQuota.total)}</span>
                         </div>
                         <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
-                            <div 
-                                className={`h - full rounded - full transition - all duration - 500 ${
-    (activeQuota.used / activeQuota.total) > 0.9 ? 'bg-destructive' : 'bg-primary'
-} `}
-                                style={{ width: `${ (activeQuota.used / activeQuota.total) * 100 }% ` }}
+                            <div
+                                className={`h-full rounded-full transition-all duration-500 ${(activeQuota.used / activeQuota.total) > 0.9 ? 'bg-destructive' : 'bg-primary'
+                                    }`}
+                                style={{ width: `${(activeQuota.used / activeQuota.total) * 100}%` }}
                             />
                         </div>
                     </div>
@@ -104,6 +100,10 @@ export default function Sidebar() {
 
                 <button
                     onClick={handleLinkAccount}
+                    className="flex w-full items-center justify-center gap-2 bg-primary/10 text-primary hover:bg-primary/20 px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                >
+                    <Plus size={16} />
+                    Link Account
                 </button>
             </div>
         </aside>
