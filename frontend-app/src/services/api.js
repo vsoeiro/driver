@@ -93,3 +93,8 @@ export const uploadChunkProxy = async (accountId, uploadUrl, chunk, start, end, 
     const response = await api.put(`/drive/${accountId}/upload/chunk?${params.toString()}`, formData);
     return response.data;
 };
+
+export const getQuota = async (accountId) => {
+    const response = await api.get(`/drive/${accountId}/quota`);
+    return response.data;
+};
