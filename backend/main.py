@@ -4,6 +4,8 @@ This is the main entrypoint for the Drive Organizer backend API.
 It configures the FastAPI application with all routes and middleware.
 """
 
+
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -11,9 +13,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.api.routes import accounts, auth, drive
+from backend.api.routes import accounts, auth, drive, jobs
 from backend.core.config import get_settings
 from backend.core.exceptions import DriveOrganizerError
+from backend.db.session import async_session_maker
+from backend.workers.handlers import move, upload  # noqa: F401
+from backend.workers.runner import BackgroundWorker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    settings = get_settings()
     """Application lifespan handler.
 
     Parameters
@@ -36,9 +42,25 @@ async def lifespan(app: FastAPI):
     None
         Yields control to the application.
     """
-    settings = get_settings()
+    async with async_session_maker() as _:
+        # Initialize any required services or cache here
+        pass
+    
+    # Initialize background worker
+    worker = BackgroundWorker(async_session_maker)
+    worker_task = asyncio.create_task(worker.start())
+    
     logger.info("Starting Drive Organizer API on %s:%s", settings.host, settings.port)
     yield
+    
+    # Shutdown background worker
+    logger.info("Stopping background worker...")
+    worker.stop()
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        pass
+        
     logger.info("Shutting down Drive Organizer API")
 
 def create_app() -> FastAPI:
@@ -70,6 +92,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix="/api/v1")
     app.include_router(accounts.router, prefix="/api/v1")
     app.include_router(drive.router, prefix="/api/v1")
+    app.include_router(jobs.router, prefix="/api/v1")
 
     @app.exception_handler(DriveOrganizerError)
     async def handle_drive_organizer_error(_, exc: DriveOrganizerError) -> JSONResponse:

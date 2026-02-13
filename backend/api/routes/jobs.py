@@ -1,0 +1,87 @@
+"""Job management routes.
+
+This module provides endpoints for creating and managing background jobs.
+"""
+
+from fastapi import APIRouter, status, UploadFile, File, Form
+
+from backend.api.dependencies import JobServiceDep
+from backend.schemas.jobs import Job, JobCreate, JobMoveRequest
+
+router = APIRouter(prefix="/jobs", tags=["Jobs"])
+
+
+@router.post("/move", response_model=Job, status_code=status.HTTP_201_CREATED)
+async def create_move_job(
+    request: JobMoveRequest,
+    job_service: JobServiceDep,
+) -> Job:
+    """Create a new job to move items between accounts.
+    
+    This endpoint initiates a background job to move a file or folder from a source account
+    to a destination account. The operation happens asynchronously.
+    """
+    payload = request.model_dump(mode='json')
+    
+    job_in = JobCreate(
+        type="move_items",
+        payload=payload,
+    )
+    
+    return await job_service.create_job(job_in)
+
+
+@router.get("/", response_model=list[Job])
+async def list_jobs(
+    job_service: JobServiceDep,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[Job]:
+    """List recent jobs.
+    
+    Returns a list of jobs ordered by creation date (newest first).
+    """
+    return await job_service.get_jobs(limit, offset)
+
+
+@router.post("/upload", response_model=Job, status_code=status.HTTP_201_CREATED)
+async def create_upload_job(
+    job_service: JobServiceDep,
+    file: UploadFile = File(...),
+    account_id: str = Form(...),
+    folder_id: str = Form("root"),
+) -> Job:
+    """Upload a file to be processed in the background.
+    
+    The file is saved to a temporary location and a job is created to upload it to OneDrive.
+    """
+    import shutil
+    import tempfile
+    import os
+    from uuid import uuid4
+    
+    # Ensure temp directory exists
+    temp_dir = os.path.join(tempfile.gettempdir(), "onedrive_uploads")
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    # Save file to temp
+    temp_filename = f"{uuid4()}_{file.filename}"
+    temp_path = os.path.join(temp_dir, temp_filename)
+    
+    with open(temp_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    # Create Job
+    payload = {
+        "account_id": account_id,
+        "folder_id": folder_id,
+        "filename": file.filename,
+        "temp_path": temp_path,
+    }
+    
+    job_in = JobCreate(
+        type="upload_file",
+        payload=payload,
+    )
+    
+    return await job_service.create_job(job_in)
