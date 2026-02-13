@@ -20,6 +20,18 @@ from backend.services.token_manager import TokenManager
 DBSession = Annotated[AsyncSession, Depends(get_db)]
 
 
+async def get_session() -> AsyncSession:
+    """Get a database session.
+    
+    Returns
+    -------
+    AsyncSession
+        Database session.
+    """
+    async for session in get_db():
+        yield session
+
+
 async def get_linked_account(
     account_id: str,
     db: DBSession,

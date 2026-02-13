@@ -772,6 +772,37 @@ class GraphClient:
         """
         await self._request("DELETE", f"/me/drive/items/{item_id}", account)
 
+    async def batch_delete_items(
+        self,
+        account: LinkedAccount,
+        item_ids: list[str],
+    ) -> None:
+        """Delete multiple items.
+
+        Parameters
+        ----------
+        account : LinkedAccount
+            The linked account.
+        item_ids : list[str]
+            List of item IDs to delete.
+        """
+        import asyncio
+        
+        # Limit concurrency to avoid hitting rate limits too hard
+        # chunks of 5?
+        semaphore = asyncio.Semaphore(5)
+
+        async def _delete_safe(iid: str):
+            async with semaphore:
+                try:
+                    await self.delete_item(account, iid)
+                except Exception as e:
+                    logger.error("Failed to delete item %s: %s", iid, e)
+                    # We continue even if one fails
+        
+        tasks = [_delete_safe(iid) for iid in item_ids]
+        await asyncio.gather(*tasks)
+
     async def copy_item(
         self,
         account: LinkedAccount,

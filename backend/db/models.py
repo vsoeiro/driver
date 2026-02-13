@@ -11,9 +11,10 @@ from sqlalchemy import (
     String,
     Text,
     JSON,
+    ForeignKey,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -138,6 +139,84 @@ class Job(Base):
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
+    )
+
+
+class MetadataCategory(Base):
+    """Metadata category model.
+
+    Represents a group of attributes, e.g., 'Contract', 'Invoice'.
+    """
+    __tablename__ = "metadata_categories"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+    attributes: Mapped[list["MetadataAttribute"]] = relationship(
+        back_populates="category", cascade="all, delete-orphan"
+    )
+
+
+class MetadataAttribute(Base):
+    """Metadata attribute model.
+
+    Represents a specific field within a category, e.g., 'Contract Number'.
+    """
+    __tablename__ = "metadata_attributes"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    category_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("metadata_categories.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    data_type: Mapped[str] = mapped_column(String(20), nullable=False)  # text, number, date, boolean, select
+    options: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # For 'select' type: {"options": ["A", "B"]}
+    is_required: Mapped[bool] = mapped_column(default=False)
+
+    category: Mapped["MetadataCategory"] = relationship(back_populates="attributes")
+
+
+class ItemMetadata(Base):
+    """Item metadata model.
+
+    Stores the assigned category and attribute values for a specific file/folder.
+    """
+    __tablename__ = "item_metadata"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+    )
+    item_id: Mapped[str] = mapped_column(String(255), nullable=False)  # OneDrive Item ID
+    category_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+    )
+    values: Mapped[dict] = mapped_column(JSON, default={})  # Key: Attribute ID, Value: User Input
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
 

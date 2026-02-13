@@ -26,6 +26,7 @@ from backend.schemas.drive import (
     UpdateItemRequest,
     UploadSession,
     UploadSessionRequest,
+    BatchDeleteRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -372,4 +373,17 @@ async def delete_item(
 ) -> None:
     """Delete an item (move to recycle bin)."""
     await graph_client.delete_item(account, item_id)
+
+
+@router.post("/{account_id}/items/batch-delete", status_code=204, tags=["File Management"])
+async def batch_delete_items(
+    account: LinkedAccountDep,
+    graph_client: GraphClientDep,
+    request: BatchDeleteRequest,
+) -> None:
+    """Delete multiple items (move to recycle bin)."""
+    if not request.item_ids:
+        return
+
+    await graph_client.batch_delete_items(account, request.item_ids)
 

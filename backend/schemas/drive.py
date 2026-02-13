@@ -280,3 +280,15 @@ class BulkDownloadRequest(BaseModel):
     archive_name: str | None = Field(default=None, min_length=1, max_length=128)
 
 
+class BatchDeleteRequest(BaseModel):
+    """Request to delete multiple items.
+
+    Attributes
+    ----------
+    item_ids : list[str]
+        List of item IDs to delete.
+    """
+
+    item_ids: list[str] = Field(..., min_length=1, max_length=100)
+
+
