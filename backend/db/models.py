@@ -10,6 +10,7 @@ from sqlalchemy import (
     DateTime,
     String,
     Text,
+    JSON,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -79,11 +80,66 @@ class LinkedAccount(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
     )
+
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+
+class Job(Base):
+    """Background job model.
+
+    Stores information about background jobs, their status, and execution results.
+
+    Attributes
+    ----------
+    id : UUID
+        Primary key.
+    type : str
+        Type of job (e.g., 'move_items').
+    status : str
+        Current status of the job (PENDING, RUNNING, COMPLETED, FAILED).
+    payload : dict
+        JSON payload containing job arguments.
+    result : dict
+        JSON result or error information.
+    retry_count : int
+        Number of times the job has been retried.
+    created_at : datetime
+        Job creation timestamp.
+    started_at : datetime
+        Job start timestamp.
+    completed_at : datetime
+        Job completion timestamp.
+    """
+
+    __tablename__ = "jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    type: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")
+    payload: Mapped[dict] = mapped_column(JSON, nullable=True)  # Stored as JSON string
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # Stored as JSON string
+    retry_count: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
 
 
 

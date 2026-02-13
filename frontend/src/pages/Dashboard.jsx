@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { getAccounts, linkAccount } from '../services/api';
+import { accountsService } from '../services/accounts';
+const { getAccounts, linkAccount } = accountsService;
 import { Link } from 'react-router-dom';
 import { Plus, HardDrive, Calendar, ArrowRight } from 'lucide-react';
 

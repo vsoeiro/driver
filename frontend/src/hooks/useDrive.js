@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getFiles, getPath, deleteItem, createFolder } from '../services/api';
+import { getFiles, getFolderFiles, getPath, deleteItem, createFolder } from '../services/drive';
 
 export function useDrive(accountId, folderId) {
     const [files, setFiles] = useState([]);
@@ -12,15 +12,21 @@ export function useDrive(accountId, folderId) {
         setLoading(true);
         setError(null);
         try {
-            const data = await getFiles(accountId, folderId || 'root');
-            setFiles(data.items);
+            let data;
+            if (folderId) {
+                data = await getFolderFiles(accountId, folderId);
+            } else {
+                data = await getFiles(accountId);
+            }
+            // Ensure we're setting an array
+            setFiles(data.items || []);
 
             // Breadcrumbs
-            if (folderId && folderId !== 'root') {
+            if (folderId) {
                 try {
                     const pathData = await getPath(accountId, folderId);
                     // Filter out "root" from API response to avoid duplication if we handle it manually
-                    const cleanPath = pathData.breadcrumb.filter(b => b.name.toLowerCase() !== 'root');
+                    const cleanPath = (pathData.breadcrumb || []).filter(b => b.name.toLowerCase() !== 'root');
                     setBreadcrumbs(cleanPath);
                 } catch (e) {
                     console.warn("Failed to fetch path", e);
@@ -30,7 +36,8 @@ export function useDrive(accountId, folderId) {
                 setBreadcrumbs([]);
             }
         } catch (err) {
-            setError(err.message);
+            console.error(err);
+            setError(err.message || 'Failed to load files');
         } finally {
             setLoading(false);
         }

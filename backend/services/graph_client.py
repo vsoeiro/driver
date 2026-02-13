@@ -655,7 +655,7 @@ class GraphClient:
         dict
             Upload progress or completed item.
         """
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=GRAPH_TIMEOUT) as client:
             response = await client.put(
                 upload_url,
                 content=chunk,

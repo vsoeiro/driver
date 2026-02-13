@@ -7,14 +7,14 @@ and current user authentication.
 import uuid
 from typing import Annotated
 
-from fastapi import Cookie, Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from backend.db.models import LinkedAccount
 from backend.db.session import get_db
 from backend.services.graph_client import GraphClient
+from backend.services.jobs import JobService
 from backend.services.token_manager import TokenManager
 
 DBSession = Annotated[AsyncSession, Depends(get_db)]
@@ -95,3 +95,22 @@ def get_graph_client(token_manager: TokenManagerDep) -> GraphClient:
 
 
 GraphClientDep = Annotated[GraphClient, Depends(get_graph_client)]
+
+
+def get_job_service(db: DBSession) -> JobService:
+    """Get a job service instance.
+
+    Parameters
+    ----------
+    db : AsyncSession
+        Database session.
+
+    Returns
+    -------
+    JobService
+        Job service instance.
+    """
+    return JobService(db)
+
+
+JobServiceDep = Annotated[JobService, Depends(get_job_service)]
