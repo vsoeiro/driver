@@ -1,25 +1,27 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useMemo, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useDrive } from '../hooks/useDrive';
 import { useUpload } from '../hooks/useUpload';
 import { driveService } from '../services/drive';
+import { metadataService } from '../services/metadata';
 const { getDownloadUrl } = driveService;
+const { deleteItemMetadata, batchDeleteMetadata } = metadataService;
 import {
     Folder, File, MoreVertical, Download, Trash2,
-    UploadCloud, FolderPlus, ArrowLeft, Loader2, Home, ArrowRightLeft
+    UploadCloud, FolderPlus, ArrowLeft, Loader2, Home, ArrowRightLeft, Database, XCircle, CheckSquare, Square, Check, Search, X, ChevronDown
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import MoveModal from '../components/MoveModal';
+import MetadataModal from '../components/MetadataModal';
 
 export default function FileBrowser() {
     const { accountId, folderId } = useParams();
-    const { files, breadcrumbs, loading, error, refresh, handleDelete, handleCreateFolder } = useDrive(accountId, folderId);
+    const { files, breadcrumbs, loading, error, refresh, handleDelete, handleBatchDelete, handleCreateFolder, searchQuery, setSearchQuery } = useDrive(accountId, folderId);
     const { upload, uploading, progress: uploadProgress } = useUpload(accountId, folderId, refresh);
 
     // Listen for job completion to auto-refresh
     React.useEffect(() => {
         const handleJobCompleted = (event) => {
-            // We could filter by job type or account if needed, but for now refreshing on any job is safe
             console.log('Job completed, refreshing file list...');
             refresh();
         };
@@ -28,12 +30,32 @@ export default function FileBrowser() {
         return () => window.removeEventListener('job-completed', handleJobCompleted);
     }, [refresh]);
 
+    // Local search state to debounce/control API calls
+    const [searchTerm, setSearchTerm] = useState('');
+    useEffect(() => {
+        setSearchTerm(searchQuery);
+    }, [searchQuery]);
+
+    // State
+    const [selectedItems, setSelectedItems] = useState(new Set());
+    const [lastSelectedIndex, setLastSelectedIndex] = useState(null);
+
     // Modal State
-    const [deleteModal, setDeleteModal] = useState({ isOpen: false, item: null });
-    const [moveModal, setMoveModal] = useState({ isOpen: false, item: null });
+    const [deleteModal, setDeleteModal] = useState({ isOpen: false });
+    const [moveModal, setMoveModal] = useState({ isOpen: false });
+    const [metadataModalOpen, setMetadataModalOpen] = useState(false);
+    const [removeMetadataModal, setRemoveMetadataModal] = useState(false);
     const [createFolderModal, setCreateFolderModal] = useState(false);
+    const [metadataMenuOpen, setMetadataMenuOpen] = useState(false);
+    const metadataMenuRef = useRef(null);
     const [newFolderName, setNewFolderName] = useState('');
     const [actionLoading, setActionLoading] = useState(false);
+
+    // Reset selection on folder change
+    React.useEffect(() => {
+        setSelectedItems(new Set());
+        setLastSelectedIndex(null);
+    }, [folderId, accountId]);
 
     // Helper to format date
     const formatDate = (dateString) => {
@@ -44,6 +66,19 @@ export default function FileBrowser() {
         });
     };
 
+    // Click outside handler for metadata menu
+    useEffect(() => {
+        function handleClickOutside(event) {
+            if (metadataMenuRef.current && !metadataMenuRef.current.contains(event.target)) {
+                setMetadataMenuOpen(false);
+            }
+        }
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => {
+            document.removeEventListener("mousedown", handleClickOutside);
+        };
+    }, [metadataMenuRef]);
+
     // Helper to format size
     const formatSize = (bytes) => {
         if (bytes === 0) return '0 B';
@@ -53,27 +88,77 @@ export default function FileBrowser() {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     };
 
-    const handleFileClick = async (file) => {
-        if (file.item_type === 'file') {
+    // Sorted items
+    const sortedFiles = useMemo(() => {
+        return [...files].sort((a, b) => {
+            if (a.item_type === b.item_type) return a.name.localeCompare(b.name);
+            return a.item_type === 'folder' ? -1 : 1;
+        });
+    }, [files]);
+
+    // Selection Logic
+    const toggleSelection = (id, index, multiSelect, rangeSelect) => {
+        const newSelection = new Set(multiSelect ? selectedItems : []);
+
+        if (rangeSelect && lastSelectedIndex !== null) {
+            const start = Math.min(lastSelectedIndex, index);
+            const end = Math.max(lastSelectedIndex, index);
+            for (let i = start; i <= end; i++) {
+                newSelection.add(sortedFiles[i].id);
+            }
+        } else {
+            if (newSelection.has(id)) {
+                newSelection.delete(id);
+            } else {
+                newSelection.add(id);
+            }
+        }
+
+        setSelectedItems(newSelection);
+        setLastSelectedIndex(index);
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedItems.size === files.length) {
+            setSelectedItems(new Set());
+        } else {
+            setSelectedItems(new Set(files.map(f => f.id)));
+        }
+    };
+
+    // Actions
+    const handleDownload = async () => {
+        const selectedFiles = sortedFiles.filter(f => selectedItems.has(f.id) && f.item_type === 'file');
+        for (const file of selectedFiles) {
             try {
                 const url = await getDownloadUrl(accountId, file.id);
                 window.open(url, '_blank');
             } catch (e) {
-                alert('Download failed');
+                console.error(`Failed to download ${file.name}`, e);
             }
         }
     };
 
-    const confirmDelete = (item) => {
-        setDeleteModal({ isOpen: true, item });
-    };
-
     const executeDelete = async () => {
-        if (!deleteModal.item) return;
         setActionLoading(true);
         try {
-            await handleDelete(deleteModal.item.id);
-            setDeleteModal({ isOpen: false, item: null });
+            await handleBatchDelete(Array.from(selectedItems));
+            setSelectedItems(new Set());
+            setDeleteModal({ isOpen: false });
+        } catch (e) {
+            alert(e.message);
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const executeRemoveMetadata = async () => {
+        setActionLoading(true);
+        try {
+            await batchDeleteMetadata(accountId, Array.from(selectedItems));
+
+            setRemoveMetadataModal(false);
+            refresh();
         } catch (e) {
             alert(e.message);
         } finally {
@@ -96,7 +181,23 @@ export default function FileBrowser() {
         }
     };
 
+    const handleSearchSubmit = (e) => {
+        if (e.key === 'Enter') {
+            setSearchQuery(searchTerm);
+        }
+    }
+
+    const clearSearch = () => {
+        setSearchTerm('');
+        setSearchQuery('');
+    };
+
     const fileInputRef = useRef(null);
+
+    // Get single selected item for singular actions
+    const singleSelectedItem = selectedItems.size === 1
+        ? files.find(f => f.id === Array.from(selectedItems)[0])
+        : null;
 
     return (
         <div className="flex flex-col h-screen">
@@ -104,19 +205,13 @@ export default function FileBrowser() {
             <header className="p-4 border-b flex items-center justify-between bg-background z-10 sticky top-0 h-16">
                 <div className="flex items-center gap-4 overflow-hidden">
                     <nav className="flex items-center text-sm text-muted-foreground overflow-x-auto whitespace-nowrap scrollbar-hide">
-                        <Link
-                            to={`/drive/${accountId}`}
-                            className="hover:text-foreground hover:underline px-1 font-medium"
-                        >
+                        <Link to={`/drive/${accountId}`} className="hover:text-foreground hover:underline px-1 font-medium">
                             Root
                         </Link>
                         {breadcrumbs.map((crumb) => (
                             <React.Fragment key={crumb.id}>
                                 <span className="mx-1">/</span>
-                                <Link
-                                    to={`/drive/${accountId}/${crumb.id}`}
-                                    className="hover:text-foreground hover:underline px-1 font-medium text-foreground"
-                                >
+                                <Link to={`/drive/${accountId}/${crumb.id}`} className="hover:text-foreground hover:underline px-1 font-medium text-foreground">
                                     {crumb.name}
                                 </Link>
                             </React.Fragment>
@@ -125,29 +220,108 @@ export default function FileBrowser() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                    <button
-                        onClick={() => setCreateFolderModal(true)}
-                        className="flex items-center gap-2 px-3 py-2 text-sm font-medium hover:bg-accent rounded-md"
-                    >
+                    <button onClick={() => setCreateFolderModal(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-medium hover:bg-accent rounded-md">
                         <FolderPlus size={16} />
                         New Folder
                     </button>
-                    <button
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={uploading}
-                        className="flex items-center gap-2 px-3 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50"
-                    >
+                    <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="flex items-center gap-2 px-3 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50">
                         {uploading ? <Loader2 className="animate-spin" size={16} /> : <UploadCloud size={16} />}
                         {uploading ? `Uploading ${uploadProgress}%` : 'Upload'}
                     </button>
-                    <input
-                        type="file"
-                        ref={fileInputRef}
-                        className="hidden"
-                        onChange={(e) => upload(e.target.files[0])}
-                    />
+                    <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => upload(e.target.files[0])} />
                 </div>
             </header>
+
+            {/* Toolbar (Always visible) */}
+            <div className="bg-muted/50 border-b px-4 py-2 flex items-center justify-between gap-2 text-sm h-14">
+                <div className="flex items-center w-full max-w-sm relative">
+                    <Search className="absolute left-2 text-muted-foreground" size={16} />
+                    <input
+                        type="text"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        onKeyDown={handleSearchSubmit}
+                        placeholder="Search files..."
+                        className="pl-8 pr-8 py-1.5 text-sm w-full rounded-md border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                    {searchTerm && (
+                        <button onClick={clearSearch} className="absolute right-2 text-muted-foreground hover:text-foreground">
+                            <X size={14} />
+                        </button>
+                    )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                    <div className="h-4 w-px bg-border mx-2" />
+                    <span className="font-medium mr-2 whitespace-nowrap w-24 text-right tabular-nums">{selectedItems.size} selected</span>
+
+                    {/* Actions */}
+                    <button
+                        onClick={handleDownload}
+                        disabled={selectedItems.size === 0}
+                        className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Download"
+                    >
+                        <Download size={16} /> <span className="hidden sm:inline">Download</span>
+                    </button>
+
+                    <button
+                        onClick={() => setMoveModal({ isOpen: true })}
+                        disabled={selectedItems.size === 0}
+                        className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Move"
+                    >
+                        <ArrowRightLeft size={16} /> <span className="hidden sm:inline">Move</span>
+                    </button>
+
+                    <div
+                        className={`relative ${selectedItems.size === 0 ? 'pointer-events-none opacity-50' : ''}`}
+                        ref={metadataMenuRef}
+                        onMouseEnter={() => selectedItems.size > 0 && setMetadataMenuOpen(true)}
+                        onMouseLeave={() => setMetadataMenuOpen(false)}
+                    >
+                        <button
+                            onClick={() => setMetadataMenuOpen(!metadataMenuOpen)}
+                            disabled={selectedItems.size === 0}
+                            className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:cursor-not-allowed"
+                            title="Metadata Actions"
+                        >
+                            <Database size={16} />
+                            <span className="hidden sm:inline">Metadata</span>
+                            <ChevronDown size={14} className={`transition-transform ${metadataMenuOpen ? 'rotate-180' : ''}`} />
+                        </button>
+
+                        {metadataMenuOpen && (
+                            <div className="absolute top-full left-0 mt-1 w-48 bg-popover border rounded-md shadow-md z-50 py-1">
+                                <button
+                                    onClick={() => { setMetadataModalOpen(true); setMetadataMenuOpen(false); }}
+                                    disabled={selectedItems.size !== 1}
+                                    className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
+                                >
+                                    <Database size={14} /> Edit Metadata
+                                </button>
+                                <button
+                                    onClick={() => { setRemoveMetadataModal(true); setMetadataMenuOpen(false); }}
+                                    className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 text-destructive hover:text-destructive"
+                                >
+                                    <XCircle size={14} /> Remove Metadata
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="h-4 w-px bg-border mx-1" />
+
+                    <button
+                        onClick={() => setDeleteModal({ isOpen: true })}
+                        disabled={selectedItems.size === 0}
+                        className="p-2 hover:bg-destructive/10 text-destructive rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Delete"
+                    >
+                        <Trash2 size={16} /> <span className="hidden sm:inline">Delete</span>
+                    </button>
+                </div>
+            </div>
 
             {/* Content */}
             <main className="flex-1 overflow-auto p-4">
@@ -161,37 +335,53 @@ export default function FileBrowser() {
                     </div>
                 ) : files.length === 0 ? (
                     <div className="text-center p-12 text-muted-foreground">
-                        This folder is empty.
+                        {searchQuery ? `No results for "${searchQuery}"` : 'This folder is empty.'}
                     </div>
                 ) : (
-                    <div className="border rounded-lg overflow-hidden bg-card">
-                        <div className="grid grid-cols-[40px_1fr_120px_180px_100px] gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
+                    <div className="border rounded-lg overflow-hidden bg-card select-none">
+                        <div className="grid grid-cols-[40px_40px_1fr_120px_180px] gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
+                            <div className="flex justify-center items-center">
+                                <button onClick={toggleSelectAll} className="hover:text-foreground">
+                                    {selectedItems.size === files.length && files.length > 0 ? <CheckSquare size={16} /> : <Square size={16} />}
+                                </button>
+                            </div>
                             <div className="text-center"></div>
                             <div>Name</div>
                             <div className="text-right">Size</div>
                             <div className="text-right">Modified</div>
-                            <div className="text-center">Actions</div>
                         </div>
 
                         <div className="divide-y">
-                            {[...files].sort((a, b) => { // Sort folders first
-                                if (a.item_type === b.item_type) return a.name.localeCompare(b.name);
-                                return a.item_type === 'folder' ? -1 : 1;
-                            }).map(file => {
+                            {sortedFiles.map((file, index) => {
                                 const isFolder = file.item_type === 'folder';
+                                const isSelected = selectedItems.has(file.id);
                                 return (
-                                    <div key={file.id} className="group grid grid-cols-[40px_1fr_120px_180px_100px] gap-4 p-3 items-center hover:bg-muted/30 transition-colors">
+                                    <div
+                                        key={file.id}
+                                        className={`group grid grid-cols-[40px_40px_1fr_120px_180px] gap-4 p-3 items-center hover:bg-muted/30 transition-colors ${isSelected ? 'bg-muted/40' : ''}`}
+                                        onClick={(e) => toggleSelection(file.id, index, !e.altKey, e.shiftKey)}
+                                    >
+                                        <div className="flex justify-center items-center">
+                                            <div className={`cursor-pointer ${isSelected ? 'text-primary' : 'text-muted-foreground/50'}`}>
+                                                {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
+                                            </div>
+                                        </div>
+
                                         <div className="text-muted-foreground flex justify-center">
                                             {isFolder ? <Folder className="text-blue-500 fill-blue-500/20" size={20} /> : <File className="text-gray-400" size={20} />}
                                         </div>
 
                                         <div className="min-w-0 truncate font-medium">
                                             {isFolder ? (
-                                                <Link to={`/drive/${accountId}/${file.id}`} className="hover:underline cursor-pointer text-foreground">
+                                                <Link
+                                                    to={`/drive/${accountId}/${file.id}`}
+                                                    className="hover:underline cursor-pointer text-foreground"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                >
                                                     {file.name}
                                                 </Link>
                                             ) : (
-                                                <span onClick={() => handleFileClick(file)} className="cursor-pointer hover:underline text-foreground">
+                                                <span className="text-foreground">
                                                     {file.name}
                                                 </span>
                                             )}
@@ -204,32 +394,6 @@ export default function FileBrowser() {
                                         <div className="text-right text-sm text-muted-foreground tabular-nums">
                                             {formatDate(file.modified_at)}
                                         </div>
-
-                                        <div className="flex justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            {!isFolder && (
-                                                <button
-                                                    onClick={() => handleFileClick(file)}
-                                                    className="p-1.5 hover:bg-accent rounded-md text-muted-foreground hover:text-foreground"
-                                                    title="Download"
-                                                >
-                                                    <Download size={16} />
-                                                </button>
-                                            )}
-                                            <button
-                                                onClick={() => confirmDelete(file)}
-                                                className="p-1.5 hover:bg-destructive/10 hover:text-destructive rounded-md text-muted-foreground transition-colors"
-                                                title="Delete"
-                                            >
-                                                <Trash2 size={16} />
-                                            </button>
-                                            <button
-                                                onClick={() => setMoveModal({ isOpen: true, item: file })}
-                                                className="p-1.5 hover:bg-accent rounded-md text-muted-foreground hover:text-foreground"
-                                                title="Move"
-                                            >
-                                                <ArrowRightLeft size={16} />
-                                            </button>
-                                        </div>
                                     </div>
                                 );
                             })}
@@ -241,25 +405,37 @@ export default function FileBrowser() {
             {/* Modals */}
             <Modal
                 isOpen={deleteModal.isOpen}
-                onClose={() => setDeleteModal({ ...deleteModal, isOpen: false })}
-                title="Confirm Deletion"
+                onClose={() => setDeleteModal({ isOpen: false })}
+                title={`Delete ${selectedItems.size} item(s)?`}
             >
                 <div className="space-y-4">
-                    <p>Are you sure you want to delete <strong>{deleteModal.item?.name}</strong>?</p>
+                    <p>Are you sure you want to delete the selected items? This action cannot be undone.</p>
                     <div className="flex justify-end gap-2">
-                        <button
-                            onClick={() => setDeleteModal({ ...deleteModal, isOpen: false })}
-                            className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent"
-                        >
+                        <button onClick={() => setDeleteModal({ isOpen: false })} className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent">
                             Cancel
                         </button>
-                        <button
-                            onClick={executeDelete}
-                            disabled={actionLoading}
-                            className="px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 disabled:opacity-50 flex items-center gap-2"
-                        >
+                        <button onClick={executeDelete} disabled={actionLoading} className="px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 disabled:opacity-50 flex items-center gap-2">
                             {actionLoading && <Loader2 className="animate-spin" size={14} />}
                             Delete
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+
+            <Modal
+                isOpen={removeMetadataModal}
+                onClose={() => setRemoveMetadataModal(false)}
+                title={`Remove Metadata from ${selectedItems.size} item(s)?`}
+            >
+                <div className="space-y-4">
+                    <p>Are you sure you want to remove metadata from the selected items? The file content will remain unchanged.</p>
+                    <div className="flex justify-end gap-2">
+                        <button onClick={() => setRemoveMetadataModal(false)} className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent">
+                            Cancel
+                        </button>
+                        <button onClick={executeRemoveMetadata} disabled={actionLoading} className="px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 disabled:opacity-50 flex items-center gap-2">
+                            {actionLoading && <Loader2 className="animate-spin" size={14} />}
+                            Remove
                         </button>
                     </div>
                 </div>
@@ -283,31 +459,36 @@ export default function FileBrowser() {
                         />
                     </div>
                     <div className="flex justify-end gap-2">
-                        <button
-                            type="button"
-                            onClick={() => setCreateFolderModal(false)}
-                            className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent"
-                        >
+                        <button type="button" onClick={() => setCreateFolderModal(false)} className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent">
                             Cancel
                         </button>
-                        <button
-                            type="submit"
-                            disabled={actionLoading || !newFolderName.trim()}
-                            className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
-                        >
+                        <button type="submit" disabled={actionLoading || !newFolderName.trim()} className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2">
                             {actionLoading && <Loader2 className="animate-spin" size={14} />}
                             Create
                         </button>
                     </div>
                 </form>
             </Modal>
+
+            <MetadataModal
+                isOpen={metadataModalOpen}
+                onClose={() => setMetadataModalOpen(false)}
+                item={singleSelectedItem}
+                accountId={accountId}
+                onSuccess={() => {
+                    // Optional: refresh metadata indicator if we had one
+                }}
+            />
+
             <MoveModal
                 isOpen={moveModal.isOpen}
-                onClose={() => setMoveModal({ isOpen: false, item: null })}
-                item={moveModal.item}
+                onClose={() => setMoveModal({ isOpen: false })}
+                item={singleSelectedItem} // Pass single item if only one, or modal handles multiple? Modal currently handles one.
+                // TODO: Update MoveModal to handle multiple items if needed, for now might need loop or disable multi-move
                 sourceAccountId={accountId}
                 onSuccess={() => {
-                    setMoveModal({ isOpen: false, item: null });
+                    setMoveModal({ isOpen: false });
+                    setSelectedItems(new Set());
                     refresh();
                 }}
             />

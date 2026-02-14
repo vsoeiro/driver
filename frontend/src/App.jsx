@@ -5,6 +5,7 @@ import Jobs from './pages/Jobs'
 import Layout from './components/Layout'
 import { ToastProvider } from './contexts/ToastContext'
 import JobStatusNotifier from './components/JobStatusNotifier'
+import MetadataManager from './pages/MetadataManager'
 
 function App() {
     return (
@@ -21,6 +22,7 @@ function App() {
                         <Route path="/drive/:accountId" element={<FileBrowser />} />
                         <Route path="/drive/:accountId/:folderId" element={<FileBrowser />} />
                         <Route path="/jobs" element={<Jobs />} />
+                        <Route path="/metadata" element={<MetadataManager />} />
                     </Route>
                 </Routes>
             </div>

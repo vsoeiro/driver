@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getFiles, getFolderFiles, getPath, deleteItem, createFolder } from '../services/drive';
+import { getFiles, getFolderFiles, getPath, deleteItem, batchDeleteItems, createFolder, searchFiles } from '../services/drive';
 
 export function useDrive(accountId, folderId) {
     const [files, setFiles] = useState([]);
@@ -7,25 +7,28 @@ export function useDrive(accountId, folderId) {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
 
+    const [searchQuery, setSearchQuery] = useState('');
+
+    // Reset search on navigation
+    useEffect(() => {
+        setSearchQuery('');
+    }, [folderId, accountId]);
+
     const fetchFiles = useCallback(async () => {
         if (!accountId) return;
         setLoading(true);
         setError(null);
         try {
             let data;
-            if (folderId) {
+            if (searchQuery) {
+                data = await searchFiles(accountId, searchQuery);
+                setFiles(data.items || []);
+                setBreadcrumbs([{ id: 'search', name: `Search results: ${searchQuery}` }]);
+            } else if (folderId) {
                 data = await getFolderFiles(accountId, folderId);
-            } else {
-                data = await getFiles(accountId);
-            }
-            // Ensure we're setting an array
-            setFiles(data.items || []);
-
-            // Breadcrumbs
-            if (folderId) {
+                setFiles(data.items || []);
                 try {
                     const pathData = await getPath(accountId, folderId);
-                    // Filter out "root" from API response to avoid duplication if we handle it manually
                     const cleanPath = (pathData.breadcrumb || []).filter(b => b.name.toLowerCase() !== 'root');
                     setBreadcrumbs(cleanPath);
                 } catch (e) {
@@ -33,6 +36,8 @@ export function useDrive(accountId, folderId) {
                     setBreadcrumbs([]);
                 }
             } else {
+                data = await getFiles(accountId);
+                setFiles(data.items || []);
                 setBreadcrumbs([]);
             }
         } catch (err) {
@@ -41,7 +46,7 @@ export function useDrive(accountId, folderId) {
         } finally {
             setLoading(false);
         }
-    }, [accountId, folderId]);
+    }, [accountId, folderId, searchQuery]);
 
     useEffect(() => {
         fetchFiles();
@@ -50,6 +55,16 @@ export function useDrive(accountId, folderId) {
     const handleDelete = async (itemId) => {
         try {
             await deleteItem(accountId, itemId);
+            fetchFiles();
+        } catch (e) {
+            throw e;
+        }
+    };
+
+    const handleBatchDelete = async (itemIds) => {
+        try {
+            // If single item, fallback to simple delete? No, batch endpoint handles list.
+            await batchDeleteItems(accountId, Array.from(itemIds));
             fetchFiles();
         } catch (e) {
             throw e;
@@ -65,5 +80,5 @@ export function useDrive(accountId, folderId) {
         }
     };
 
-    return { files, breadcrumbs, loading, error, refresh: fetchFiles, handleDelete, handleCreateFolder };
+    return { files, breadcrumbs, loading, error, refresh: fetchFiles, handleDelete, handleBatchDelete, handleCreateFolder, searchQuery, setSearchQuery };
 }

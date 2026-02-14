@@ -5,7 +5,7 @@ import { driveService } from '../services/drive';
 
 const { getAccounts } = accountsService;
 const { getQuota } = driveService;
-import { HardDrive, Plus, Cloud, Loader2, User, Activity } from 'lucide-react';
+import { HardDrive, Plus, Cloud, Loader2, User, Activity, Database } from 'lucide-react';
 
 export default function Sidebar() {
     const { accountId } = useParams();
@@ -124,6 +124,19 @@ export default function Sidebar() {
                 >
                     <Activity size={18} className="shrink-0" />
                     <span>Jobs</span>
+                </NavLink>
+                <NavLink
+                    to="/metadata"
+                    className={({ isActive }) => `
+                        flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
+                        ${isActive
+                            ? 'bg-primary text-primary-foreground shadow-sm'
+                            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                        }
+                    `}
+                >
+                    <Database size={18} className="shrink-0" />
+                    <span>Metadata</span>
                 </NavLink>
             </div>
         </aside>

@@ -98,17 +98,34 @@ export const getQuota = async (accountId) => {
     return response.data;
 };
 
+/**
+ * Search for files
+ */
+export const searchFiles = async (accountId, query) => {
+    const response = await api.get(`/drive/${accountId}/search?q=${encodeURIComponent(query)}`);
+    return response.data;
+};
+
+/**
+ * Delete multiple items
+ */
+export const batchDeleteItems = async (accountId, itemIds) => {
+    await api.post(`/drive/${accountId}/items/batch-delete`, { item_ids: itemIds });
+};
+
 export const driveService = {
     getFiles,
     getFolderFiles,
     getPath,
     createFolder,
     deleteItem,
+    batchDeleteItems,
     uploadFileSimple,
     createUploadSession,
     uploadChunkProxy,
     getDownloadUrl,
-    getQuota
+    getQuota,
+    searchFiles
 };
 
 export default driveService;
