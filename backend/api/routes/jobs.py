@@ -6,7 +6,7 @@ This module provides endpoints for creating and managing background jobs.
 from fastapi import APIRouter, status, UploadFile, File, Form
 
 from backend.api.dependencies import JobServiceDep
-from backend.schemas.jobs import Job, JobCreate, JobMoveRequest
+from backend.schemas.jobs import Job, JobCreate, JobMoveRequest, JobMetadataUpdateRequest, JobSyncRequest
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 
@@ -79,8 +79,45 @@ async def create_upload_job(
         "temp_path": temp_path,
     }
     
+    
     job_in = JobCreate(
         type="upload_file",
+        payload=payload,
+    )
+    
+    return await job_service.create_job(job_in)
+
+
+@router.post("/metadata-update", response_model=Job, status_code=status.HTTP_201_CREATED)
+async def create_metadata_update_job(
+    request: JobMetadataUpdateRequest,
+    job_service: JobServiceDep,
+) -> Job:
+    """Create a new job to bulk update metadata."""
+    
+    payload = request.model_dump(mode='json')
+    
+    job_in = JobCreate(
+        type="update_metadata",
+        payload=payload,
+    )
+    
+    return await job_service.create_job(job_in)
+
+    return await job_service.create_job(job_in)
+
+
+@router.post("/sync", response_model=Job, status_code=status.HTTP_201_CREATED)
+async def create_sync_job(
+    request: JobSyncRequest,
+    job_service: JobServiceDep,
+) -> Job:
+    """Create a new job to sync items for an account."""
+    
+    payload = request.model_dump(mode='json')
+    
+    job_in = JobCreate(
+        type="sync_items",
         payload=payload,
     )
     

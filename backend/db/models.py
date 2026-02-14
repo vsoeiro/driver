@@ -12,6 +12,8 @@ from sqlalchemy import (
     Text,
     JSON,
     ForeignKey,
+    BigInteger,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -217,6 +219,50 @@ class ItemMetadata(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class Item(Base):
+    """File system item model.
+
+    Stores static properties of files and folders to avoid repeated Graph API calls
+    and to enable SQL-based filtering/sorting.
+    """
+    __tablename__ = "items"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("linked_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    item_id: Mapped[str] = mapped_column(String(255), nullable=False)  # OneDrive Item ID
+    parent_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    path: Mapped[str | None] = mapped_column(String(1000), nullable=True)  # Full path /Folder/File.ext
+    
+    item_type: Mapped[str] = mapped_column(String(50), default="file")  # file, folder
+    mime_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    extension: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    
+    size: Mapped[int] = mapped_column(BigInteger, default=0)
+    
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    modified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    last_synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    __table_args__ = (
+        UniqueConstraint('account_id', 'item_id', name='uq_items_account_item'),
     )
 
 

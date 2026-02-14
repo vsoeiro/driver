@@ -1,5 +1,6 @@
 """Job Pydantic schemas."""
 
+from typing import Any
 from datetime import datetime
 from uuid import UUID
 
@@ -59,3 +60,18 @@ class JobUploadRequest(BaseModel):
     folder_id: str = "root"
     filename: str
     temp_path: str
+
+
+class JobSyncRequest(BaseModel):
+    """Schema for sync items job request."""
+    account_id: UUID
+
+
+class JobMetadataUpdateRequest(BaseModel):
+    """Schema for bulk metadata update job request."""
+
+    account_id: UUID
+    root_item_id: str
+    metadata: dict[str, Any]  # Key: Attribute Name, Value: Value
+    category_name: str
+

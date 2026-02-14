@@ -292,20 +292,22 @@ export default function FileBrowser() {
                         </button>
 
                         {metadataMenuOpen && (
-                            <div className="absolute top-full left-0 mt-1 w-48 bg-popover border rounded-md shadow-md z-50 py-1">
-                                <button
-                                    onClick={() => { setMetadataModalOpen(true); setMetadataMenuOpen(false); }}
-                                    disabled={selectedItems.size !== 1}
-                                    className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
-                                >
-                                    <Database size={14} /> Edit Metadata
-                                </button>
-                                <button
-                                    onClick={() => { setRemoveMetadataModal(true); setMetadataMenuOpen(false); }}
-                                    className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 text-destructive hover:text-destructive"
-                                >
-                                    <XCircle size={14} /> Remove Metadata
-                                </button>
+                            <div className="absolute top-full left-0 w-48 pt-1 z-50">
+                                <div className="bg-popover border rounded-md shadow-md py-1">
+                                    <button
+                                        onClick={() => { setMetadataModalOpen(true); setMetadataMenuOpen(false); }}
+                                        disabled={selectedItems.size !== 1}
+                                        className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
+                                    >
+                                        <Database size={14} /> Edit Metadata
+                                    </button>
+                                    <button
+                                        onClick={() => { setRemoveMetadataModal(true); setMetadataMenuOpen(false); }}
+                                        className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 text-destructive hover:text-destructive"
+                                    >
+                                        <XCircle size={14} /> Remove Metadata
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>

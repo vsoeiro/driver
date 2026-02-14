@@ -42,10 +42,21 @@ export const uploadFileBackground = async (accountId, folderId, file, onProgress
     return response.data;
 };
 
+export const createMetadataUpdateJob = async (accountId, rootItemId, metadata, categoryName) => {
+    const response = await api.post('/jobs/metadata-update', {
+        account_id: accountId,
+        root_item_id: rootItemId,
+        metadata: metadata,
+        category_name: categoryName,
+    });
+    return response.data;
+};
+
 export const jobsService = {
     createMoveJob,
     getJobs,
     uploadFileBackground,
+    createMetadataUpdateJob,
 };
 
 export default jobsService;

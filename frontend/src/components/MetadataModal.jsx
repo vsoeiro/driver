@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import Modal from './Modal';
 import { metadataService } from '../services/metadata';
+import { jobsService } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
-import { Loader2 } from 'lucide-react';
+import { Loader2, AlertTriangle } from 'lucide-react';
 
 export default function MetadataModal({ isOpen, onClose, item, accountId, onSuccess }) {
     const { showToast } = useToast();
@@ -15,6 +16,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
     const [formValues, setFormValues] = useState({});
 
     useEffect(() => {
+        console.log("MetadataModal item:", item);
         if (isOpen && item) {
             loadData();
         } else {
@@ -63,14 +65,41 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                 return;
             }
 
-            await metadataService.saveItemMetadata({
-                account_id: accountId,
-                item_id: item.id,
-                category_id: selectedCategoryId,
-                values: formValues
-            });
+            // Check if folder -> Bulk Update
+            if (item.item_type === 'folder') {
+                // Prepare metadata map: { "Attribute Name": "Value" }
+                // The backend job expects attribute names, not IDs, because it resolves them recursively 
+                // (or strictly speaking, the handler implementation maps input keys to attribute IDs).
+                // Wait, my backend implementation:
+                // `attr_map = {attr.name: attr.id for attr in attributes}`
+                // `if key in attr_map`
+                // So yes, I need to send Attribute Names as keys.
 
-            showToast('Metadata saved successfully', 'success');
+                const metadata = {};
+                Object.entries(formValues).forEach(([attrId, value]) => {
+                    const attr = category.attributes.find(a => a.id === attrId);
+                    if (attr) {
+                        metadata[attr.name] = value;
+                    }
+                });
+
+                await jobsService.createMetadataUpdateJob(
+                    accountId,
+                    item.id,
+                    metadata,
+                    category.name
+                );
+                showToast('Bulk metadata update job started', 'success');
+            } else {
+                await metadataService.saveItemMetadata({
+                    account_id: accountId,
+                    item_id: item.id,
+                    category_id: selectedCategoryId,
+                    values: formValues
+                });
+                showToast('Metadata saved successfully', 'success');
+            }
+
             if (onSuccess) onSuccess();
             onClose();
         } catch (error) {
@@ -100,6 +129,21 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                 </div>
             ) : (
                 <form onSubmit={handleSave} className="space-y-4">
+                    {item?.item_type === 'folder' && (
+                        <div className="bg-yellow-500/10 border-l-4 border-yellow-500 p-4 mb-4">
+                            <div className="flex">
+                                <div className="flex-shrink-0">
+                                    <AlertTriangle className="h-5 w-5 text-yellow-500" aria-hidden="true" />
+                                </div>
+                                <div className="ml-3">
+                                    <p className="text-sm text-yellow-700 dark:text-yellow-400">
+                                        You are editing a folder. Changes will be applied effectively to <strong>all files</strong> inside this folder recursively. This process runs in the background.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     <div>
                         <label className="block text-sm font-medium mb-1">Category</label>
                         <select

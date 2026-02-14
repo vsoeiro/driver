@@ -465,23 +465,40 @@ class GraphClient:
         list[dict]
             List of path components from root to item.
         """
-        data = await self._request(
-            "GET",
-            f"/me/drive/items/{item_id}?$select=id,name,parentReference",
-            account,
-        )
-
         breadcrumb = []
-        parent_ref = data.get("parentReference", {})
-        path = parent_ref.get("path", "")
+        current_id = item_id
+        
+        # Safety limit for depth
+        max_depth = 50
 
-        if path:
-            path_parts = path.replace("/drive/root:", "").split("/")
-            for part in path_parts:
-                if part:
-                    breadcrumb.append({"id": "", "name": part})
+        while max_depth > 0:
+            try:
+                data = await self._request(
+                    "GET",
+                    f"/me/drive/items/{current_id}?$select=id,name,parentReference,root",
+                    account,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to fetch breadcrumb item {current_id}: {e}")
+                break
 
-        breadcrumb.append({"id": data["id"], "name": data["name"]})
+            # Prepend the current item
+            breadcrumb.insert(0, {"id": data["id"], "name": data.get("name")})
+
+            # Check if we reached the root
+            if "root" in data:
+                break
+            
+            # Get parent ID to continue traversal
+            parent_ref = data.get("parentReference", {})
+            parent_id = parent_ref.get("id")
+            
+            if not parent_id:
+                break
+                
+            current_id = parent_id
+            max_depth -= 1
+
         return breadcrumb
 
     async def get_recent_items(self, account: LinkedAccount) -> DriveListResponse:

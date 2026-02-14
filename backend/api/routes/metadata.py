@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.api.dependencies import get_session
-from backend.db.models import ItemMetadata, MetadataAttribute, MetadataCategory, LinkedAccount
+from backend.db.models import Item, ItemMetadata, MetadataAttribute, MetadataCategory, LinkedAccount
 from backend.schemas.metadata import (
     ItemMetadataCreate,
     MetadataAttributeCreate,
@@ -17,6 +17,8 @@ from backend.schemas.metadata import (
     ItemMetadata as ItemMetadataSchema,
     MetadataAttribute as MetadataAttributeSchema,
 )
+from backend.services.graph_client import GraphClient
+from backend.services.token_manager import TokenManager
 
 router = APIRouter(prefix="/metadata", tags=["Metadata"])
 
@@ -135,11 +137,93 @@ async def upsert_item_metadata(
     result = await session.execute(query)
     existing_metadata = result.scalar_one_or_none()
 
+    # 4. Upsert Item record
+    # We need to fetch details from Graph API to populate Item table
+    from datetime import datetime, UTC
+    
+    token_manager = TokenManager(session)
+    client = GraphClient(token_manager)
+    
+    try:
+        # Get item details
+        # We don't have parent_id easily here unless we fetch it.
+        # GraphClient.get_item_metadata returns DriveItem which has basic info.
+        # To get parent and path, we might need more calls, but let's stick to basic info for now.
+        # or use get_item_path to get full path?
+        drive_item = await client.get_item_metadata(account, metadata.item_id)
+        
+        # Check if Item exists
+        stmt = select(Item).where(
+            Item.account_id == account.id,
+            Item.item_id == metadata.item_id
+        )
+        result = await session.execute(stmt)
+        db_item = result.scalar_one_or_none()
+        
+        # Extension extraction
+        extension = None
+        if drive_item.item_type == "file" and "." in drive_item.name:
+            extension = drive_item.name.rsplit(".", 1)[-1].lower()
+
+        if db_item:
+            # Update
+            db_item.name = drive_item.name
+            db_item.size = drive_item.size
+            db_item.modified_at = drive_item.modified_at
+            db_item.last_synced_at = datetime.now(UTC)
+            db_item.mime_type = drive_item.mime_type
+            db_item.extension = extension
+            # parent_id and path are hard to update without fetching parent details.
+            # If we want to be thorough we could fetch parent.
+        else:
+            # Create
+            # Fetch path to get parent?
+            try:
+                path_data = await client.get_item_path(account, metadata.item_id)
+                # path_data: [{'id': 'root', 'name': 'Root'}, ..., {'id': 'parent_id', 'name': 'Parent'}, {'id': 'item_id', 'name': 'Item'}]
+                # Parent is the second to last item
+                parent_id = None
+                path_str = "/"
+                
+                if len(path_data) >= 2:
+                    parent_id = path_data[-2]["id"]
+                
+                # Construct path string
+                path_names = [p["name"] for p in path_data if p["name"] and p["name"].lower() != "root"]
+                path_str = "/" + "/".join(path_names)
+                
+            except Exception:
+                parent_id = None
+                path_str = None
+
+            db_item = Item(
+                account_id=account.id,
+                item_id=metadata.item_id,
+                parent_id=parent_id,
+                name=drive_item.name,
+                path=path_str,
+                item_type=drive_item.item_type,
+                mime_type=drive_item.mime_type,
+                extension=extension,
+                size=drive_item.size,
+                created_at=drive_item.created_at,
+                modified_at=drive_item.modified_at,
+                last_synced_at=datetime.now(UTC),
+            )
+            session.add(db_item)
+            
+    except Exception as e:
+        # Don't fail the metadata update just because item sync failed?
+        # User requested "always register the item", so maybe we should log error but proceed, 
+        # or fail? Let's log and proceed to avoid blocking metadata save if Graph is flaky.
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to sync Item record for {metadata.item_id}: {e}")
+
     if existing_metadata:
         # Update existing
         existing_metadata.category_id = metadata.category_id
         existing_metadata.values = metadata.values
-        # account_id and item_id should match, but we can update them i guess? No, they are keys.
         
         session.add(existing_metadata)
         await session.commit()

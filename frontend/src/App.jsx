@@ -1,6 +1,7 @@
 import React from 'react'
 import { Routes, Route } from 'react-router-dom'
 import FileBrowser from './pages/FileBrowser'
+import AllFiles from './pages/AllFiles'
 import Jobs from './pages/Jobs'
 import Layout from './components/Layout'
 import { ToastProvider } from './contexts/ToastContext'
@@ -21,6 +22,7 @@ function App() {
                         } />
                         <Route path="/drive/:accountId" element={<FileBrowser />} />
                         <Route path="/drive/:accountId/:folderId" element={<FileBrowser />} />
+                        <Route path="/all-files" element={<AllFiles />} />
                         <Route path="/jobs" element={<Jobs />} />
                         <Route path="/metadata" element={<MetadataManager />} />
                     </Route>

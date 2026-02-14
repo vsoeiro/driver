@@ -13,11 +13,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.api.routes import accounts, auth, drive, jobs, metadata
+from backend.api.routes import accounts, auth, drive, jobs, metadata, items
 from backend.core.config import get_settings
 from backend.core.exceptions import DriveOrganizerError
 from backend.db.session import async_session_maker
-from backend.workers.handlers import move, upload  # noqa: F401
+from backend.workers.handlers import move, upload, metadata as metadata_handler, sync as sync_handler  # noqa: F401
 from backend.workers.runner import BackgroundWorker
 
 logging.basicConfig(
@@ -94,6 +94,7 @@ def create_app() -> FastAPI:
     app.include_router(drive.router, prefix="/api/v1")
     app.include_router(jobs.router, prefix="/api/v1")
     app.include_router(metadata.router, prefix="/api/v1")
+    app.include_router(items.router, prefix="/api/v1")
 
     @app.exception_handler(DriveOrganizerError)
     async def handle_drive_organizer_error(_, exc: DriveOrganizerError) -> JSONResponse:
