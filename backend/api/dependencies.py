@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.models import LinkedAccount
-from backend.db.session import get_db
+from backend.db.session import async_session_maker, get_db
 from backend.services.graph_client import GraphClient
 from backend.services.jobs import JobService
 from backend.services.token_manager import TokenManager
@@ -28,8 +28,12 @@ async def get_session() -> AsyncSession:
     AsyncSession
         Database session.
     """
-    async for session in get_db():
-        yield session
+    async with async_session_maker() as session:
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
 
 
 async def get_linked_account(

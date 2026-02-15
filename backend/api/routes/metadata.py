@@ -3,7 +3,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -104,8 +104,14 @@ async def create_category(
     session.add(db_category)
     await session.commit()
     await session.refresh(db_category)
-    # Eager load attributes (will be empty)
-    return db_category
+    # Avoid async lazy-load during response serialization.
+    return MetadataCategorySchema(
+        id=db_category.id,
+        name=db_category.name,
+        description=db_category.description,
+        created_at=db_category.created_at,
+        attributes=[],
+    )
 
 
 @router.delete("/categories/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -115,6 +121,11 @@ async def delete_category(category_id: UUID, session: AsyncSession = Depends(get
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
 
+    # Remove metadata assignments that reference this category.
+    # `item_metadata.category_id` is not a FK, so this cleanup is manual.
+    await session.execute(
+        delete(ItemMetadata).where(ItemMetadata.category_id == category_id)
+    )
     await session.delete(category)
     await session.commit()
 
