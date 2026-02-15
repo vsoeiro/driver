@@ -533,6 +533,8 @@ export default function MetadataManager() {
     const [newAttrType, setNewAttrType] = useState('text');
     const [newAttrRequired, setNewAttrRequired] = useState(false);
     const [newAttrOptions, setNewAttrOptions] = useState('');
+    const [deleteCategoryTarget, setDeleteCategoryTarget] = useState(null);
+    const [deletingCategory, setDeletingCategory] = useState(false);
 
     useEffect(() => {
         loadCategories();
@@ -565,15 +567,23 @@ export default function MetadataManager() {
         }
     };
 
-    const handleDeleteCategory = async (id, e) => {
+    const openDeleteCategoryModal = (category, e) => {
         e.stopPropagation();
-        if (!window.confirm('Are you sure? This will delete all attributes and metadata associated with this category.')) return;
+        setDeleteCategoryTarget(category);
+    };
+
+    const confirmDeleteCategory = async () => {
+        if (!deleteCategoryTarget) return;
+        setDeletingCategory(true);
         try {
-            await metadataService.deleteCategory(id);
+            await metadataService.deleteCategory(deleteCategoryTarget.id);
             showToast('Category deleted', 'success');
-            loadCategories();
+            setDeleteCategoryTarget(null);
+            await loadCategories();
         } catch (error) {
             showToast('Failed to delete category', 'error');
+        } finally {
+            setDeletingCategory(false);
         }
     };
 
@@ -700,7 +710,7 @@ export default function MetadataManager() {
                                             <Eye size={18} />
                                         </button>
                                         <button
-                                            onClick={(e) => handleDeleteCategory(cat.id, e)}
+                                            onClick={(e) => openDeleteCategoryModal(cat, e)}
                                             className="p-2 hover:bg-destructive/10 text-muted-foreground hover:text-destructive rounded-md transition-colors"
                                             title="Delete category"
                                         >
@@ -804,6 +814,40 @@ export default function MetadataManager() {
                         </button>
                     </div>
                 </form>
+            </Modal>
+
+            {/* Delete Category Modal */}
+            <Modal
+                isOpen={!!deleteCategoryTarget}
+                onClose={() => !deletingCategory && setDeleteCategoryTarget(null)}
+                title="Delete Category"
+            >
+                <div className="space-y-4">
+                    <p className="text-sm text-muted-foreground">
+                        Are you sure you want to delete
+                        {' '}
+                        <span className="font-medium text-foreground">{deleteCategoryTarget?.name}</span>
+                        ? This will delete all attributes and metadata associated with this category.
+                    </p>
+                    <div className="flex justify-end gap-2 pt-2">
+                        <button
+                            type="button"
+                            onClick={() => setDeleteCategoryTarget(null)}
+                            disabled={deletingCategory}
+                            className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="button"
+                            onClick={confirmDeleteCategory}
+                            disabled={deletingCategory}
+                            className="px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 disabled:opacity-50"
+                        >
+                            {deletingCategory ? 'Deleting...' : 'Delete'}
+                        </button>
+                    </div>
+                </div>
             </Modal>
 
             {/* Add Attribute Modal */}
