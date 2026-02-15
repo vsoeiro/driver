@@ -46,6 +46,7 @@ export const batchDeleteMetadata = async (accountId, itemIds) => {
 
 export const metadataService = {
     getCategories,
+    listCategories: getCategories,
     createCategory,
     deleteCategory,
     createAttribute,

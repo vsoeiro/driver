@@ -21,11 +21,16 @@ async def list_items(
     sort_by: str = Query("modified_at", regex="^(name|size|modified_at|created_at)$"),
     sort_order: str = Query("desc", regex="^(asc|desc)$"),
     q: Optional[str] = None,
+    search_fields: str = Query("both", regex="^(name|path|both)$"),
+    path_prefix: Optional[str] = None,
+    direct_children_only: bool = Query(False),
     extensions: Optional[list[str]] = Query(None),
     item_type: Optional[str] = Query(None, regex="^(file|folder)$"),
     size_min: Optional[int] = Query(None, ge=0),
     size_max: Optional[int] = Query(None, ge=0),
     account_id: Optional[UUID] = None,
+    category_id: Optional[UUID] = None,
+    has_metadata: Optional[bool] = None,
     session: AsyncSession = Depends(get_session),
 ):
     """List all items with pagination and filtering."""
@@ -33,9 +38,12 @@ async def list_items(
     # Base query
     # Join Item with ItemMetadata
     # We use outerjoin because not all items have metadata
-    query = select(Item, ItemMetadata).outerjoin(
+    query = select(Item, ItemMetadata, MetadataCategory.name.label("category_name")).outerjoin(
         ItemMetadata,
         (Item.item_id == ItemMetadata.item_id) & (Item.account_id == ItemMetadata.account_id)
+    ).outerjoin(
+        MetadataCategory,
+        ItemMetadata.category_id == MetadataCategory.id
     )
 
     # Filters
@@ -43,7 +51,28 @@ async def list_items(
         query = query.where(Item.account_id == account_id)
     
     if q:
-        query = query.where(Item.name.ilike(f"%{q}%"))
+        search_pattern = f"%{q}%"
+        if search_fields == "name":
+            query = query.where(Item.name.ilike(search_pattern))
+        elif search_fields == "path":
+            query = query.where(Item.path.ilike(search_pattern))
+        else:
+            query = query.where(
+                Item.name.ilike(search_pattern) | Item.path.ilike(search_pattern)
+            )
+
+    if path_prefix:
+        clean_prefix = path_prefix.rstrip("/")
+        if direct_children_only:
+            child_pattern = clean_prefix + "/%"
+            grandchild_pattern = clean_prefix + "/%/%"
+            query = query.where(
+                Item.path.ilike(child_pattern),
+                ~Item.path.ilike(grandchild_pattern),
+            )
+        else:
+            child_pattern = clean_prefix + "/%"
+            query = query.where(Item.path.ilike(child_pattern))
         
     if extensions:
         # Clean extensions (remove dots)
@@ -59,19 +88,41 @@ async def list_items(
     if size_max is not None:
         query = query.where(Item.size <= size_max)
 
+    if category_id:
+        query = query.where(ItemMetadata.category_id == category_id)
+
+    if has_metadata is True:
+        query = query.where(ItemMetadata.id.isnot(None))
+    elif has_metadata is False:
+        query = query.where(ItemMetadata.id.is_(None))
+
     # Count total
-    # For counting we can just count Items matching filters
-    # count_query = select(func.count()).select_from(Item) ...
-    # But reusing the query structure is safer for consistency
-    # However, select(Item, ItemMetadata) count might be tricky.
-    # Let's count just Item rows with same filters
-    
     count_query = select(func.count(Item.id))
     
     if account_id:
         count_query = count_query.where(Item.account_id == account_id)
     if q:
-        count_query = count_query.where(Item.name.ilike(f"%{q}%"))
+        search_pattern = f"%{q}%"
+        if search_fields == "name":
+            count_query = count_query.where(Item.name.ilike(search_pattern))
+        elif search_fields == "path":
+            count_query = count_query.where(Item.path.ilike(search_pattern))
+        else:
+            count_query = count_query.where(
+                Item.name.ilike(search_pattern) | Item.path.ilike(search_pattern)
+            )
+    if path_prefix:
+        clean_prefix = path_prefix.rstrip("/")
+        if direct_children_only:
+            child_pattern = clean_prefix + "/%"
+            grandchild_pattern = clean_prefix + "/%/%"
+            count_query = count_query.where(
+                Item.path.ilike(child_pattern),
+                ~Item.path.ilike(grandchild_pattern),
+            )
+        else:
+            child_pattern = clean_prefix + "/%"
+            count_query = count_query.where(Item.path.ilike(child_pattern))
     if extensions:
         clean_exts = [e.lstrip(".").lower() for e in extensions]
         count_query = count_query.where(Item.extension.in_(clean_exts))
@@ -81,6 +132,22 @@ async def list_items(
         count_query = count_query.where(Item.size >= size_min)
     if size_max is not None:
         count_query = count_query.where(Item.size <= size_max)
+    if category_id:
+        count_query = count_query.join(
+            ItemMetadata,
+            (Item.item_id == ItemMetadata.item_id) & (Item.account_id == ItemMetadata.account_id)
+        ).where(ItemMetadata.category_id == category_id)
+    if has_metadata is True:
+        count_query = count_query.join(
+            ItemMetadata,
+            (Item.item_id == ItemMetadata.item_id) & (Item.account_id == ItemMetadata.account_id),
+            isouter=False
+        ) if not category_id else count_query
+    elif has_metadata is False:
+        count_query = count_query.outerjoin(
+            ItemMetadata,
+            (Item.item_id == ItemMetadata.item_id) & (Item.account_id == ItemMetadata.account_id)
+        ).where(ItemMetadata.id.is_(None)) if not category_id else count_query
 
     total = (await session.execute(count_query)).scalar_one()
 
@@ -98,18 +165,21 @@ async def list_items(
     result = await session.execute(query)
     rows = result.all()
     
-    # Transform to schemas
     items = []
     for row in rows:
-        # If we selected (Item, ItemMetadata), row is a tuple
-        # But if ItemMetadata is None (outerjoin), it might be just Item if we didn't unpack
-        # SQLAlchemy execute(select(A, B)) returns rows of (A, B)
-        item, metadata = row
+        item, metadata, category_name = row
         
-        # We need to serialize item and attach metadata
-        # Pydantic's from_attributes can handle objectORM, but here we are constructing a dict
-        # to match the ItemResponse schema which expects a flat structure or nested?
-        # ItemResponse inherits DriveItemBase and adds metadata field.
+        metadata_data = None
+        if metadata:
+            metadata_data = {
+                "id": str(metadata.id),
+                "account_id": metadata.account_id,
+                "item_id": metadata.item_id,
+                "category_id": metadata.category_id,
+                "values": metadata.values,
+                "updated_at": metadata.updated_at,
+                "category_name": category_name,
+            }
         
         item_data = {
             "id": str(item.id),
@@ -125,9 +195,9 @@ async def list_items(
             "created_at": item.created_at,
             "modified_at": item.modified_at,
             "last_synced_at": item.last_synced_at,
-            "web_url": None, # Item model doesn't store web_url currently
+            "web_url": None,
             "download_url": None,
-            "metadata": metadata 
+            "metadata": metadata_data
         }
         items.append(item_data)
 

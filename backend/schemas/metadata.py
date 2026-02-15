@@ -70,6 +70,7 @@ class ItemMetadata(ItemMetadataBase):
     id: UUID
     account_id: UUID
     updated_at: datetime
+    category_name: str | None = None
 
     class Config:
         from_attributes = True

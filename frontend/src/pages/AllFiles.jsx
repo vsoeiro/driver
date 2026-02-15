@@ -2,14 +2,17 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { itemsService } from '../services/items';
 import { metadataService } from '../services/metadata';
+import { accountsService } from '../services/accounts';
+import { jobsService } from '../services/jobs';
+import { useToast } from '../contexts/ToastContext';
 import {
-    File, Folder, Search, Filter, Database, CheckSquare, Square,
-    Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown
+    File, Folder, FolderOpen, Search, Filter, Database, CheckSquare, Square,
+    Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, User, X, Trash2
 } from 'lucide-react';
 import Modal from '../components/Modal';
 
 // Filter Component
-const FilterBar = ({ onFilter, filters }) => {
+const FilterBar = ({ onFilter, filters, accounts, categories }) => {
     const [localFilters, setLocalFilters] = useState(filters);
     const [isOpen, setIsOpen] = useState(false);
 
@@ -27,7 +30,10 @@ const FilterBar = ({ onFilter, filters }) => {
             extensions: [],
             size_min: '',
             size_max: '',
-            item_type: ''
+            item_type: '',
+            account_id: '',
+            category_id: '',
+            has_metadata: ''
         };
         setLocalFilters(cleared);
         onFilter(cleared);
@@ -44,6 +50,47 @@ const FilterBar = ({ onFilter, filters }) => {
 
             {isOpen && (
                 <div className="absolute right-0 top-full mt-2 w-72 bg-popover border rounded-md shadow-lg p-4 z-50 space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Account</label>
+                        <select
+                            className="w-full border rounded-md p-2 text-sm bg-background"
+                            value={localFilters.account_id || ''}
+                            onChange={(e) => handleChange('account_id', e.target.value)}
+                        >
+                            <option value="">All Accounts</option>
+                            {accounts?.map(acc => (
+                                <option key={acc.id} value={acc.id}>{acc.email || acc.display_name}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Category</label>
+                        <select
+                            className="w-full border rounded-md p-2 text-sm bg-background"
+                            value={localFilters.category_id || ''}
+                            onChange={(e) => handleChange('category_id', e.target.value)}
+                        >
+                            <option value="">All Categories</option>
+                            {categories?.map(cat => (
+                                <option key={cat.id} value={cat.id}>{cat.name}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Has Metadata</label>
+                        <select
+                            className="w-full border rounded-md p-2 text-sm bg-background"
+                            value={localFilters.has_metadata ?? ''}
+                            onChange={(e) => handleChange('has_metadata', e.target.value)}
+                        >
+                            <option value="">All</option>
+                            <option value="true">With Metadata</option>
+                            <option value="false">Without Metadata</option>
+                        </select>
+                    </div>
+
                     <div>
                         <label className="block text-sm font-medium mb-1">Type</label>
                         <select
@@ -102,20 +149,67 @@ const FilterBar = ({ onFilter, filters }) => {
 };
 
 // Batch Metadata Modal
-const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess }) => {
+const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToast }) => {
     const [categories, setCategories] = useState([]);
     const [selectedCategory, setSelectedCategory] = useState('');
     const [attributeValues, setAttributeValues] = useState({});
+    const [applyRecursive, setApplyRecursive] = useState(false);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
+
+    const hasFolders = selectedItems.some(i => i.item_type === 'folder');
 
     useEffect(() => {
         if (isOpen) {
             loadCategories();
-            setAttributeValues({});
-            setSelectedCategory('');
+            setApplyRecursive(false);
         }
     }, [isOpen]);
+
+    useEffect(() => {
+        if (!isOpen || categories.length === 0 || selectedItems.length === 0) return;
+        prefillFromSelection();
+    }, [isOpen, categories, selectedItems]);
+
+    const prefillFromSelection = () => {
+        const itemsWithMeta = selectedItems.filter(i => i.metadata);
+
+        if (itemsWithMeta.length === 0) {
+            setSelectedCategory('');
+            setAttributeValues({});
+            return;
+        }
+
+        const firstCatId = itemsWithMeta[0].metadata.category_id;
+        const allSameCategory = itemsWithMeta.every(
+            i => i.metadata.category_id === firstCatId
+        );
+
+        if (!allSameCategory) {
+            setSelectedCategory('');
+            setAttributeValues({});
+            return;
+        }
+
+        setSelectedCategory(firstCatId);
+
+        if (itemsWithMeta.length === 1) {
+            setAttributeValues(itemsWithMeta[0].metadata.values || {});
+            return;
+        }
+
+        const commonValues = {};
+        const firstValues = itemsWithMeta[0].metadata.values || {};
+        for (const [key, val] of Object.entries(firstValues)) {
+            const allMatch = itemsWithMeta.every(
+                i => (i.metadata.values || {})[key] === val
+            );
+            if (allMatch) {
+                commonValues[key] = val;
+            }
+        }
+        setAttributeValues(commonValues);
+    };
 
     const loadCategories = async () => {
         setLoading(true);
@@ -133,32 +227,55 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess }) => {
         if (!selectedCategory) return;
         setSaving(true);
         try {
-            // We assume all selected items belong to the same account for now, 
-            // OR we need to group by account if the view shows mixed accounts.
-            // The table view shows account_id.
-
-            // Check if multiple accounts are selected
-            const accounts = new Set(selectedItems.map(i => i.account_id));
-            if (accounts.size > 1) {
-                alert("Cannot batch update items from different accounts simultaneously.");
+            const accountSet = new Set(selectedItems.map(i => i.account_id));
+            if (accountSet.size > 1) {
+                showToast('Cannot batch update items from different accounts simultaneously.', 'error');
                 setSaving(false);
                 return;
             }
 
-            const accountId = Array.from(accounts)[0];
-            const itemIds = selectedItems.map(i => i.item_id);
+            const accountId = Array.from(accountSet)[0];
+            const folders = selectedItems.filter(i => i.item_type === 'folder');
+            const files = selectedItems.filter(i => i.item_type !== 'folder');
 
-            await itemsService.batchUpdateMetadata(
-                accountId,
-                itemIds,
-                selectedCategory,
-                attributeValues
-            );
+            const promises = [];
+
+            if (files.length > 0) {
+                promises.push(
+                    itemsService.batchUpdateMetadata(
+                        accountId,
+                        files.map(i => i.item_id),
+                        selectedCategory,
+                        attributeValues
+                    )
+                );
+            }
+
+            if (applyRecursive && folders.length > 0) {
+                for (const folder of folders) {
+                    promises.push(
+                        jobsService.applyMetadataRecursive(
+                            accountId,
+                            folder.path,
+                            selectedCategory,
+                            attributeValues
+                        )
+                    );
+                }
+            }
+
+            await Promise.all(promises);
+
+            if (applyRecursive && folders.length > 0) {
+                showToast(`${folders.length} recursive job(s) created for folder contents.`, 'success');
+            } else {
+                showToast('Metadata updated successfully.', 'success');
+            }
 
             onSuccess();
             onClose();
         } catch (error) {
-            alert("Failed to update metadata: " + error.message);
+            showToast('Failed to update metadata: ' + error.message, 'error');
         } finally {
             setSaving(false);
         }
@@ -167,7 +284,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess }) => {
     const currentCategory = categories.find(c => c.id === selectedCategory);
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={`Edit Metadata for ${selectedItems.length} items`}>
+        <Modal isOpen={isOpen} onClose={onClose} title={`Edit Metadata for ${selectedItems.length} item${selectedItems.length > 1 ? 's' : ''}`}>
             <div className="space-y-4">
                 {loading ? (
                     <div className="flex justify-center"><Loader2 className="animate-spin" /></div>
@@ -178,7 +295,10 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess }) => {
                             <select
                                 className="w-full border rounded-md p-2 bg-background"
                                 value={selectedCategory}
-                                onChange={(e) => setSelectedCategory(e.target.value)}
+                                onChange={(e) => {
+                                    setSelectedCategory(e.target.value);
+                                    setAttributeValues({});
+                                }}
                             >
                                 <option value="">Select Category...</option>
                                 {categories.map(c => (
@@ -195,7 +315,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess }) => {
                                         {attr.data_type === 'select' ? (
                                             <select
                                                 className="w-full border rounded-md p-2 text-sm bg-background"
-                                                value={attributeValues[attr.id] || ''}
+                                                value={attributeValues[attr.id] ?? ''}
                                                 onChange={e => setAttributeValues(prev => ({ ...prev, [attr.id]: e.target.value }))}
                                             >
                                                 <option value="">Select...</option>
@@ -206,7 +326,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess }) => {
                                         ) : attr.data_type === 'boolean' ? (
                                             <select
                                                 className="w-full border rounded-md p-2 text-sm bg-background"
-                                                value={attributeValues[attr.id] || ''}
+                                                value={attributeValues[attr.id] ?? ''}
                                                 onChange={e => setAttributeValues(prev => ({ ...prev, [attr.id]: e.target.value === 'true' }))}
                                             >
                                                 <option value="">Select...</option>
@@ -217,13 +337,24 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess }) => {
                                             <input
                                                 type={attr.data_type === 'number' ? 'number' : attr.data_type === 'date' ? 'date' : 'text'}
                                                 className="w-full border rounded-md p-2 text-sm bg-background"
-                                                value={attributeValues[attr.id] || ''}
+                                                value={attributeValues[attr.id] ?? ''}
                                                 onChange={e => setAttributeValues(prev => ({ ...prev, [attr.id]: e.target.value }))}
                                             />
                                         )}
                                     </div>
                                 ))}
                             </div>
+                        )}
+
+                        {hasFolders && (
+                            <label className="flex items-center gap-2 text-sm border p-3 rounded-md bg-amber-50 text-amber-800">
+                                <input
+                                    type="checkbox"
+                                    checked={applyRecursive}
+                                    onChange={(e) => setApplyRecursive(e.target.checked)}
+                                />
+                                Apply recursively to folder contents (background job)
+                            </label>
                         )}
                     </>
                 )}
@@ -245,8 +376,120 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess }) => {
 };
 
 
+// Remove Metadata Modal
+const RemoveMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToast }) => {
+    const [removing, setRemoving] = useState(false);
+
+    const folders = selectedItems.filter(i => i.item_type === 'folder');
+    const filesWithMeta = selectedItems.filter(i => i.item_type !== 'folder' && i.metadata);
+    const foldersWithMeta = folders.filter(i => i.metadata);
+    const hasAnything = filesWithMeta.length > 0 || folders.length > 0;
+
+    const handleRemove = async () => {
+        setRemoving(true);
+        try {
+            const promises = [];
+
+            const directDeleteItems = [...filesWithMeta, ...foldersWithMeta];
+            if (directDeleteItems.length > 0) {
+                const byAccount = {};
+                for (const item of directDeleteItems) {
+                    if (!byAccount[item.account_id]) byAccount[item.account_id] = [];
+                    byAccount[item.account_id].push(item.item_id);
+                }
+                for (const [accountId, itemIds] of Object.entries(byAccount)) {
+                    promises.push(metadataService.batchDeleteMetadata(accountId, itemIds));
+                }
+            }
+
+            for (const folder of folders) {
+                promises.push(
+                    jobsService.removeMetadataRecursive(folder.account_id, folder.path)
+                );
+            }
+
+            await Promise.all(promises);
+
+            const parts = [];
+            if (directDeleteItems.length > 0) parts.push(`${directDeleteItems.length} item(s) cleared`);
+            if (folders.length > 0) parts.push(`${folders.length} folder(s) queued for recursive removal`);
+            showToast(parts.join(', ') + '.', 'success');
+
+            onSuccess();
+            onClose();
+        } catch (error) {
+            showToast('Failed to remove metadata: ' + error.message, 'error');
+        } finally {
+            setRemoving(false);
+        }
+    };
+
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title={`Remove Metadata from ${selectedItems.length} item${selectedItems.length > 1 ? 's' : ''}`}>
+            <div className="space-y-4">
+                {!hasAnything ? (
+                    <p className="text-sm text-muted-foreground">None of the selected items have metadata to remove.</p>
+                ) : (
+                    <>
+                        {filesWithMeta.length > 0 && (
+                            <div>
+                                <p className="text-sm font-medium mb-2">Files ({filesWithMeta.length})</p>
+                                <div className="border rounded-md divide-y max-h-40 overflow-y-auto">
+                                    {filesWithMeta.map(item => (
+                                        <div key={item.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
+                                            <File size={14} className="text-gray-400 shrink-0" />
+                                            <span className="truncate">{item.name}</span>
+                                            <span className="ml-auto text-xs text-muted-foreground shrink-0">
+                                                {item.metadata?.category_name}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {folders.length > 0 && (
+                            <div>
+                                <p className="text-sm font-medium mb-2">Folders — recursive removal ({folders.length})</p>
+                                <div className="border rounded-md divide-y max-h-40 overflow-y-auto">
+                                    {folders.map(item => (
+                                        <div key={item.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
+                                            <Folder size={14} className="text-blue-500 shrink-0" />
+                                            <span className="truncate">{item.name}</span>
+                                            <span className="ml-auto text-xs text-muted-foreground shrink-0">+ all contents</span>
+                                        </div>
+                                    ))}
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                    A background job will remove metadata from the folder and all items inside it.
+                                </p>
+                            </div>
+                        )}
+                    </>
+                )}
+
+                <div className="flex justify-end gap-2 pt-2">
+                    <button onClick={onClose} className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent">Cancel</button>
+                    {hasAnything && (
+                        <button
+                            onClick={handleRemove}
+                            disabled={removing}
+                            className="px-4 py-2 text-sm font-medium bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {removing && <Loader2 className="animate-spin" size={14} />}
+                            Confirm Removal
+                        </button>
+                    )}
+                </div>
+            </div>
+        </Modal>
+    );
+};
+
+
 export default function AllFiles() {
     const [items, setItems] = useState([]);
+    const [accounts, setAccounts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
@@ -257,25 +500,44 @@ export default function AllFiles() {
         extensions: [],
         size_min: '',
         size_max: '',
-        item_type: ''
+        item_type: '',
+        account_id: '',
+        category_id: '',
+        has_metadata: ''
     });
 
     const [sort, setSort] = useState({ by: 'modified_at', order: 'desc' });
     const [searchTerm, setSearchTerm] = useState('');
+    const [searchScope, setSearchScope] = useState('both');
+    const [pathPrefix, setPathPrefix] = useState('');
     const [selectedItems, setSelectedItems] = useState(new Set());
     const [lastSelectedIndex, setLastSelectedIndex] = useState(null);
+    const [metaCategories, setMetaCategories] = useState([]);
 
     const [batchModalOpen, setBatchModalOpen] = useState(false);
+    const [removeModalOpen, setRemoveModalOpen] = useState(false);
 
-    const fetchItems = async () => {
+    const { showToast } = useToast();
+
+    useEffect(() => {
+        accountsService.getAccounts().then(setAccounts).catch(console.error);
+        metadataService.listCategories().then(setMetaCategories).catch(console.error);
+    }, []);
+
+    const fetchItems = async (overridePage) => {
         setLoading(true);
         try {
+            const effectivePage = overridePage ?? page;
+            const isSearching = searchTerm.trim().length > 0;
             const params = {
-                page,
+                page: effectivePage,
                 page_size: 50,
                 sort_by: sort.by,
                 sort_order: sort.order,
                 q: searchTerm,
+                search_fields: searchScope,
+                path_prefix: pathPrefix,
+                direct_children_only: !!pathPrefix && !isSearching,
                 ...filters
             };
             const data = await itemsService.listItems(params);
@@ -291,7 +553,7 @@ export default function AllFiles() {
 
     useEffect(() => {
         fetchItems();
-    }, [page, sort, filters]); // Search term is handled manually or debounce? Let's generic search on enter.
+    }, [page, sort, filters, pathPrefix]);
 
     // Selection Logic (copied from FileBrowser)
     const toggleSelection = (id, index, multiSelect, rangeSelect) => {
@@ -348,27 +610,89 @@ export default function AllFiles() {
         return items.filter(i => selectedItems.has(i.id));
     };
 
+    const getAccountName = (accountId) => {
+        const acc = accounts.find(a => a.id === accountId);
+        return acc ? acc.email : (accountId ? accountId.slice(0, 8) : '-');
+    };
+
+    const handleFolderClick = (item) => {
+        const folderPath = item.path || `/${item.name}`;
+        setSearchTerm('');
+        setPathPrefix(folderPath);
+        setPage(1);
+    };
+
+    const clearPathPrefix = () => {
+        setSearchTerm('');
+        setPathPrefix('');
+        setPage(1);
+    };
+
+
+
+    const breadcrumbSegments = useMemo(() => {
+        if (!pathPrefix) return [];
+        const cleaned = pathPrefix.replace(/^\/+/, '');
+        const parts = cleaned.split('/').filter(Boolean);
+        return parts.map((part, idx) => ({
+            label: part,
+            path: '/' + parts.slice(0, idx + 1).join('/')
+        }));
+    }, [pathPrefix]);
+
+    const searchPlaceholders = {
+        name: 'Search by title...',
+        path: 'Search by path...',
+        both: 'Search by title or path...'
+    };
+
     return (
         <div className="flex flex-col h-screen">
             {/* Header */}
             <div className="p-4 border-b flex items-center justify-between bg-background">
-                <h1 className="text-lg font-semibold flex items-center gap-2">
-                    All Files <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-0.5 rounded-full">{total} items</span>
-                </h1>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={clearPathPrefix}
+                        className={`text-lg font-semibold hover:text-primary transition-colors ${!pathPrefix ? 'text-foreground' : 'text-muted-foreground'}`}
+                    >
+                        All Files
+                    </button>
+                    {breadcrumbSegments.map((seg) => (
+                        <React.Fragment key={seg.path}>
+                            <ChevronRight size={16} className="text-muted-foreground" />
+                            <button
+                                onClick={() => { setSearchTerm(''); setPathPrefix(seg.path); setPage(1); }}
+                                className={`text-lg font-semibold hover:text-primary transition-colors ${pathPrefix === seg.path ? 'text-foreground' : 'text-muted-foreground'}`}
+                            >
+                                {seg.label}
+                            </button>
+                        </React.Fragment>
+                    ))}
+                    <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-0.5 rounded-full ml-2">{total} items</span>
+                </div>
 
                 <div className="flex items-center gap-2">
+                    <select
+                        className="border rounded-md px-2 py-1.5 text-sm bg-background"
+                        value={searchScope}
+                        onChange={(e) => setSearchScope(e.target.value)}
+                    >
+                        <option value="both">Title + Path</option>
+                        <option value="name">Title</option>
+                        <option value="path">Path</option>
+                    </select>
                     <div className="relative">
                         <Search className="absolute left-2 top-1.5 text-muted-foreground" size={16} />
                         <input
                             type="text"
-                            placeholder="Search all files..."
+                            placeholder={searchPlaceholders[searchScope]}
                             className="pl-8 pr-4 py-1.5 text-sm border rounded-md w-64 focus:outline-none focus:ring-1 focus:ring-primary"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && fetchItems()}
+                            onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); fetchItems(1); } }}
                         />
                     </div>
-                    <FilterBar onFilter={setFilters} filters={filters} />
+                    <FilterBar onFilter={setFilters} filters={filters} accounts={accounts} categories={metaCategories} />
                 </div>
             </div>
 
@@ -384,6 +708,14 @@ export default function AllFiles() {
                     >
                         <Database size={16} /> Edit Metadata
                     </button>
+                    <button
+                        onClick={() => setRemoveModalOpen(true)}
+                        disabled={selectedItems.size === 0}
+                        className="flex items-center gap-2 px-3 py-1.5 hover:bg-red-50 text-red-600 rounded-md disabled:opacity-50"
+                    >
+                        <Trash2 size={16} /> Remove Metadata
+                    </button>
+
                 </div>
 
                 {/* Pagination */}
@@ -408,6 +740,18 @@ export default function AllFiles() {
                 </div>
             </div>
 
+            {/* Path Prefix Breadcrumb */}
+            {pathPrefix && (
+                <div className="bg-blue-50 border-b px-4 py-2 flex items-center gap-2 text-sm">
+                    <FolderOpen size={16} className="text-blue-500" />
+                    <span className="text-muted-foreground">Showing files in:</span>
+                    <span className="font-medium text-blue-700">{pathPrefix}</span>
+                    <button onClick={clearPathPrefix} className="ml-auto flex items-center gap-1 text-muted-foreground hover:text-foreground text-xs">
+                        <X size={14} /> Clear
+                    </button>
+                </div>
+            )}
+
             {/* Content */}
             <main className="flex-1 overflow-auto p-4">
                 {loading ? (
@@ -421,7 +765,7 @@ export default function AllFiles() {
                 ) : (
                     <div className="border rounded-lg overflow-hidden bg-card select-none">
                         {/* Header */}
-                        <div className="grid grid-cols-[40px_40px_1fr_100px_100px_150px_150px] gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center sticky top-0">
+                        <div className="grid grid-cols-[40px_40px_2fr_120px_80px_80px_140px_minmax(150px,1fr)] gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center sticky top-0">
                             <div className="flex justify-center">
                                 <button onClick={toggleSelectAll}>
                                     {selectedItems.size === items.length && items.length > 0 ? <CheckSquare size={16} /> : <Square size={16} />}
@@ -430,6 +774,9 @@ export default function AllFiles() {
                             <div></div>
                             <div className="cursor-pointer flex items-center gap-1 hover:text-foreground" onClick={() => handleSort('name')}>
                                 Name {renderSortIcon('name')}
+                            </div>
+                            <div className="flex items-center gap-1 hover:text-foreground">
+                                Account
                             </div>
                             <div className="cursor-pointer flex items-center gap-1 hover:text-foreground justify-end" onClick={() => handleSort('size')}>
                                 Size {renderSortIcon('size')}
@@ -451,7 +798,7 @@ export default function AllFiles() {
                                 return (
                                     <div
                                         key={item.id}
-                                        className={`group grid grid-cols-[40px_40px_1fr_100px_100px_150px_150px] gap-4 p-3 items-center hover:bg-muted/30 transition-colors ${isSelected ? 'bg-muted/40' : ''}`}
+                                        className={`group grid grid-cols-[40px_40px_2fr_120px_80px_80px_140px_minmax(150px,1fr)] gap-4 p-3 items-center hover:bg-muted/30 transition-colors ${isSelected ? 'bg-muted/40' : ''}`}
                                         onClick={(e) => toggleSelection(item.id, index, !e.altKey, e.shiftKey)}
                                     >
                                         <div className="flex justify-center">
@@ -460,21 +807,34 @@ export default function AllFiles() {
                                             </div>
                                         </div>
                                         <div className="flex justify-center text-muted-foreground">
-                                            {isFolder ? <Folder className="text-blue-500 fill-blue-500/20" size={20} /> : <File className="text-gray-400" size={20} />}
+                                            {isFolder ? (
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); handleFolderClick(item); }}
+                                                    className="hover:scale-110 transition-transform"
+                                                    title="Show files inside this folder"
+                                                >
+                                                    <Folder className="text-blue-500 fill-blue-500/20" size={20} />
+                                                </button>
+                                            ) : (
+                                                <File className="text-gray-400" size={20} />
+                                            )}
                                         </div>
                                         <div className="min-w-0 truncate font-medium">
                                             {item.name}
+                                        </div>
+                                        <div className="flex items-center gap-1 text-sm text-foreground">
+                                            <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                                                <User size={12} className="text-primary" />
+                                            </div>
+                                            <span className="truncate" title={getAccountName(item.account_id)}>
+                                                {getAccountName(item.account_id)}
+                                            </span>
                                         </div>
                                         <div className="text-right text-sm text-muted-foreground tabular-nums">
                                             {formatSize(item.size)}
                                         </div>
                                         <div className="text-right text-sm text-muted-foreground truncate">
-                                            {/* We need to fetch category name? Or just show indicator? 
-                                                The item.metadata object has category_id, but not name unless joined.
-                                                For now showing "Yes" if metadata exists. 
-                                                Ideally Backend should return Category Name.
-                                             */}
-                                            {item.metadata ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">Yes</span> : '-'}
+                                            {item.metadata ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800" title={item.metadata.category_name}>{item.metadata.category_name || 'N/A'}</span> : '-'}
                                         </div>
                                         <div className="text-right text-sm text-muted-foreground tabular-nums">
                                             {formatDate(item.modified_at)}
@@ -494,6 +854,18 @@ export default function AllFiles() {
                 isOpen={batchModalOpen}
                 onClose={() => setBatchModalOpen(false)}
                 selectedItems={getSelectedObjects()}
+                showToast={showToast}
+                onSuccess={() => {
+                    fetchItems();
+                    setSelectedItems(new Set());
+                }}
+            />
+
+            <RemoveMetadataModal
+                isOpen={removeModalOpen}
+                onClose={() => setRemoveModalOpen(false)}
+                selectedItems={getSelectedObjects()}
+                showToast={showToast}
                 onSuccess={() => {
                     fetchItems();
                     setSelectedItems(new Set());
