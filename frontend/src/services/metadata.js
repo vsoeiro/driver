@@ -44,9 +44,15 @@ export const batchDeleteMetadata = async (accountId, itemIds) => {
     });
 };
 
+export const getCategoryStats = async () => {
+    const response = await api.get('/metadata/categories/stats');
+    return response.data;
+};
+
 export const metadataService = {
     getCategories,
     listCategories: getCategories,
+    getCategoryStats,
     createCategory,
     deleteCategory,
     createAttribute,

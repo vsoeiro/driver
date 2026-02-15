@@ -3,7 +3,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -29,8 +29,61 @@ async def list_categories(session: AsyncSession = Depends(get_session)):
     """List all metadata categories with their attributes."""
     query = select(MetadataCategory).options(selectinload(MetadataCategory.attributes))
     result = await session.execute(query)
-    # Unique is needed when joining/loading collections to avoid duplicates in result rows if join happened
     return result.scalars().all()
+
+
+@router.get("/categories/stats")
+async def get_category_stats(session: AsyncSession = Depends(get_session)):
+    """Return each category with its item count.
+
+    Returns
+    -------
+    list[dict]
+        Each dict contains category fields plus ``item_count``.
+    """
+    count_subq = (
+        select(
+            ItemMetadata.category_id,
+            func.count(ItemMetadata.id).label("item_count"),
+        )
+        .group_by(ItemMetadata.category_id)
+        .subquery()
+    )
+
+    query = (
+        select(
+            MetadataCategory,
+            func.coalesce(count_subq.c.item_count, 0).label("item_count"),
+        )
+        .outerjoin(count_subq, MetadataCategory.id == count_subq.c.category_id)
+        .options(selectinload(MetadataCategory.attributes))
+        .order_by(MetadataCategory.name)
+    )
+
+    result = await session.execute(query)
+    rows = result.unique().all()
+
+    return [
+        {
+            "id": str(cat.id),
+            "name": cat.name,
+            "description": cat.description,
+            "created_at": cat.created_at,
+            "attributes": [
+                {
+                    "id": str(attr.id),
+                    "category_id": str(attr.category_id),
+                    "name": attr.name,
+                    "data_type": attr.data_type,
+                    "options": attr.options,
+                    "is_required": attr.is_required,
+                }
+                for attr in cat.attributes
+            ],
+            "item_count": item_count,
+        }
+        for cat, item_count in rows
+    ]
 
 
 @router.post("/categories", response_model=MetadataCategorySchema, status_code=status.HTTP_201_CREATED)
