@@ -75,3 +75,20 @@ class JobMetadataUpdateRequest(BaseModel):
     metadata: dict[str, Any]  # Key: Attribute Name, Value: Value
     category_name: str
 
+
+class JobApplyMetadataRecursiveRequest(BaseModel):
+    """Schema for recursive metadata application using local items table."""
+
+    account_id: UUID
+    path_prefix: str
+    category_id: UUID
+    values: dict[str, Any] = {}
+    include_folders: bool = False
+
+
+class JobRemoveMetadataRecursiveRequest(BaseModel):
+    """Schema for recursive metadata removal using local items table."""
+
+    account_id: UUID
+    path_prefix: str
+

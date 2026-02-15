@@ -5,7 +5,7 @@ from datetime import datetime, UTC
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.models import Item, ItemMetadata, LinkedAccount, MetadataAttribute, MetadataCategory
@@ -232,7 +232,6 @@ async def upsert_item_record(
     path: str | None,
 ):
     """Upsert Item record."""
-    # Check if exists
     stmt = select(Item).where(
         Item.account_id == account.id,
         Item.item_id == item_data.id
@@ -240,25 +239,20 @@ async def upsert_item_record(
     result = await session.execute(stmt)
     db_item = result.scalar_one_or_none()
 
-    # Prepare data
-    # Extension extraction
     extension = None
     if item_data.item_type == "file" and "." in item_data.name:
         extension = item_data.name.rsplit(".", 1)[-1].lower()
 
     if db_item:
-        # Update
         db_item.name = item_data.name
-        db_item.parent_id = parent_id # Might change if moved?
+        db_item.parent_id = parent_id
         db_item.path = path
         db_item.size = item_data.size
         db_item.modified_at = item_data.modified_at
         db_item.last_synced_at = datetime.now(UTC)
-        # Type and extension are unlikely to change for same ID but let's update
         db_item.mime_type = item_data.mime_type
         db_item.extension = extension
     else:
-        # Create
         db_item = Item(
             account_id=account.id,
             item_id=item_data.id,
@@ -274,4 +268,127 @@ async def upsert_item_record(
             last_synced_at=datetime.now(UTC),
         )
         session.add(db_item)
+
+
+@register_handler("apply_metadata_recursive")
+async def apply_metadata_recursive_handler(
+    payload: dict, session: AsyncSession
+) -> dict:
+    """Apply metadata recursively to all items under a path prefix.
+
+    Operates entirely on the local `items` table — no Graph API calls.
+
+    Payload
+    -------
+    {
+        "account_id": "uuid",
+        "path_prefix": "/Comics/Marvel",
+        "category_id": "uuid",
+        "values": {"attr-uuid-1": "value1", "attr-uuid-2": "value2"},
+        "include_folders": false
+    }
+    """
+    account_id = UUID(payload["account_id"])
+    path_prefix = payload["path_prefix"].rstrip("/")
+    category_id = UUID(payload["category_id"])
+    values = payload.get("values", {})
+    include_folders = payload.get("include_folders", False)
+
+    query = select(Item).where(
+        Item.account_id == account_id,
+        Item.path.ilike(f"{path_prefix}/%"),
+    )
+
+    if not include_folders:
+        query = query.where(Item.item_type == "file")
+
+    result = await session.execute(query)
+    items = result.scalars().all()
+
+    stats = {"total": len(items), "created": 0, "updated": 0, "errors": 0}
+    batch_count = 0
+
+    for item in items:
+        try:
+            stmt = select(ItemMetadata).where(
+                ItemMetadata.account_id == account_id,
+                ItemMetadata.item_id == item.item_id,
+            )
+            meta_result = await session.execute(stmt)
+            existing = meta_result.scalar_one_or_none()
+
+            if existing:
+                if existing.category_id != category_id:
+                    existing.category_id = category_id
+                    existing.values = values
+                else:
+                    current = dict(existing.values)
+                    current.update(values)
+                    existing.values = current
+                stats["updated"] += 1
+            else:
+                new_meta = ItemMetadata(
+                    account_id=account_id,
+                    item_id=item.item_id,
+                    category_id=category_id,
+                    values=values,
+                )
+                session.add(new_meta)
+                stats["created"] += 1
+
+            batch_count += 1
+            if batch_count >= 50:
+                await session.commit()
+                batch_count = 0
+
+        except Exception as e:
+            logger.error(f"Failed to apply metadata to item {item.item_id}: {e}")
+            stats["errors"] += 1
+
+    if batch_count > 0:
+        await session.commit()
+
+    return stats
+
+
+@register_handler("remove_metadata_recursive")
+async def remove_metadata_recursive_handler(
+    payload: dict, session: AsyncSession
+) -> dict:
+    """Remove metadata from a folder and all items under it.
+
+    Payload
+    -------
+    {
+        "account_id": "uuid",
+        "path_prefix": "/Comics/Marvel"
+    }
+    """
+    account_id = UUID(payload["account_id"])
+    path_prefix = payload["path_prefix"].rstrip("/")
+
+    sub = select(Item.item_id).where(
+        Item.account_id == account_id,
+        or_(
+            Item.path == path_prefix,
+            Item.path.ilike(f"{path_prefix}/%"),
+        ),
+    ).scalar_subquery()
+
+    stmt = select(ItemMetadata).where(
+        ItemMetadata.account_id == account_id,
+        ItemMetadata.item_id.in_(sub),
+    )
+    result = await session.execute(stmt)
+    metadata_list = result.scalars().all()
+
+    deleted = 0
+    for meta in metadata_list:
+        await session.delete(meta)
+        deleted += 1
+
+    if deleted > 0:
+        await session.commit()
+
+    return {"deleted": deleted}
 

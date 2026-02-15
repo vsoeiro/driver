@@ -6,7 +6,11 @@ This module provides endpoints for creating and managing background jobs.
 from fastapi import APIRouter, status, UploadFile, File, Form
 
 from backend.api.dependencies import JobServiceDep
-from backend.schemas.jobs import Job, JobCreate, JobMoveRequest, JobMetadataUpdateRequest, JobSyncRequest
+from backend.schemas.jobs import (
+    Job, JobCreate, JobMoveRequest, JobMetadataUpdateRequest,
+    JobSyncRequest, JobApplyMetadataRecursiveRequest,
+    JobRemoveMetadataRecursiveRequest,
+)
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 
@@ -104,8 +108,6 @@ async def create_metadata_update_job(
     
     return await job_service.create_job(job_in)
 
-    return await job_service.create_job(job_in)
-
 
 @router.post("/sync", response_model=Job, status_code=status.HTTP_201_CREATED)
 async def create_sync_job(
@@ -121,4 +123,39 @@ async def create_sync_job(
         payload=payload,
     )
     
+    return await job_service.create_job(job_in)
+
+
+@router.post("/apply-metadata-recursive", response_model=Job, status_code=status.HTTP_201_CREATED)
+async def create_apply_metadata_recursive_job(
+    request: JobApplyMetadataRecursiveRequest,
+    job_service: JobServiceDep,
+) -> Job:
+    """Apply metadata recursively to all items under a path prefix.
+
+    Uses the local items table — no Graph API calls needed.
+    """
+    payload = request.model_dump(mode='json')
+
+    job_in = JobCreate(
+        type="apply_metadata_recursive",
+        payload=payload,
+    )
+
+    return await job_service.create_job(job_in)
+
+
+@router.post("/remove-metadata-recursive", response_model=Job, status_code=status.HTTP_201_CREATED)
+async def create_remove_metadata_recursive_job(
+    request: JobRemoveMetadataRecursiveRequest,
+    job_service: JobServiceDep,
+) -> Job:
+    """Remove metadata from all items under a path prefix."""
+    payload = request.model_dump(mode='json')
+
+    job_in = JobCreate(
+        type="remove_metadata_recursive",
+        payload=payload,
+    )
+
     return await job_service.create_job(job_in)

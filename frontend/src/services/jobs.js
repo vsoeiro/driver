@@ -52,11 +52,32 @@ export const createMetadataUpdateJob = async (accountId, rootItemId, metadata, c
     return response.data;
 };
 
+export const applyMetadataRecursive = async (accountId, pathPrefix, categoryId, values = {}, includeFolders = false) => {
+    const response = await api.post('/jobs/apply-metadata-recursive', {
+        account_id: accountId,
+        path_prefix: pathPrefix,
+        category_id: categoryId,
+        values,
+        include_folders: includeFolders,
+    });
+    return response.data;
+};
+
+export const removeMetadataRecursive = async (accountId, pathPrefix) => {
+    const response = await api.post('/jobs/remove-metadata-recursive', {
+        account_id: accountId,
+        path_prefix: pathPrefix,
+    });
+    return response.data;
+};
+
 export const jobsService = {
     createMoveJob,
     getJobs,
     uploadFileBackground,
     createMetadataUpdateJob,
+    applyMetadataRecursive,
+    removeMetadataRecursive,
 };
 
 export default jobsService;
