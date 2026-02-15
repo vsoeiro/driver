@@ -31,6 +31,7 @@ async def list_items(
     account_id: Optional[UUID] = None,
     category_id: Optional[UUID] = None,
     has_metadata: Optional[bool] = None,
+    metadata_filters: Optional[str] = Query(None, alias="metadata"),  # JSON string: {"attr_id": "value"}
     session: AsyncSession = Depends(get_session),
 ):
     """List all items with pagination and filtering."""
@@ -96,6 +97,18 @@ async def list_items(
     elif has_metadata is False:
         query = query.where(ItemMetadata.id.is_(None))
 
+    if metadata_filters:
+        try:
+            import json
+            filters = json.loads(metadata_filters)
+            for attr_id, value in filters.items():
+                if value:
+                    # Filter ItemMetadata.values JSON where key matches attr_id and value matches
+                    query = query.where(ItemMetadata.values[attr_id].as_string() == str(value))
+        except Exception as e:
+            # Silently ignore invalid JSON filters for now or log them
+            pass
+
     # Count total
     count_query = select(func.count(Item.id))
     
@@ -148,6 +161,23 @@ async def list_items(
             ItemMetadata,
             (Item.item_id == ItemMetadata.item_id) & (Item.account_id == ItemMetadata.account_id)
         ).where(ItemMetadata.id.is_(None)) if not category_id else count_query
+
+    if metadata_filters:
+        try:
+            import json
+            filters = json.loads(metadata_filters)
+            if not category_id and not has_metadata:
+                # Need to join ItemMetadata if not already joined
+                count_query = count_query.join(
+                    ItemMetadata,
+                    (Item.item_id == ItemMetadata.item_id) & (Item.account_id == ItemMetadata.account_id)
+                )
+            
+            for attr_id, value in filters.items():
+                if value:
+                    count_query = count_query.where(ItemMetadata.values[attr_id].as_string() == str(value))
+        except Exception:
+            pass
 
     total = (await session.execute(count_query)).scalar_one()
 

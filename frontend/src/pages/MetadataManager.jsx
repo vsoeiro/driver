@@ -1,29 +1,186 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { metadataService } from '../services/metadata';
 import { itemsService } from '../services/items';
+import { accountsService } from '../services/accounts';
 import {
     Plus, Trash2, ChevronRight, ChevronDown, ChevronLeft,
-    Database, Loader2, Tag, Hash, Calendar, ArrowLeft,
+    Database, Loader2, Tag, Hash, ArrowLeft,
     File, Folder, ArrowUpDown, ArrowUp, ArrowDown,
-    CheckSquare, Square, Eye
+    CheckSquare, Square, Eye, Search, Filter, User
 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import Modal from '../components/Modal';
+import BatchMetadataModal from '../components/BatchMetadataModal';
+import RemoveMetadataModal from '../components/RemoveMetadataModal';
 
 
 // -- Category Items Table --
 const CategoryItemsTable = ({ category, onBack }) => {
+    const { showToast } = useToast();
     const [items, setItems] = useState([]);
+    const [accounts, setAccounts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [page, setPage] = useState(1);
     const [total, setTotal] = useState(0);
     const [totalPages, setTotalPages] = useState(1);
     const [sort, setSort] = useState({ by: 'modified_at', order: 'desc' });
+    const [selectedItems, setSelectedItems] = useState(new Set());
+    const [lastSelectedIndex, setLastSelectedIndex] = useState(null);
+    const [batchModalOpen, setBatchModalOpen] = useState(false);
+    const [removeModalOpen, setRemoveModalOpen] = useState(false);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [appliedSearchTerm, setAppliedSearchTerm] = useState('');
+    const [searchScope, setSearchScope] = useState('both');
+    const [filters, setFilters] = useState({
+        account_id: '',
+        item_type: '',
+        attributes: {}
+    });
+
+    useEffect(() => {
+        accountsService.getAccounts().then(setAccounts).catch(console.error);
+    }, []);
+
+    const CategoryFilterBar = ({ onFilter, currentFilters }) => {
+        const [localFilters, setLocalFilters] = useState(currentFilters);
+        const [isOpen, setIsOpen] = useState(false);
+
+        useEffect(() => {
+            setLocalFilters(currentFilters);
+        }, [currentFilters]);
+
+        const handleChange = (key, value) => {
+            setLocalFilters(prev => ({ ...prev, [key]: value }));
+        };
+
+        const handleAttributeChange = (attrId, value) => {
+            setLocalFilters(prev => ({
+                ...prev,
+                attributes: {
+                    ...prev.attributes,
+                    [attrId]: value
+                }
+            }));
+        };
+
+        const applyFilters = () => {
+            onFilter(localFilters);
+            setIsOpen(false);
+        };
+
+        const clearFilters = () => {
+            const cleared = {
+                account_id: '',
+                item_type: '',
+                attributes: {}
+            };
+            setLocalFilters(cleared);
+            onFilter(cleared);
+            setIsOpen(false);
+        };
+
+        return (
+            <div className="relative">
+                <button
+                    onClick={() => setIsOpen(!isOpen)}
+                    className={`flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium ${isOpen ? 'bg-accent text-accent-foreground' : 'hover:bg-accent'}`}
+                >
+                    <Filter size={16} /> Filters
+                </button>
+
+                {isOpen && (
+                    <div className="absolute right-0 top-full mt-2 w-80 bg-popover border rounded-md shadow-lg p-4 z-50 space-y-4 max-h-[70vh] overflow-y-auto">
+                        <div>
+                            <label className="block text-sm font-medium mb-1">Account</label>
+                            <select
+                                className="w-full border rounded-md p-2 text-sm bg-background"
+                                value={localFilters.account_id || ''}
+                                onChange={(e) => handleChange('account_id', e.target.value)}
+                            >
+                                <option value="">All Accounts</option>
+                                {accounts.map(acc => (
+                                    <option key={acc.id} value={acc.id}>{acc.email || acc.display_name}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium mb-1">Type</label>
+                            <select
+                                className="w-full border rounded-md p-2 text-sm bg-background"
+                                value={localFilters.item_type || ''}
+                                onChange={(e) => handleChange('item_type', e.target.value)}
+                            >
+                                <option value="">All</option>
+                                <option value="file">Files</option>
+                                <option value="folder">Folders</option>
+                            </select>
+                        </div>
+
+                        <div className="border-t pt-3">
+                            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                                Category Attributes
+                            </h4>
+                            <div className="space-y-3">
+                                {(category.attributes || []).map(attr => (
+                                    <div key={attr.id}>
+                                        <label className="block text-sm font-medium mb-1">{attr.name}</label>
+                                        {attr.data_type === 'select' ? (
+                                            <select
+                                                className="w-full border rounded-md p-2 text-sm bg-background"
+                                                value={localFilters.attributes[attr.id] ?? ''}
+                                                onChange={(e) => handleAttributeChange(attr.id, e.target.value)}
+                                            >
+                                                <option value="">Any</option>
+                                                {attr.options?.options?.map(opt => (
+                                                    <option key={opt} value={opt}>{opt}</option>
+                                                ))}
+                                            </select>
+                                        ) : attr.data_type === 'boolean' ? (
+                                            <select
+                                                className="w-full border rounded-md p-2 text-sm bg-background"
+                                                value={localFilters.attributes[attr.id] ?? ''}
+                                                onChange={(e) => handleAttributeChange(attr.id, e.target.value)}
+                                            >
+                                                <option value="">Any</option>
+                                                <option value="true">Yes</option>
+                                                <option value="false">No</option>
+                                            </select>
+                                        ) : (
+                                            <input
+                                                type={attr.data_type === 'number' ? 'number' : attr.data_type === 'date' ? 'date' : 'text'}
+                                                className="w-full border rounded-md p-2 text-sm bg-background"
+                                                value={localFilters.attributes[attr.id] ?? ''}
+                                                onChange={(e) => handleAttributeChange(attr.id, e.target.value)}
+                                                placeholder={`Filter by ${attr.name}`}
+                                            />
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="flex justify-between pt-2">
+                            <button onClick={clearFilters} className="text-sm text-muted-foreground hover:text-foreground">Clear</button>
+                            <button onClick={applyFilters} className="bg-primary text-primary-foreground px-3 py-1.5 rounded-md text-sm font-medium">Apply</button>
+                        </div>
+                    </div>
+                )}
+            </div>
+        );
+    };
 
     const fetchItems = async (overridePage) => {
         setLoading(true);
         try {
             const effectivePage = overridePage ?? page;
+            const metadataFilters = {};
+            Object.entries(filters.attributes || {}).forEach(([attrId, value]) => {
+                if (value !== '' && value !== null && value !== undefined) {
+                    metadataFilters[attrId] = value;
+                }
+            });
+
             const data = await itemsService.listItems({
                 page: effectivePage,
                 page_size: 50,
@@ -31,6 +188,11 @@ const CategoryItemsTable = ({ category, onBack }) => {
                 sort_order: sort.order,
                 category_id: category.id,
                 has_metadata: true,
+                q: appliedSearchTerm,
+                search_fields: searchScope,
+                account_id: filters.account_id || undefined,
+                item_type: filters.item_type || undefined,
+                metadata: metadataFilters
             });
             setItems(data.items);
             setTotal(data.total);
@@ -44,7 +206,11 @@ const CategoryItemsTable = ({ category, onBack }) => {
 
     useEffect(() => {
         fetchItems();
-    }, [page, sort, category.id]);
+    }, [page, sort, category.id, appliedSearchTerm, searchScope, filters]);
+
+    useEffect(() => {
+        setSelectedItems(new Set());
+    }, [items]);
 
     const handleSort = (column) => {
         if (sort.by === column) {
@@ -89,14 +255,53 @@ const CategoryItemsTable = ({ category, onBack }) => {
 
     const attributes = category.attributes || [];
 
-    const fixedColTemplate = '40px 2fr 80px';
+    const fixedColTemplate = '40px 40px 2fr 120px 80px';
     const attrCols = attributes.map(() => 'minmax(100px, 1fr)').join(' ');
-    const gridTemplate = `${fixedColTemplate} ${attrCols} 140px`;
+    const gridTemplate = `${fixedColTemplate} ${attrCols} 140px minmax(180px,1fr)`;
+
+    const toggleSelection = (id, index, multiSelect, rangeSelect) => {
+        const newSelection = new Set(multiSelect ? selectedItems : []);
+        if (rangeSelect && lastSelectedIndex !== null) {
+            const start = Math.min(lastSelectedIndex, index);
+            const end = Math.max(lastSelectedIndex, index);
+            for (let i = start; i <= end; i++) {
+                newSelection.add(items[i].id);
+            }
+        } else {
+            if (newSelection.has(id)) newSelection.delete(id);
+            else newSelection.add(id);
+        }
+        setSelectedItems(newSelection);
+        setLastSelectedIndex(index);
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedItems.size === items.length) setSelectedItems(new Set());
+        else setSelectedItems(new Set(items.map(f => f.id)));
+    };
+
+    const getSelectedObjects = () => items.filter(i => selectedItems.has(i.id));
+
+    const getAccountName = (accountId) => {
+        const acc = accounts.find(a => a.id === accountId);
+        return acc ? (acc.email || acc.display_name) : (accountId ? String(accountId).slice(0, 8) : '-');
+    };
+
+    const applySearch = () => {
+        setPage(1);
+        setAppliedSearchTerm(searchTerm.trim());
+    };
+
+    const searchPlaceholders = {
+        name: 'Search by title...',
+        path: 'Search by path...',
+        both: 'Search by title or path...'
+    };
 
     return (
         <>
             {/* Header */}
-            <div className="p-4 border-b flex items-center justify-between bg-background sticky top-0 z-10">
+            <div className="p-4 border-b flex items-center justify-between bg-background">
                 <div className="flex items-center gap-3">
                     <button
                         onClick={onBack}
@@ -108,6 +313,77 @@ const CategoryItemsTable = ({ category, onBack }) => {
                     <div>
                         <h1 className="text-lg font-semibold text-foreground">{category.name}</h1>
                         <p className="text-xs text-muted-foreground">{total} items</p>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2">
+                    <select
+                        className="border rounded-md px-2 py-1.5 text-sm bg-background"
+                        value={searchScope}
+                        onChange={(e) => setSearchScope(e.target.value)}
+                    >
+                        <option value="both">Title + Path</option>
+                        <option value="name">Title</option>
+                        <option value="path">Path</option>
+                    </select>
+                    <div className="relative">
+                        <Search className="absolute left-2 top-1.5 text-muted-foreground" size={16} />
+                        <input
+                            type="text"
+                            placeholder={searchPlaceholders[searchScope]}
+                            className="pl-8 pr-4 py-1.5 text-sm border rounded-md w-72 focus:outline-none focus:ring-1 focus:ring-primary"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') applySearch(); }}
+                        />
+                    </div>
+                    <CategoryFilterBar
+                        onFilter={(newFilters) => {
+                            setFilters(newFilters);
+                            setPage(1);
+                        }}
+                        currentFilters={filters}
+                    />
+                </div>
+            </div>
+
+            {/* Toolbar */}
+            <div className="bg-muted/50 border-b px-4 py-2 flex items-center justify-between gap-2 text-sm h-14">
+                <div className="flex items-center gap-2">
+                    <span className="font-medium mr-2 whitespace-nowrap w-24 text-right tabular-nums">{selectedItems.size} selected</span>
+                    <div className="h-4 w-px bg-border mx-2" />
+                    <button
+                        onClick={() => setBatchModalOpen(true)}
+                        disabled={selectedItems.size === 0}
+                        className="flex items-center gap-2 px-3 py-1.5 hover:bg-background rounded-md disabled:opacity-50"
+                    >
+                        <Database size={16} /> Edit Metadata
+                    </button>
+                    <button
+                        onClick={() => setRemoveModalOpen(true)}
+                        disabled={selectedItems.size === 0}
+                        className="flex items-center gap-2 px-3 py-1.5 hover:bg-red-50 text-red-600 rounded-md disabled:opacity-50"
+                    >
+                        <Trash2 size={16} /> Remove Metadata
+                    </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">Page {page} of {totalPages}</span>
+                    <div className="flex gap-1">
+                        <button
+                            disabled={page <= 1}
+                            onClick={() => setPage(p => p - 1)}
+                            className="p-1 hover:bg-background rounded disabled:opacity-50"
+                        >
+                            <ChevronLeft size={16} />
+                        </button>
+                        <button
+                            disabled={page >= totalPages}
+                            onClick={() => setPage(p => p + 1)}
+                            className="p-1 hover:bg-background rounded disabled:opacity-50"
+                        >
+                            <ChevronRight size={16} />
+                        </button>
                     </div>
                 </div>
             </div>
@@ -129,9 +405,17 @@ const CategoryItemsTable = ({ category, onBack }) => {
                             className="gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center sticky top-0"
                             style={{ display: 'grid', gridTemplateColumns: gridTemplate }}
                         >
+                            <div className="flex justify-center">
+                                <button onClick={toggleSelectAll}>
+                                    {selectedItems.size === items.length && items.length > 0 ? <CheckSquare size={16} /> : <Square size={16} />}
+                                </button>
+                            </div>
                             <div></div>
                             <div className="cursor-pointer flex items-center gap-1 hover:text-foreground" onClick={() => handleSort('name')}>
                                 Name {renderSortIcon('name')}
+                            </div>
+                            <div className="flex items-center gap-1 hover:text-foreground">
+                                Account
                             </div>
                             <div className="cursor-pointer flex items-center gap-1 hover:text-foreground justify-end" onClick={() => handleSort('size')}>
                                 Size {renderSortIcon('size')}
@@ -144,18 +428,26 @@ const CategoryItemsTable = ({ category, onBack }) => {
                             <div className="cursor-pointer flex items-center gap-1 hover:text-foreground justify-end" onClick={() => handleSort('modified_at')}>
                                 Modified {renderSortIcon('modified_at')}
                             </div>
+                            <div className="text-right">Path</div>
                         </div>
 
                         {/* Table Rows */}
                         <div className="divide-y">
-                            {items.map((item) => {
+                            {items.map((item, index) => {
                                 const isFolder = item.item_type === 'folder';
+                                const isSelected = selectedItems.has(item.id);
                                 return (
                                     <div
                                         key={item.id}
-                                        className="gap-4 p-3 items-center hover:bg-muted/30 transition-colors"
+                                        className={`gap-4 p-3 items-center hover:bg-muted/30 transition-colors ${isSelected ? 'bg-muted/40' : ''}`}
                                         style={{ display: 'grid', gridTemplateColumns: gridTemplate }}
+                                        onClick={(e) => toggleSelection(item.id, index, !e.altKey, e.shiftKey)}
                                     >
+                                        <div className="flex justify-center">
+                                            <div className={`cursor-pointer ${isSelected ? 'text-primary' : 'text-muted-foreground/50'}`}>
+                                                {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
+                                            </div>
+                                        </div>
                                         <div className="flex justify-center text-muted-foreground">
                                             {isFolder ? (
                                                 <Folder className="text-blue-500 fill-blue-500/20" size={20} />
@@ -165,6 +457,14 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                         </div>
                                         <div className="min-w-0 truncate font-medium" title={item.name}>
                                             {item.name}
+                                        </div>
+                                        <div className="flex items-center gap-1 text-sm text-foreground">
+                                            <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                                                <User size={12} className="text-primary" />
+                                            </div>
+                                            <span className="truncate" title={getAccountName(item.account_id)}>
+                                                {getAccountName(item.account_id)}
+                                            </span>
                                         </div>
                                         <div className="text-right text-sm text-muted-foreground tabular-nums">
                                             {formatSize(item.size)}
@@ -177,6 +477,9 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                         <div className="text-right text-sm text-muted-foreground tabular-nums">
                                             {formatDate(item.modified_at)}
                                         </div>
+                                        <div className="text-right text-xs text-muted-foreground truncate" title={item.path}>
+                                            {item.path}
+                                        </div>
                                     </div>
                                 );
                             })}
@@ -185,28 +488,27 @@ const CategoryItemsTable = ({ category, onBack }) => {
                 )}
             </main>
 
-            {/* Pagination */}
-            {totalPages > 1 && (
-                <div className="bg-muted/50 border-t px-4 py-2 flex items-center justify-end gap-2 text-sm">
-                    <span className="text-muted-foreground">Page {page} of {totalPages}</span>
-                    <div className="flex gap-1">
-                        <button
-                            disabled={page <= 1}
-                            onClick={() => setPage(p => p - 1)}
-                            className="p-1 hover:bg-background rounded disabled:opacity-50"
-                        >
-                            <ChevronLeft size={16} />
-                        </button>
-                        <button
-                            disabled={page >= totalPages}
-                            onClick={() => setPage(p => p + 1)}
-                            className="p-1 hover:bg-background rounded disabled:opacity-50"
-                        >
-                            <ChevronRight size={16} />
-                        </button>
-                    </div>
-                </div>
-            )}
+            <BatchMetadataModal
+                isOpen={batchModalOpen}
+                onClose={() => setBatchModalOpen(false)}
+                selectedItems={getSelectedObjects()}
+                showToast={showToast}
+                onSuccess={() => {
+                    fetchItems();
+                    setSelectedItems(new Set());
+                }}
+            />
+
+            <RemoveMetadataModal
+                isOpen={removeModalOpen}
+                onClose={() => setRemoveModalOpen(false)}
+                selectedItems={getSelectedObjects()}
+                showToast={showToast}
+                onSuccess={() => {
+                    fetchItems();
+                    setSelectedItems(new Set());
+                }}
+            />
         </>
     );
 };

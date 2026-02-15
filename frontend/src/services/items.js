@@ -22,6 +22,8 @@ export const itemsService = {
             if (value !== undefined && value !== null && value !== '') {
                 if (Array.isArray(value)) {
                     value.forEach(v => queryParams.append(key, v));
+                } else if (typeof value === 'object') {
+                    queryParams.append(key, JSON.stringify(value));
                 } else {
                     queryParams.append(key, value);
                 }
