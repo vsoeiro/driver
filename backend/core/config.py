@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     microsoft_client_id: str = Field(alias="MS_CLIENT_ID")
     microsoft_client_secret: str = Field(alias="MS_CLIENT_SECRET")
     microsoft_tenant_id: str = Field(default="common", alias="MS_TENANT_ID")
+    google_client_id: str | None = Field(default=None, alias="GOOGLE_CLIENT_ID")
+    google_client_secret: str | None = Field(default=None, alias="GOOGLE_CLIENT_SECRET")
 
     app_secret_key: str = Field(alias="SECRET_KEY")
     token_encryption_key: str = Field(alias="ENCRYPTION_KEY")
@@ -58,6 +60,10 @@ class Settings(BaseSettings):
     database_url: str = Field(alias="DATABASE_URL")
 
     redirect_uri: str = Field(default="http://localhost:8000/api/v1/auth/microsoft/callback", alias="MS_REDIRECT_URI")
+    google_redirect_uri: str = Field(
+        default="http://localhost:8000/api/v1/auth/google/callback",
+        alias="GOOGLE_REDIRECT_URI",
+    )
 
     host: str = "0.0.0.0"
     port: int = 8000
@@ -103,6 +109,16 @@ class Settings(BaseSettings):
             "Files.Read.All",
             "Files.ReadWrite",
             "Files.ReadWrite.All",
+        ]
+
+    @property
+    def google_scopes(self) -> list[str]:
+        """Get required Google OAuth scopes."""
+        return [
+            "openid",
+            "email",
+            "profile",
+            "https://www.googleapis.com/auth/drive",
         ]
 
 

@@ -5,36 +5,14 @@ using MSAL (Microsoft Authentication Library).
 """
 
 import logging
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import msal
 
 from backend.core.config import get_settings
+from backend.services.oauth_types import TokenResult
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class TokenResult:
-    """Result from token acquisition.
-
-    Attributes
-    ----------
-    access_token : str
-        OAuth access token.
-    refresh_token : str
-        OAuth refresh token for offline access.
-    expires_at : datetime
-        Token expiration timestamp.
-    id_token_claims : dict
-        Claims from the ID token.
-    """
-
-    access_token: str
-    refresh_token: str | None
-    expires_at: datetime
-    id_token_claims: dict
 
 
 class MicrosoftAuthService:

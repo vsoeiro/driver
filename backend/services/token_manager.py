@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.core.exceptions import TokenRefreshError
 from backend.core.security import decrypt_token, encrypt_token
 from backend.db.models import LinkedAccount
+from backend.services.google_auth import get_google_auth_service
 from backend.services.microsoft_auth import get_microsoft_auth_service
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,8 @@ class TokenManager:
             Database session for token operations.
         """
         self._db = db
-        self._auth_service = get_microsoft_auth_service()
+        self._microsoft_auth_service = get_microsoft_auth_service()
+        self._google_auth_service = get_google_auth_service()
 
     async def get_valid_access_token(self, account: LinkedAccount) -> str:
         """Get a valid access token for the account, refreshing if needed.
@@ -132,7 +134,8 @@ class TokenManager:
             await self._mark_account_inactive(locked_account)
             raise TokenRefreshError("Failed to decrypt refresh token")
 
-        result = self._auth_service.refresh_access_token(refresh_token)
+        auth_service = self._get_auth_service(locked_account.provider)
+        result = auth_service.refresh_access_token(refresh_token)
         if not result:
             logger.error(
                 "Token refresh failed for account %s. Result was None. Refresh token (masked): %s...",
@@ -157,6 +160,14 @@ class TokenManager:
         logger.info("Successfully refreshed token for account %s", locked_account.id)
 
         return result.access_token
+
+    def _get_auth_service(self, provider: str):
+        provider_key = (provider or "").lower()
+        if provider_key == "microsoft":
+            return self._microsoft_auth_service
+        if provider_key == "google":
+            return self._google_auth_service
+        raise TokenRefreshError(f"Unsupported provider for token refresh: {provider}")
 
     async def _mark_account_inactive(self, account: LinkedAccount) -> None:
         """Mark an account as inactive due to authentication failure.
