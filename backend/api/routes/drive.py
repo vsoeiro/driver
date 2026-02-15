@@ -12,7 +12,7 @@ from starlette.background import BackgroundTask
 
 from backend.api.dependencies import (
     LinkedAccountDep,
-    GraphClientDep,
+    DriveClientDep,
 )
 from backend.schemas.drive import (
     BreadcrumbItem,
@@ -59,7 +59,7 @@ def _ensure_unique_name(name: str, used_names: set[str]) -> str:
 @router.get("/{account_id}/files", response_model=DriveListResponse, tags=["Files"])
 async def list_root_files(
     account: LinkedAccountDep,
-    graph_client: GraphClientDep,
+    graph_client: DriveClientDep,
 ) -> DriveListResponse:
     """List files in the root of OneDrive."""
     return await graph_client.list_root_items(account)
@@ -68,7 +68,7 @@ async def list_root_files(
 @router.get("/{account_id}/files/{item_id}", response_model=DriveListResponse, tags=["Files"])
 async def list_folder_files(
     account: LinkedAccountDep,
-    graph_client: GraphClientDep,
+    graph_client: DriveClientDep,
     item_id: str,
 ) -> DriveListResponse:
     """List files in a specific folder."""
@@ -78,7 +78,7 @@ async def list_folder_files(
 @router.get("/{account_id}/file/{item_id}", response_model=DriveItem, tags=["Files"])
 async def get_file_metadata(
     account: LinkedAccountDep,
-    graph_client: GraphClientDep,
+    graph_client: DriveClientDep,
     item_id: str,
 ) -> DriveItem:
     """Get metadata for a specific file or folder."""
@@ -88,7 +88,7 @@ async def get_file_metadata(
 @router.get("/{account_id}/download/{item_id}", tags=["Downloads"])
 async def get_download_url(
     account: LinkedAccountDep,
-    graph_client: GraphClientDep,
+    graph_client: DriveClientDep,
     item_id: str,
 ) -> dict:
     """Get a temporary download URL for a file."""
@@ -99,7 +99,7 @@ async def get_download_url(
 @router.get("/{account_id}/download/{item_id}/redirect", tags=["Downloads"])
 async def download_redirect(
     account: LinkedAccountDep,
-    graph_client: GraphClientDep,
+    graph_client: DriveClientDep,
     item_id: str,
 ) -> RedirectResponse:
     """Redirect to the file download URL."""
@@ -110,7 +110,7 @@ async def download_redirect(
 @router.post("/{account_id}/download/zip", tags=["Downloads"])
 async def download_zip(
     account: LinkedAccountDep,
-    graph_client: GraphClientDep,
+    graph_client: DriveClientDep,
     request: BulkDownloadRequest,
 ) -> FileResponse:
     """Download multiple selected files as a ZIP archive.
@@ -194,7 +194,7 @@ async def download_zip(
 @router.get("/{account_id}/search", response_model=DriveListResponse, tags=["Search & Organize"])
 async def search_files(
     account: LinkedAccountDep,
-    graph_client: GraphClientDep,
+    graph_client: DriveClientDep,
     q: str = Query(..., min_length=1, description="Search query"),
 ) -> DriveListResponse:
     """Search for files and folders in OneDrive."""
@@ -204,7 +204,7 @@ async def search_files(
 @router.get("/{account_id}/quota", response_model=DriveQuota, tags=["Usage"])
 async def get_quota(
     account: LinkedAccountDep,
-    graph_client: GraphClientDep,
+    graph_client: DriveClientDep,
 ) -> DriveQuota:
     """Get storage quota information for the OneDrive."""
     quota_data = await graph_client.get_quota(account)
@@ -214,7 +214,7 @@ async def get_quota(
 @router.get("/{account_id}/recent", response_model=DriveListResponse, tags=["Search & Organize"])
 async def get_recent_files(
     account: LinkedAccountDep,
-    graph_client: GraphClientDep,
+    graph_client: DriveClientDep,
 ) -> DriveListResponse:
     """Get recently accessed files."""
     return await graph_client.get_recent_items(account)
@@ -223,7 +223,7 @@ async def get_recent_files(
 @router.get("/{account_id}/shared", response_model=DriveListResponse, tags=["Search & Organize"])
 async def get_shared_files(
     account: LinkedAccountDep,
-    graph_client: GraphClientDep,
+    graph_client: DriveClientDep,
 ) -> DriveListResponse:
     """Get files shared with the current user."""
     return await graph_client.get_shared_with_me(account)
@@ -232,7 +232,7 @@ async def get_shared_files(
 @router.get("/{account_id}/path/{item_id}", response_model=PathResponse, tags=["Files"])
 async def get_item_path(
     account: LinkedAccountDep,
-    graph_client: GraphClientDep,
+    graph_client: DriveClientDep,
     item_id: str,
 ) -> PathResponse:
     """Get the full breadcrumb path for an item."""
@@ -244,7 +244,7 @@ async def get_item_path(
 @router.post("/{account_id}/upload", response_model=DriveItem, tags=["Uploads"])
 async def upload_file(
     account: LinkedAccountDep,
-    graph_client: GraphClientDep,
+    graph_client: DriveClientDep,
     file: UploadFile = File(...),
     folder_id: str = Query("root", description="Target folder ID"),
 ) -> DriveItem:
@@ -280,7 +280,7 @@ async def upload_file(
 @router.post("/{account_id}/upload/session", response_model=UploadSession, tags=["Uploads"])
 async def create_upload_session(
     account: LinkedAccountDep,
-    graph_client: GraphClientDep,
+    graph_client: DriveClientDep,
     request: UploadSessionRequest,
 ) -> UploadSession:
     """Create an upload session for large files (> 4MB)."""
@@ -298,7 +298,7 @@ async def create_upload_session(
 
 @router.put("/{account_id}/upload/chunk", tags=["Uploads"])
 async def upload_chunk(
-    graph_client: GraphClientDep,
+    graph_client: DriveClientDep,
     upload_url: str = Query(..., description="Upload session URL"),
     start_byte: int = Query(..., description="Start byte position"),
     end_byte: int = Query(..., description="End byte position"),
@@ -320,7 +320,7 @@ async def upload_chunk(
 @router.post("/{account_id}/folders", response_model=DriveItem, status_code=201, tags=["File Management"])
 async def create_folder(
     account: LinkedAccountDep,
-    graph_client: GraphClientDep,
+    graph_client: DriveClientDep,
     request: CreateFolderRequest,
 ) -> DriveItem:
     """Create a new folder."""
@@ -335,7 +335,7 @@ async def create_folder(
 @router.patch("/{account_id}/items/{item_id}", response_model=DriveItem, tags=["File Management"])
 async def update_item(
     account: LinkedAccountDep,
-    graph_client: GraphClientDep,
+    graph_client: DriveClientDep,
     item_id: str,
     request: UpdateItemRequest,
 ) -> DriveItem:
@@ -351,7 +351,7 @@ async def update_item(
 @router.post("/{account_id}/items/{item_id}/copy", status_code=202, tags=["File Management"])
 async def copy_item(
     account: LinkedAccountDep,
-    graph_client: GraphClientDep,
+    graph_client: DriveClientDep,
     item_id: str,
     request: CopyItemRequest,
 ) -> dict:
@@ -368,7 +368,7 @@ async def copy_item(
 @router.delete("/{account_id}/items/{item_id}", status_code=204, tags=["File Management"])
 async def delete_item(
     account: LinkedAccountDep,
-    graph_client: GraphClientDep,
+    graph_client: DriveClientDep,
     item_id: str,
 ) -> None:
     """Delete an item (move to recycle bin)."""
@@ -378,7 +378,7 @@ async def delete_item(
 @router.post("/{account_id}/items/batch-delete", status_code=204, tags=["File Management"])
 async def batch_delete_items(
     account: LinkedAccountDep,
-    graph_client: GraphClientDep,
+    graph_client: DriveClientDep,
     request: BatchDeleteRequest,
 ) -> None:
     """Delete multiple items (move to recycle bin)."""

@@ -17,7 +17,7 @@ from backend.schemas.metadata import (
     ItemMetadata as ItemMetadataSchema,
     MetadataAttribute as MetadataAttributeSchema,
 )
-from backend.services.graph_client import GraphClient
+from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
 
 router = APIRouter(prefix="/metadata", tags=["Metadata"])
@@ -206,12 +206,12 @@ async def upsert_item_metadata(
     from datetime import datetime, UTC
     
     token_manager = TokenManager(session)
-    client = GraphClient(token_manager)
+    client = build_drive_client(account, token_manager)
     
     try:
         # Get item details
         # We don't have parent_id easily here unless we fetch it.
-        # GraphClient.get_item_metadata returns DriveItem which has basic info.
+        # Provider client returns DriveItem with basic info.
         # To get parent and path, we might need more calls, but let's stick to basic info for now.
         # or use get_item_path to get full path?
         drive_item = await client.get_item_metadata(account, metadata.item_id)

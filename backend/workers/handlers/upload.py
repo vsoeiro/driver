@@ -8,7 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.exceptions import DriveOrganizerError
 from backend.db.models import LinkedAccount
-from backend.services.graph_client import GraphClient
+
+from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
 from backend.workers.dispatcher import register_handler
 
@@ -43,7 +44,7 @@ async def upload_file_handler(payload: dict, session: AsyncSession) -> dict:
             raise DriveOrganizerError("Account not found", status_code=404)
 
         token_manager = TokenManager(session)
-        client = GraphClient(token_manager)
+        client = build_drive_client(account, token_manager)
 
         # 2. Upload Logic
         file_size = os.path.getsize(temp_path)

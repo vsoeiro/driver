@@ -17,12 +17,13 @@ async def test_sync_items_handler():
     mock_session = AsyncMock()
     
     # Mock Account
-    mock_account = LinkedAccount(id=account_id, token="token")
+    mock_account = LinkedAccount(id=account_id)
     mock_session.get.return_value = mock_account
     
-    # Mock GraphClient
-    with patch("backend.workers.handlers.sync.GraphClient") as MockGraphClient:
-        mock_client = MockGraphClient.return_value
+    # Mock provider client factory
+    with patch("backend.workers.handlers.sync.build_drive_client") as mock_build_client:
+        mock_client = MagicMock()
+        mock_build_client.return_value = mock_client
         
         # Mock Root Item
         mock_root_item = MagicMock()
@@ -34,7 +35,7 @@ async def test_sync_items_handler():
         mock_root_item.modified_at = None
         mock_root_item.mime_type = None
         
-        mock_client.get_item_metadata.return_value = mock_root_item
+        mock_client.get_item_metadata = AsyncMock(return_value=mock_root_item)
         
         # Mock List Folder Items
         mock_folder_item = MagicMock()
@@ -66,10 +67,10 @@ async def test_sync_items_handler():
         # Mock empty list for recursion on file/empty folder?
         # The recursive logic calls list_folder_items only for folders.
         
-        mock_client.list_folder_items.side_effect = [
+        mock_client.list_folder_items = AsyncMock(side_effect=[
             mock_children_root,   # For root
             mock_children_folder, # For MyFolder
-        ]
+        ])
         
         # Mock upsert_item_record
         with patch("backend.workers.handlers.sync.upsert_item_record", new_callable=AsyncMock) as mock_upsert:

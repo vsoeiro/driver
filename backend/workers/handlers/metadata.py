@@ -9,7 +9,8 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.models import Item, ItemMetadata, LinkedAccount, MetadataAttribute, MetadataCategory
-from backend.services.graph_client import GraphClient
+from backend.services.providers.base import DriveProviderClient
+from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
 from backend.workers.dispatcher import register_handler
 
@@ -72,7 +73,7 @@ async def update_metadata_handler(payload: dict, session: AsyncSession) -> dict:
             logger.warning(f"Attribute {key} not found in category {category_name}, skipping.")
 
     token_manager = TokenManager(session)
-    client = GraphClient(token_manager)
+    client = build_drive_client(account, token_manager)
 
     # 3. Start recursive update
     stats = {"processed": 0, "updated": 0, "errors": 0}
@@ -129,7 +130,7 @@ async def update_metadata_handler(payload: dict, session: AsyncSession) -> dict:
 
 
 async def _update_metadata_recursive(
-    client: GraphClient,
+    client: DriveProviderClient,
     session: AsyncSession,
     account: LinkedAccount,
     folder_id: str,

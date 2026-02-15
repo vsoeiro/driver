@@ -9,6 +9,7 @@ from backend.db.models import LinkedAccount, MetadataCategory, MetadataAttribute
 class TestMetadataJob(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.session = AsyncMock()
+        self.session.add = MagicMock()
         self.account_id = uuid4()
         self.category_id = uuid4()
         self.root_item_id = "root_folder"
@@ -52,21 +53,26 @@ class TestMetadataJob(unittest.IsolatedAsyncioTestCase):
         # Determine which result to return
         # simple approach: assume happy path where everything is found except ItemMetadata (so we test creation)
         
-        # For simplicity in this mock, we can just return the category first, then attributes, then repeated None for ItemMetadata
-        self.session.execute.side_effect = [
-            self.mock_category_result,
-            self.mock_attributes_result,
-            self.mock_metadata_result_empty, # For root item (if file) or recursive items
-            self.mock_metadata_result_empty, 
-            self.mock_metadata_result_empty
-        ]
+        # Return category first, attributes second, then "empty" results for remaining selects.
+        call_idx = {"value": 0}
+
+        async def execute_side_effect(*args, **kwargs):
+            call_idx["value"] += 1
+            if call_idx["value"] == 1:
+                return self.mock_category_result
+            if call_idx["value"] == 2:
+                return self.mock_attributes_result
+            return self.mock_metadata_result_empty
+
+        self.session.execute.side_effect = execute_side_effect
 
         self.session.get.return_value = self.account
 
-    @patch("backend.workers.handlers.metadata.GraphClient")
-    async def test_recursive_update(self, MockGraphClient):
-        # Setup Graph Client Mock
-        client_instance = MockGraphClient.return_value
+    @patch("backend.workers.handlers.metadata.build_drive_client")
+    async def test_recursive_update(self, mock_build_client):
+        # Setup provider client mock
+        client_instance = MagicMock()
+        mock_build_client.return_value = client_instance
         
         # Root item is a folder
         root_metadata = MagicMock()
@@ -116,22 +122,18 @@ class TestMetadataJob(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats["processed"], 2) # 2 files processed
         self.assertEqual(stats["updated"], 2)
         
-        # Verify calls to session.add (ItemMetadata creation)
-        # Should be called twice (for file_1 and file_2)
-        # Note: session.add is not async
-        self.assertEqual(self.session.add.call_count, 2)
-        
-        # Verify args passed to session.add
-        calls = self.session.add.call_args_list
-        
-        # Check first call
-        arg1 = calls[0][0][0]
+        # Verify ItemMetadata records added (other add calls may be Item upserts).
+        calls = [c[0][0] for c in self.session.add.call_args_list if isinstance(c[0][0], ItemMetadata)]
+        self.assertEqual(len(calls), 2)
+
+        # Check first metadata add
+        arg1 = calls[0]
         self.assertIsInstance(arg1, ItemMetadata)
         self.assertEqual(arg1.item_id, "file_1")
         self.assertEqual(arg1.values, {str(self.attr_id): "New Series"})
         
-        # Check second call (might be subfile)
-        arg2 = calls[1][0][0]
+        # Check second metadata add (might be subfile)
+        arg2 = calls[1]
         self.assertIsInstance(arg2, ItemMetadata)
         self.assertEqual(arg2.item_id, "file_2")
         self.assertEqual(arg2.values, {str(self.attr_id): "New Series"})

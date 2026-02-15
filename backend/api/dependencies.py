@@ -13,8 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.models import LinkedAccount
 from backend.db.session import async_session_maker, get_db
-from backend.services.graph_client import GraphClient
 from backend.services.jobs import JobService
+from backend.services.providers.base import DriveProviderClient
+from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
 
 DBSession = Annotated[AsyncSession, Depends(get_db)]
@@ -94,23 +95,26 @@ def get_token_manager(db: DBSession) -> TokenManager:
 TokenManagerDep = Annotated[TokenManager, Depends(get_token_manager)]
 
 
-def get_graph_client(token_manager: TokenManagerDep) -> GraphClient:
-    """Get a Graph API client instance.
+def get_drive_client(account: LinkedAccountDep, db: DBSession) -> DriveProviderClient:
+    """Get a provider-specific drive client instance.
 
     Parameters
     ----------
-    token_manager : TokenManager
-        Token manager for authentication.
+    account : LinkedAccount
+        The linked account whose provider defines the client implementation.
+    db : AsyncSession
+        Database session for token lifecycle operations.
 
     Returns
     -------
-    GraphClient
-        Graph API client instance.
+    DriveProviderClient
+        Provider-specific drive client instance.
     """
-    return GraphClient(token_manager)
+    token_manager = TokenManager(db)
+    return build_drive_client(account, token_manager)
 
 
-GraphClientDep = Annotated[GraphClient, Depends(get_graph_client)]
+DriveClientDep = Annotated[DriveProviderClient, Depends(get_drive_client)]
 
 
 def get_job_service(db: DBSession) -> JobService:

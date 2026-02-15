@@ -7,7 +7,8 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.models import LinkedAccount
-from backend.services.graph_client import GraphClient
+from backend.services.providers.base import DriveProviderClient
+from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
 from backend.workers.dispatcher import register_handler
 from backend.workers.handlers.metadata import upsert_item_record
@@ -55,7 +56,7 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
         raise ValueError(f"Account {account_id} not found")
 
     token_manager = TokenManager(session)
-    client = GraphClient(token_manager)
+    client = build_drive_client(account, token_manager)
 
     # Use context for stats and batch commit
     ctx = SyncContext(session, batch_size=50)
@@ -91,7 +92,7 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
 
 
 async def _sync_folder_recursive(
-    client: GraphClient,
+    client: DriveProviderClient,
     ctx: SyncContext,
     account: LinkedAccount,
     folder_id: str,
