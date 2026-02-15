@@ -62,11 +62,18 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     debug: bool = False
+    enable_daily_sync_scheduler: bool = Field(default=True, alias="ENABLE_DAILY_SYNC_SCHEDULER")
+    daily_sync_hour: int = Field(default=0, alias="DAILY_SYNC_HOUR")
+    daily_sync_minute: int = Field(default=0, alias="DAILY_SYNC_MINUTE")
 
     @model_validator(mode="after")
     def assemble_db_connection(self) -> "Settings":
         if self.database_url.startswith("sqlite:///") and "aiosqlite" not in self.database_url:
             self.database_url = self.database_url.replace("sqlite:///", "sqlite+aiosqlite:///")
+        if not 0 <= self.daily_sync_hour <= 23:
+            raise ValueError("DAILY_SYNC_HOUR must be between 0 and 23")
+        if not 0 <= self.daily_sync_minute <= 59:
+            raise ValueError("DAILY_SYNC_MINUTE must be between 0 and 59")
         return self
 
     @property
