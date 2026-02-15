@@ -37,39 +37,6 @@ class SyncContext:
                 logger.error(f"Failed to commit batch: {e}")
                 raise
 
-from backend.db.models import LinkedAccount
-from backend.services.graph_client import GraphClient
-from backend.services.token_manager import TokenManager
-from backend.workers.dispatcher import register_handler
-from backend.workers.handlers.metadata import upsert_item_record
-
-logger = logging.getLogger(__name__)
-
-
-
-class SyncContext:
-    """Context for sync operation to handle batch commits."""
-    def __init__(self, session: AsyncSession, batch_size: int = 50):
-        self.session = session
-        self.batch_size = batch_size
-        self.stats = {"processed": 0, "created": 0, "updated": 0, "errors": 0}
-        self.pending_commits = 0
-
-    async def increment_and_commit(self):
-        """Increment processed count and commit if batch size reached."""
-        self.stats["processed"] += 1
-        self.pending_commits += 1
-        if self.pending_commits >= self.batch_size:
-            try:
-                await self.session.commit()
-                self.pending_commits = 0
-            except Exception as e:
-                logger.error(f"Failed to commit batch: {e}")
-                # Try to rollback? Or just continue?
-                # If commit fails, the session might be in failed state.
-                # Ideally we should raise and fail the job.
-                raise
-
 
 @register_handler("sync_items")
 async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
