@@ -9,12 +9,12 @@ export const getAccounts = async () => {
 };
 
 /**
- * Initiate Microsoft OAuth flow
+ * Initiate OAuth flow for a provider
  */
-export const linkAccount = () => {
+export const linkAccount = (provider = 'microsoft') => {
     // Redirect to backend auth endpoint
     // Adjust URL based on environment if needed, but relative path should work with proxy
-    window.location.href = 'http://localhost:8000/api/v1/auth/microsoft/login';
+    window.location.href = `http://localhost:8000/api/v1/auth/${provider}/login`;
 };
 
 /**

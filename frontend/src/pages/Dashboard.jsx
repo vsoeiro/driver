@@ -22,13 +22,22 @@ export default function Dashboard() {
         <div className="container mx-auto p-6 max-w-5xl">
             <header className="flex justify-between items-center mb-8">
                 <h1 className="text-3xl font-bold tracking-tight">Connected Accounts</h1>
-                <button
-                    onClick={linkAccount}
-                    className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md hover:bg-primary/90 transition-colors"
-                >
-                    <Plus size={20} />
-                    Link Account
-                </button>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => linkAccount('microsoft')}
+                        className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md hover:bg-primary/90 transition-colors"
+                    >
+                        <Plus size={20} />
+                        Link Microsoft
+                    </button>
+                    <button
+                        onClick={() => linkAccount('google')}
+                        className="flex items-center gap-2 bg-accent text-accent-foreground px-4 py-2 rounded-md hover:bg-accent/90 transition-colors"
+                    >
+                        <Plus size={20} />
+                        Link Google
+                    </button>
+                </div>
             </header>
 
             {loading ? (
@@ -39,13 +48,21 @@ export default function Dashboard() {
                 <div className="text-center p-12 border border-dashed rounded-lg bg-muted/50">
                     <HardDrive className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
                     <h3 className="text-lg font-medium">No accounts linked</h3>
-                    <p className="text-muted-foreground mb-6">Connect a OneDrive account to get started.</p>
-                    <button
-                        onClick={linkAccount}
-                        className="bg-primary text-primary-foreground px-4 py-2 rounded-md hover:bg-primary/90"
-                    >
-                        Link Account
-                    </button>
+                    <p className="text-muted-foreground mb-6">Connect a cloud account to get started.</p>
+                    <div className="flex justify-center gap-2">
+                        <button
+                            onClick={() => linkAccount('microsoft')}
+                            className="bg-primary text-primary-foreground px-4 py-2 rounded-md hover:bg-primary/90"
+                        >
+                            Link Microsoft
+                        </button>
+                        <button
+                            onClick={() => linkAccount('google')}
+                            className="bg-accent text-accent-foreground px-4 py-2 rounded-md hover:bg-accent/90"
+                        >
+                            Link Google
+                        </button>
+                    </div>
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

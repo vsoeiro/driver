@@ -67,7 +67,6 @@ class LinkedAccount(Base):
     provider: Mapped[str] = mapped_column(String(50), nullable=False, default="microsoft")
     provider_account_id: Mapped[str] = mapped_column(
         String(255),
-        unique=True,
         nullable=False,
     )
     email: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -88,6 +87,14 @@ class LinkedAccount(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "provider_account_id",
+            name="uq_linked_accounts_provider_provider_account_id",
+        ),
     )
 
 
@@ -264,7 +271,6 @@ class Item(Base):
     __table_args__ = (
         UniqueConstraint('account_id', 'item_id', name='uq_items_account_item'),
     )
-
 
 
 

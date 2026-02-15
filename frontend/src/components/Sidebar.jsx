@@ -3,7 +3,7 @@ import { NavLink, useParams } from 'react-router-dom';
 import { accountsService } from '../services/accounts';
 import { driveService } from '../services/drive';
 
-const { getAccounts } = accountsService;
+const { getAccounts, linkAccount } = accountsService;
 const { getQuota } = driveService;
 import { HardDrive, Plus, Cloud, Loader2, User, Activity, Database, FileText } from 'lucide-react';
 
@@ -28,8 +28,8 @@ export default function Sidebar() {
         }).catch(console.error);
     }, []);
 
-    const handleLinkAccount = () => {
-        window.location.href = 'http://localhost:8000/api/v1/auth/microsoft/login';
+    const handleLinkAccount = (provider) => {
+        linkAccount(provider);
     };
 
     const formatBytes = (bytes) => {
@@ -102,13 +102,22 @@ export default function Sidebar() {
                     </div>
                 )}
 
-                <button
-                    onClick={handleLinkAccount}
-                    className="flex w-full items-center gap-3 bg-primary/10 text-primary hover:bg-primary/20 px-3 py-2 rounded-md text-sm font-medium transition-colors"
-                >
-                    <Plus size={18} className="shrink-0" />
-                    <span>Link Account</span>
-                </button>
+                <div className="space-y-2">
+                    <button
+                        onClick={() => handleLinkAccount('microsoft')}
+                        className="flex w-full items-center gap-3 bg-primary/10 text-primary hover:bg-primary/20 px-3 py-2 rounded-md text-sm font-medium transition-colors"
+                    >
+                        <Plus size={18} className="shrink-0" />
+                        <span>Link Microsoft</span>
+                    </button>
+                    <button
+                        onClick={() => handleLinkAccount('google')}
+                        className="flex w-full items-center gap-3 bg-accent text-accent-foreground hover:bg-accent/80 px-3 py-2 rounded-md text-sm font-medium transition-colors"
+                    >
+                        <Plus size={18} className="shrink-0" />
+                        <span>Link Google</span>
+                    </button>
+                </div>
             </div>
 
             <div className="px-4 pb-4">
