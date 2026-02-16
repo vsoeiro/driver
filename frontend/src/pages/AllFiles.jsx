@@ -12,7 +12,7 @@ import {
 import Modal from '../components/Modal';
 import ProviderIcon from '../components/ProviderIcon';
 
-const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'pdf', 'epub']);
+const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'cbw', 'pdf', 'epub', 'cbr', 'rar', 'cb7', '7z', 'cbt', 'tar']);
 
 // Filter Component
 const FilterBar = ({ onFilter, filters, accounts, categories }) => {
@@ -661,7 +661,7 @@ export default function AllFiles() {
     const executeMapComics = async () => {
         if (selectedItems.size === 0) return;
         if (!canMapComics) {
-            showToast('Map Comics is only available for folders or files with extensions: CBZ, ZIP, PDF, EPUB.', 'error');
+            showToast('Map Comics is only available for folders or files with supported extensions (CBZ, ZIP, CBW, PDF, EPUB, CBR, RAR, CB7, 7Z, CBT, TAR).', 'error');
             return;
         }
         setActionLoading(true);

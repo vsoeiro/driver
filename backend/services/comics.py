@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import posixpath
+import tarfile
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
@@ -25,7 +26,19 @@ from backend.services.providers.base import DriveProviderClient
 from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
 
-SUPPORTED_COMIC_EXTENSIONS = {"cbz", "zip", "pdf", "epub"}
+SUPPORTED_COMIC_EXTENSIONS = {
+    "cbz",
+    "zip",
+    "cbw",
+    "pdf",
+    "epub",
+    "cbr",
+    "rar",
+    "cb7",
+    "7z",
+    "cbt",
+    "tar",
+}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
 
 
@@ -46,8 +59,14 @@ def file_extension(filename: str | None) -> str:
 
 def extract_comic_asset(local_path: str, extension: str) -> ComicExtractionResult:
     ext = extension.lower()
-    if ext in {"zip", "cbz"}:
+    if ext in {"zip", "cbz", "cbw"}:
         return _extract_from_zip(local_path, fmt=ext)
+    if ext in {"rar", "cbr"}:
+        return _extract_from_rar(local_path, fmt=ext)
+    if ext in {"7z", "cb7"}:
+        return _extract_from_7z(local_path, fmt=ext)
+    if ext in {"tar", "cbt"}:
+        return _extract_from_tar(local_path, fmt=ext)
     if ext == "epub":
         return _extract_from_epub(local_path)
     if ext == "pdf":
@@ -62,21 +81,101 @@ def _extract_from_zip(local_path: str, *, fmt: str) -> ComicExtractionResult:
             for name in archive.namelist()
             if not name.endswith("/") and Path(name).suffix.lower() in IMAGE_EXTENSIONS
         ]
-        image_names.sort(key=lambda value: value.lower())
-
-        if not image_names:
-            raise ValueError("Archive has no image pages")
-
-        cover_name = image_names[0]
+        cover_name, page_count = _select_cover_and_count(image_names)
         cover_bytes = archive.read(cover_name)
         cover_extension = Path(cover_name).suffix.lower().lstrip(".") or "jpg"
         return ComicExtractionResult(
             format=fmt,
-            page_count=len(image_names),
+            page_count=page_count,
             cover_bytes=cover_bytes,
             cover_extension=cover_extension,
             details={"cover_member": cover_name},
         )
+
+
+def _extract_from_tar(local_path: str, *, fmt: str) -> ComicExtractionResult:
+    with tarfile.open(local_path, "r:*") as archive:
+        image_members = [
+            member
+            for member in archive.getmembers()
+            if member.isfile() and Path(member.name).suffix.lower() in IMAGE_EXTENSIONS
+        ]
+        image_names = [member.name for member in image_members]
+        cover_name, page_count = _select_cover_and_count(image_names)
+        cover_member = next(member for member in image_members if member.name == cover_name)
+        extracted = archive.extractfile(cover_member)
+        if extracted is None:
+            raise ValueError("Failed to extract TAR cover image")
+        cover_bytes = extracted.read()
+        cover_extension = Path(cover_name).suffix.lower().lstrip(".") or "jpg"
+        return ComicExtractionResult(
+            format=fmt,
+            page_count=page_count,
+            cover_bytes=cover_bytes,
+            cover_extension=cover_extension,
+            details={"cover_member": cover_name},
+        )
+
+
+def _extract_from_rar(local_path: str, *, fmt: str) -> ComicExtractionResult:
+    try:
+        import rarfile  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise ValueError("RAR support requires optional dependency 'rarfile'") from exc
+
+    with rarfile.RarFile(local_path, "r") as archive:
+        image_names = [
+            info.filename
+            for info in archive.infolist()
+            if not info.is_dir() and Path(info.filename).suffix.lower() in IMAGE_EXTENSIONS
+        ]
+        cover_name, page_count = _select_cover_and_count(image_names)
+        cover_bytes = archive.read(cover_name)
+        cover_extension = Path(cover_name).suffix.lower().lstrip(".") or "jpg"
+        return ComicExtractionResult(
+            format=fmt,
+            page_count=page_count,
+            cover_bytes=cover_bytes,
+            cover_extension=cover_extension,
+            details={"cover_member": cover_name},
+        )
+
+
+def _extract_from_7z(local_path: str, *, fmt: str) -> ComicExtractionResult:
+    try:
+        import py7zr  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise ValueError("7Z support requires optional dependency 'py7zr'") from exc
+
+    with py7zr.SevenZipFile(local_path, "r") as archive:
+        image_names = [
+            name
+            for name in archive.getnames()
+            if Path(name).suffix.lower() in IMAGE_EXTENSIONS
+        ]
+        cover_name, page_count = _select_cover_and_count(image_names)
+        with tempfile.TemporaryDirectory(prefix="comic_7z_cover_") as temp_dir:
+            archive.extract(path=temp_dir, targets=[cover_name])
+            cover_path = Path(temp_dir) / Path(cover_name)
+            if not cover_path.exists():
+                raise ValueError("Failed to extract 7Z cover image")
+            cover_bytes = cover_path.read_bytes()
+        cover_extension = Path(cover_name).suffix.lower().lstrip(".") or "jpg"
+        return ComicExtractionResult(
+            format=fmt,
+            page_count=page_count,
+            cover_bytes=cover_bytes,
+            cover_extension=cover_extension,
+            details={"cover_member": cover_name},
+        )
+
+
+def _select_cover_and_count(image_names: list[str]) -> tuple[str, int]:
+    ordered = [name for name in image_names if name]
+    ordered.sort(key=lambda value: value.lower())
+    if not ordered:
+        raise ValueError("Archive has no image pages")
+    return ordered[0], len(ordered)
 
 
 def _extract_from_epub(local_path: str) -> ComicExtractionResult:

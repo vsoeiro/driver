@@ -17,7 +17,7 @@ import MetadataModal from '../components/MetadataModal';
 import BatchMetadataModal from '../components/BatchMetadataModal';
 import { useToast } from '../contexts/ToastContext';
 
-const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'pdf', 'epub']);
+const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'cbw', 'pdf', 'epub', 'cbr', 'rar', 'cb7', '7z', 'cbt', 'tar']);
 
 export default function FileBrowser() {
     const { accountId, folderId } = useParams();
