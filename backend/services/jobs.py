@@ -15,6 +15,10 @@ from backend.schemas.jobs import JobCreate
 logger = logging.getLogger(__name__)
 
 
+class JobCancelledError(Exception):
+    """Raised when a running job is cancelled by user request."""
+
+
 class JobService:
     """Service to manage background jobs."""
 
@@ -159,6 +163,71 @@ class JobService:
         logger.info(f"Job {job_id} completed successfully")
         return job
 
+    async def request_cancel(self, job_id: UUID) -> Job:
+        """Request cancellation for a job.
+
+        - PENDING/RETRY_SCHEDULED/RUNNING/CANCEL_REQUESTED: cancelled immediately
+        - finalized jobs: raises ValueError
+        """
+        job = await self.session.get(Job, job_id)
+        if not job:
+            raise ValueError(f"Job {job_id} not found")
+        if job.status == "CANCELLED":
+            logger.info("Job %s failure ignored because it was cancelled", job_id)
+            return job
+
+        finalized_statuses = {"COMPLETED", "FAILED", "DEAD_LETTER", "CANCELLED"}
+        if job.status in finalized_statuses:
+            raise ValueError("Finalized jobs cannot be cancelled")
+
+        now = datetime.now(UTC)
+        job.status = "CANCELLED"
+        job.completed_at = now
+        job.result = {
+            **(job.result or {}),
+            "cancelled": True,
+            "message": "Cancelled by user",
+        }
+
+        self.session.add(job)
+        await self.session.commit()
+        await self.session.refresh(job)
+        return job
+
+    async def is_cancel_requested(self, job_id: UUID) -> bool:
+        """Check whether a running job has a cancellation request."""
+        status = await self.session.scalar(select(Job.status).where(Job.id == job_id))
+        return status in {"CANCEL_REQUESTED", "CANCELLED"}
+
+    async def cancel_running_job(self, job_id: UUID, message: str = "Cancelled by user") -> Job:
+        """Finalize a running/cancel-requested job as cancelled."""
+        now = datetime.now(UTC)
+        current_status = await self.session.scalar(select(Job.status).where(Job.id == job_id))
+        if current_status == "CANCELLED":
+            existing = await self.session.get(Job, job_id)
+            if existing is None:
+                raise ValueError(f"Job {job_id} not found")
+            logger.info("Job %s completion ignored because it was cancelled", job_id)
+            return existing
+
+        stmt = (
+            update(Job)
+            .where(Job.id == job_id)
+            .values(
+                status="CANCELLED",
+                completed_at=now,
+                result={
+                    "cancelled": True,
+                    "message": message,
+                },
+            )
+            .returning(Job)
+        )
+        result = await self.session.execute(stmt)
+        job = result.scalar_one()
+        await self.session.commit()
+        return job
+
     async def fail_job(self, job_id: UUID, error: str) -> Job:
         """Mark a job as retry scheduled or dead-letter/failed.
 
@@ -223,6 +292,9 @@ class JobService:
         metrics: dict | None = None,
     ) -> Job:
         """Persist job progress and metrics."""
+        if await self.is_cancel_requested(job_id):
+            raise JobCancelledError("Job cancellation was requested")
+
         current = max(0, current)
         progress_percent = 0
         if total is not None and total > 0:
@@ -262,6 +334,17 @@ class JobService:
         Sequence[Job]
             List of jobs.
         """
+        await self.session.execute(
+            update(Job)
+            .where(Job.status == "CANCEL_REQUESTED")
+            .values(
+                status="CANCELLED",
+                completed_at=datetime.now(UTC),
+                result={"cancelled": True, "message": "Cancelled by user"},
+            )
+        )
+        await self.session.commit()
+
         stmt = (
             select(Job)
             .order_by(Job.created_at.desc())
@@ -277,7 +360,7 @@ class JobService:
         if not job:
             raise ValueError(f"Job {job_id} not found")
 
-        finalized_statuses = {"COMPLETED", "FAILED", "DEAD_LETTER"}
+        finalized_statuses = {"COMPLETED", "FAILED", "DEAD_LETTER", "CANCELLED"}
         if job.status not in finalized_statuses:
             raise ValueError("Only finalized jobs can be deleted")
 

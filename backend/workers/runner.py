@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
-from backend.services.jobs import JobService
+from backend.services.jobs import JobCancelledError, JobService
 from backend.workers.dispatcher import get_handler
 
 logger = logging.getLogger(__name__)
@@ -74,8 +74,16 @@ class BackgroundWorker:
                 payload = dict(job.payload or {})
                 payload["_job_id"] = str(job.id)
 
+                if await job_service.is_cancel_requested(job.id):
+                    await job_service.cancel_running_job(job.id, "Cancelled before execution started")
+                    return
+
                 # Execute the handler with payload/session.
                 result = await handler(payload, session)
+
+                if await job_service.is_cancel_requested(job.id):
+                    await job_service.cancel_running_job(job.id, "Cancelled during execution")
+                    return
 
                 elapsed = (datetime.now(UTC) - started).total_seconds()
                 if isinstance(result, dict):
@@ -84,6 +92,13 @@ class BackgroundWorker:
                     result["metrics"] = metrics
 
                 await job_service.complete_job(job.id, result)
+            except JobCancelledError:
+                logger.info("Job %s cancellation acknowledged during progress update", job.id)
+                try:
+                    await session.rollback()
+                except Exception:
+                    pass
+                await job_service.cancel_running_job(job.id, "Cancelled during execution")
             except Exception as e:
                 error_msg = str(e)
                 stack_trace = traceback.format_exc()

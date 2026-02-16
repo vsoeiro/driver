@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, CheckCircle, XCircle, Clock, PlayCircle, Eye, AlertTriangle, Undo2, Trash2 } from 'lucide-react';
-import { createMetadataUndoJob, deleteJob, getJobs } from '../services/jobs';
+import { RefreshCw, CheckCircle, XCircle, Clock, PlayCircle, Eye, AlertTriangle, Undo2, Trash2, Square } from 'lucide-react';
+import { cancelJob, createMetadataUndoJob, deleteJob, getJobs } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
 import Modal from '../components/Modal';
 
@@ -10,6 +10,7 @@ export default function Jobs() {
     const [selectedJob, setSelectedJob] = useState(null);
     const [undoingBatchId, setUndoingBatchId] = useState(null);
     const [deletingJobId, setDeletingJobId] = useState(null);
+    const [cancellingJobId, setCancellingJobId] = useState(null);
     const { showToast } = useToast();
 
     const fetchJobs = useCallback(async () => {
@@ -41,9 +42,19 @@ export default function Jobs() {
                 return <AlertTriangle className="w-4 h-4" />;
             case 'RUNNING':
                 return <PlayCircle className="w-4 h-4" />;
+            case 'CANCEL_REQUESTED':
+                return <Square className="w-4 h-4" />;
+            case 'CANCELLED':
+                return <Square className="w-4 h-4" />;
             default:
                 return <Clock className="w-4 h-4" />;
         }
+    };
+
+    const getStatusLabel = (status) => {
+        if (status === 'CANCEL_REQUESTED') return 'cancelling';
+        if (status === 'CANCELLED') return 'cancelled';
+        return status.toLowerCase();
     };
 
     const triggerUndo = async (batchId) => {
@@ -71,6 +82,30 @@ export default function Jobs() {
             showToast('Failed to remove job', 'error');
         } finally {
             setDeletingJobId(null);
+        }
+    };
+
+    const requestCancel = async (jobId) => {
+        setCancellingJobId(jobId);
+        try {
+            await cancelJob(jobId);
+            setJobs((prev) =>
+                prev.map((job) =>
+                    job.id === jobId
+                        ? {
+                            ...job,
+                            status: 'CANCELLED',
+                        }
+                        : job
+                )
+            );
+            showToast('Cancellation requested', 'success');
+            fetchJobs();
+        } catch (error) {
+            const message = error?.response?.data?.detail || 'Failed to cancel job';
+            showToast(message, 'error');
+        } finally {
+            setCancellingJobId(null);
         }
     };
 
@@ -125,7 +160,8 @@ export default function Jobs() {
                                     : '-';
                                 const progressPercent = job.progress_percent ?? 0;
                                 const canUndo = job.status === 'COMPLETED' && job.result?.batch_id;
-                                const canDelete = ['COMPLETED', 'FAILED', 'DEAD_LETTER'].includes(job.status);
+                                const canDelete = ['COMPLETED', 'FAILED', 'DEAD_LETTER', 'CANCELLED'].includes(job.status);
+                                const canCancel = ['PENDING', 'RUNNING', 'RETRY_SCHEDULED', 'CANCEL_REQUESTED'].includes(job.status);
 
                                 return (
                                     <div
@@ -135,10 +171,12 @@ export default function Jobs() {
                                         <div className="pointer-events-auto">
                                             <div className={`inline-flex items-center gap-2 font-medium ${job.status === 'COMPLETED' ? 'text-green-600' :
                                                 job.status === 'FAILED' || job.status === 'DEAD_LETTER' ? 'text-red-500' :
-                                                    job.status === 'RUNNING' ? 'text-blue-500' : 'text-zinc-500'
+                                                    job.status === 'RUNNING' ? 'text-blue-500' :
+                                                        job.status === 'CANCEL_REQUESTED' ? 'text-amber-600' :
+                                                            job.status === 'CANCELLED' ? 'text-zinc-500' : 'text-zinc-500'
                                                 }`}>
                                                 {getStatusIcon(job.status)}
-                                                <span className="capitalize">{job.status.toLowerCase()}</span>
+                                                <span className="capitalize">{getStatusLabel(job.status)}</span>
                                             </div>
                                         </div>
                                         <div className="font-medium text-foreground truncate pointer-events-auto capitalize">
@@ -158,8 +196,7 @@ export default function Jobs() {
                                                 />
                                             </div>
                                             <div className="text-xs text-muted-foreground mt-1">
-                                                {job.progress_current ?? 0}
-                                                {job.progress_total ? ` / ${job.progress_total}` : ''} ({progressPercent}%)
+                                                {progressPercent}%
                                             </div>
                                         </div>
                                         <div className="text-right pointer-events-auto">
@@ -172,6 +209,16 @@ export default function Jobs() {
                                                         title="Undo Batch"
                                                     >
                                                         <Undo2 className="w-4 h-4" />
+                                                    </button>
+                                                )}
+                                                {canCancel && (
+                                                    <button
+                                                        onClick={() => requestCancel(job.id)}
+                                                        disabled={cancellingJobId === job.id || job.status === 'CANCEL_REQUESTED'}
+                                                        className="p-1 text-muted-foreground hover:text-amber-600 hover:bg-amber-50 rounded-md transition-colors disabled:opacity-50"
+                                                        title={job.status === 'CANCEL_REQUESTED' ? 'Cancellation requested' : 'Cancel job'}
+                                                    >
+                                                        <Square className="w-4 h-4" />
                                                     </button>
                                                 )}
                                                 <button
@@ -214,10 +261,12 @@ export default function Jobs() {
                                 <span className="text-sm text-muted-foreground block mb-1">Status</span>
                                 <div className={`flex items-center gap-2 font-medium ${selectedJob.status === 'COMPLETED' ? 'text-green-600' :
                                     selectedJob.status === 'FAILED' || selectedJob.status === 'DEAD_LETTER' ? 'text-red-500' :
-                                        selectedJob.status === 'RUNNING' ? 'text-blue-500' : 'text-zinc-500'
+                                        selectedJob.status === 'RUNNING' ? 'text-blue-500' :
+                                            selectedJob.status === 'CANCEL_REQUESTED' ? 'text-amber-600' :
+                                                selectedJob.status === 'CANCELLED' ? 'text-zinc-500' : 'text-zinc-500'
                                     }`}>
                                     {getStatusIcon(selectedJob.status)}
-                                    <span className="capitalize">{selectedJob.status.toLowerCase()}</span>
+                                    <span className="capitalize">{getStatusLabel(selectedJob.status)}</span>
                                 </div>
                             </div>
                             <div className="text-right">
@@ -236,8 +285,7 @@ export default function Jobs() {
                                 />
                             </div>
                             <div className="text-xs text-muted-foreground">
-                                {selectedJob.progress_current ?? 0}
-                                {selectedJob.progress_total ? ` / ${selectedJob.progress_total}` : ''} ({selectedJob.progress_percent ?? 0}%)
+                                {selectedJob.progress_percent ?? 0}%
                             </div>
                             <div className="text-xs text-muted-foreground">
                                 Retry: {selectedJob.retry_count}/{selectedJob.max_retries}

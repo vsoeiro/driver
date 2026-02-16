@@ -26,6 +26,11 @@ export const deleteJob = async (jobId) => {
     await api.delete(`/jobs/${jobId}`);
 };
 
+export const cancelJob = async (jobId) => {
+    const response = await api.post(`/jobs/${jobId}/cancel`);
+    return response.data;
+};
+
 export const uploadFileBackground = async (accountId, folderId, file, onProgress) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -92,6 +97,7 @@ export const createApplyRuleJob = async (ruleId) => {
 export const jobsService = {
     createMoveJob,
     getJobs,
+    cancelJob,
     deleteJob,
     uploadFileBackground,
     createMetadataUpdateJob,

@@ -204,3 +204,18 @@ async def delete_job(
         if "not found" in message.lower():
             raise HTTPException(status_code=404, detail=message) from exc
         raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post("/{job_id}/cancel", response_model=Job, status_code=status.HTTP_200_OK)
+async def cancel_job(
+    job_id: UUID,
+    job_service: JobServiceDep,
+) -> Job:
+    """Request cancellation for a job."""
+    try:
+        return await job_service.request_cancel(job_id)
+    except ValueError as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
