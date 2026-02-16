@@ -78,6 +78,8 @@ async def suggest_category_schema(
             await session.flush()
             created_attribute_ids.append(db_attr.id)
 
+        await session.commit()
+
     return AISuggestCategoryResponse(
         suggestion=suggestion,
         created_category_id=created_category_id,
@@ -103,5 +105,8 @@ async def extract_metadata(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"AI provider error: {exc}") from exc
+
+    if payload.apply_to_item:
+        await session.commit()
 
     return AIExtractMetadataResponse(**result)

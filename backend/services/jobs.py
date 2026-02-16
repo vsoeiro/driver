@@ -1,5 +1,6 @@
 """Job service for managing background jobs."""
 
+import asyncio
 import logging
 import math
 from datetime import datetime, UTC, timedelta
@@ -7,6 +8,7 @@ from typing import Sequence
 from uuid import UUID
 
 from sqlalchemy import and_, or_, select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.models import Job
@@ -334,25 +336,23 @@ class JobService:
         Sequence[Job]
             List of jobs.
         """
-        await self.session.execute(
-            update(Job)
-            .where(Job.status == "CANCEL_REQUESTED")
-            .values(
-                status="CANCELLED",
-                completed_at=datetime.now(UTC),
-                result={"cancelled": True, "message": "Cancelled by user"},
-            )
-        )
-        await self.session.commit()
-
         stmt = (
             select(Job)
             .order_by(Job.created_at.desc())
             .limit(limit)
             .offset(offset)
         )
-        result = await self.session.execute(stmt)
-        return result.scalars().all()
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                result = await self.session.execute(stmt)
+                return result.scalars().all()
+            except OperationalError as exc:
+                if "database is locked" not in str(exc).lower() or attempt == max_attempts:
+                    raise
+                await asyncio.sleep(0.15 * attempt)
+
+        return []
 
     async def delete_job(self, job_id: UUID) -> None:
         """Delete a finalized job from history."""

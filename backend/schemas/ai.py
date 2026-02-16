@@ -19,9 +19,31 @@ class AISuggestAttribute(BaseModel):
     def normalize_options(cls, value: Any) -> dict | None:
         if value is None:
             return None
+
+        def normalize_option_values(raw_options: Any) -> list[str]:
+            if not isinstance(raw_options, list):
+                return []
+
+            normalized: list[str] = []
+            for option in raw_options:
+                if isinstance(option, str):
+                    candidate = option.strip()
+                elif isinstance(option, dict):
+                    candidate = str(option.get("value") or option.get("label") or "").strip()
+                else:
+                    candidate = str(option).strip()
+
+                if candidate and candidate not in normalized:
+                    normalized.append(candidate)
+            return normalized
+
         if isinstance(value, list):
-            return {"options": value}
+            normalized = normalize_option_values(value)
+            return {"options": normalized} if normalized else None
         if isinstance(value, dict):
+            if "options" in value:
+                normalized = normalize_option_values(value.get("options"))
+                return {"options": normalized} if normalized else None
             return value
         return None
 

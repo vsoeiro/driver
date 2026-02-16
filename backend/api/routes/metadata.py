@@ -21,6 +21,7 @@ from backend.db.models import (
 from backend.schemas.metadata import (
     ItemMetadataCreate,
     MetadataAttributeCreate,
+    MetadataAttributeUpdate,
     MetadataCategoryCreate,
     MetadataCategory as MetadataCategorySchema,
     ItemMetadata as ItemMetadataSchema,
@@ -174,6 +175,29 @@ async def delete_attribute(attribute_id: UUID, session: AsyncSession = Depends(g
 
     await session.delete(attribute)
     await session.commit()
+
+
+@router.patch("/attributes/{attribute_id}", response_model=MetadataAttributeSchema)
+async def update_attribute(
+    attribute_id: UUID,
+    attribute: MetadataAttributeUpdate,
+    session: AsyncSession = Depends(get_session),
+):
+    """Update a metadata attribute."""
+    db_attribute = await session.get(MetadataAttribute, attribute_id)
+    if not db_attribute:
+        raise HTTPException(status_code=404, detail="Attribute not found")
+
+    updates = attribute.model_dump(exclude_unset=True)
+    if "data_type" in updates and updates["data_type"] != "select":
+        updates["options"] = None
+
+    for key, value in updates.items():
+        setattr(db_attribute, key, value)
+
+    await session.commit()
+    await session.refresh(db_attribute)
+    return db_attribute
 
 
 # --- Item Metadata ---

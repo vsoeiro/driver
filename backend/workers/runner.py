@@ -60,29 +60,30 @@ class BackgroundWorker:
                 # No jobs found, sleep
                 await asyncio.sleep(self.poll_interval)
                 return
+            job_id = job.id
 
             handler = get_handler(job.type)
             if not handler:
                 logger.error(f"No handler found for job type: {job.type}")
-                await job_service.fail_job(job.id, f"No handler registered for type: {job.type}")
+                await job_service.fail_job(job_id, f"No handler registered for type: {job.type}")
                 return
 
             try:
-                logger.info(f"Executing job {job.id} ({job.type})")
+                logger.info(f"Executing job {job_id} ({job.type})")
 
                 started = datetime.now(UTC)
                 payload = dict(job.payload or {})
-                payload["_job_id"] = str(job.id)
+                payload["_job_id"] = str(job_id)
 
-                if await job_service.is_cancel_requested(job.id):
-                    await job_service.cancel_running_job(job.id, "Cancelled before execution started")
+                if await job_service.is_cancel_requested(job_id):
+                    await job_service.cancel_running_job(job_id, "Cancelled before execution started")
                     return
 
                 # Execute the handler with payload/session.
                 result = await handler(payload, session)
 
-                if await job_service.is_cancel_requested(job.id):
-                    await job_service.cancel_running_job(job.id, "Cancelled during execution")
+                if await job_service.is_cancel_requested(job_id):
+                    await job_service.cancel_running_job(job_id, "Cancelled during execution")
                     return
 
                 elapsed = (datetime.now(UTC) - started).total_seconds()
@@ -91,20 +92,23 @@ class BackgroundWorker:
                     metrics["duration_seconds"] = round(elapsed, 3)
                     result["metrics"] = metrics
 
-                await job_service.complete_job(job.id, result)
+                await job_service.complete_job(job_id, result)
             except JobCancelledError:
-                logger.info("Job %s cancellation acknowledged during progress update", job.id)
+                logger.info("Job %s cancellation acknowledged during progress update", job_id)
                 try:
                     await session.rollback()
                 except Exception:
                     pass
-                await job_service.cancel_running_job(job.id, "Cancelled during execution")
+                await job_service.cancel_running_job(job_id, "Cancelled during execution")
             except Exception as e:
                 error_msg = str(e)
                 stack_trace = traceback.format_exc()
-                logger.error(f"Job {job.id} failed: {error_msg}")
+                logger.error(f"Job {job_id} failed: {error_msg}")
                 try:
                     await session.rollback()
                 except Exception:
                     pass
-                await job_service.fail_job(job.id, f"{error_msg}\n{stack_trace}")
+                try:
+                    await job_service.fail_job(job_id, f"{error_msg}\n{stack_trace}")
+                except Exception:
+                    logger.error("Failed to mark job %s as failed", job_id, exc_info=True)

@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass, field
 
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.jobs import JobService
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -51,11 +55,19 @@ class JobProgressReporter:
         bind = self.session.bind
         if bind is None:
             return
-        async with AsyncSession(bind=bind, expire_on_commit=False) as progress_session:
-            service = JobService(progress_session)
-            await service.update_job_progress(
-                self.job_id,
-                current=self.current,
-                total=self.total,
-                metrics=self.metrics,
-            )
+        try:
+            async with AsyncSession(bind=bind, expire_on_commit=False) as progress_session:
+                service = JobService(progress_session)
+                await service.update_job_progress(
+                    self.job_id,
+                    current=self.current,
+                    total=self.total,
+                    metrics=self.metrics,
+                )
+        except OperationalError as exc:
+            # SQLite can lock during long-running writer transactions.
+            # Progress is best-effort; we should not fail the job on this.
+            if "database is locked" in str(exc).lower():
+                logger.warning("Skipping progress update for job %s due to sqlite lock", self.job_id)
+                return
+            raise

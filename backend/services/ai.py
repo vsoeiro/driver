@@ -163,16 +163,12 @@ class AIService:
         )
         result = await OllamaClient(config).generate_json(prompt=prompt, system=system)
         values = result.get("values", {})
-        if not isinstance(values, dict):
-            raise ValueError("AI response 'values' must be an object")
-
-        allowed_attr_ids = {str(attr.id) for attr in category.attributes}
-        filtered_values = {k: v for k, v in values.items() if str(k) in allowed_attr_ids}
+        filtered_values = self._normalize_extracted_values(values, category.attributes)
 
         output: dict[str, Any] = {
             "values": filtered_values,
-            "confidence": result.get("confidence"),
-            "notes": result.get("notes"),
+            "confidence": self._normalize_confidence(result.get("confidence")),
+            "notes": self._normalize_notes(result.get("notes")),
             "applied": False,
             "metadata_id": None,
         }
@@ -191,6 +187,115 @@ class AIService:
             output["metadata_id"] = change.get("metadata_id")
 
         return output
+
+    @staticmethod
+    def _normalize_extracted_values(values: Any, attributes: list[Any]) -> dict[str, Any]:
+        if isinstance(values, list):
+            mapped: dict[str, Any] = {}
+            for entry in values:
+                if not isinstance(entry, dict):
+                    continue
+                key = (
+                    entry.get("attribute_id")
+                    or entry.get("id")
+                    or entry.get("attribute")
+                    or entry.get("name")
+                )
+                if key is None:
+                    continue
+                raw_value = entry.get("value")
+                if isinstance(raw_value, dict) and "value" in raw_value:
+                    raw_value = raw_value["value"]
+                mapped[str(key)] = raw_value
+            values = mapped
+
+        if not isinstance(values, dict):
+            raise ValueError("AI response 'values' must be an object")
+
+        allowed_attr_ids = {str(attr.id): attr for attr in attributes}
+        name_to_id = {
+            str(attr.name).strip().lower(): str(attr.id)
+            for attr in attributes
+            if getattr(attr, "name", None)
+        }
+
+        filtered_values: dict[str, Any] = {}
+        for raw_key, raw_value in values.items():
+            key = str(raw_key).strip()
+            attr_id = key if key in allowed_attr_ids else name_to_id.get(key.lower())
+            if not attr_id:
+                continue
+
+            value = raw_value
+            if isinstance(value, dict) and "value" in value:
+                value = value["value"]
+            filtered_values[attr_id] = value
+
+        return filtered_values
+
+    @staticmethod
+    def _normalize_confidence(confidence: Any) -> float | None:
+        if confidence is None:
+            return None
+
+        if isinstance(confidence, bool):
+            return 1.0 if confidence else 0.0
+
+        if isinstance(confidence, (int, float)):
+            return float(confidence)
+
+        if isinstance(confidence, str):
+            try:
+                return float(confidence.strip())
+            except ValueError:
+                return None
+
+        if isinstance(confidence, dict):
+            numeric_values: list[float] = []
+            for value in confidence.values():
+                if isinstance(value, bool):
+                    numeric_values.append(1.0 if value else 0.0)
+                elif isinstance(value, (int, float)):
+                    numeric_values.append(float(value))
+                elif isinstance(value, str):
+                    try:
+                        numeric_values.append(float(value.strip()))
+                    except ValueError:
+                        continue
+            if not numeric_values:
+                return None
+            return sum(numeric_values) / len(numeric_values)
+
+        if isinstance(confidence, list):
+            numeric_values: list[float] = []
+            for value in confidence:
+                if isinstance(value, bool):
+                    numeric_values.append(1.0 if value else 0.0)
+                elif isinstance(value, (int, float)):
+                    numeric_values.append(float(value))
+                elif isinstance(value, str):
+                    try:
+                        numeric_values.append(float(value.strip()))
+                    except ValueError:
+                        continue
+            if not numeric_values:
+                return None
+            return sum(numeric_values) / len(numeric_values)
+
+        return None
+
+    @staticmethod
+    def _normalize_notes(notes: Any) -> str | None:
+        if notes is None:
+            return None
+        if isinstance(notes, str):
+            return notes
+        if isinstance(notes, (int, float, bool)):
+            return str(notes)
+        try:
+            return json.dumps(notes, ensure_ascii=True)
+        except TypeError:
+            return str(notes)
 
     async def _get_category_with_attributes(self, category_id: UUID) -> MetadataCategory:
         stmt = (

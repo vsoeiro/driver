@@ -83,16 +83,15 @@ async def test_delete_job_allows_cancelled_status():
 
 
 @pytest.mark.asyncio
-async def test_get_jobs_reconciles_cancel_requested_to_cancelled():
+async def test_get_jobs_reads_without_reconciliation_write():
     session = AsyncMock()
     result = MagicMock()
     result.scalars.return_value.all.return_value = []
-    session.execute.side_effect = [None, result]
+    session.execute.return_value = result
 
     service = JobService(session)
     jobs = await service.get_jobs()
 
     assert jobs == []
-    assert session.execute.await_count == 2
-    # One commit for reconciliation before select.
-    session.commit.assert_awaited_once()
+    session.execute.assert_awaited_once()
+    session.commit.assert_not_awaited()
