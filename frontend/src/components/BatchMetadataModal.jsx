@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { metadataService } from '../services/metadata';
 import { itemsService } from '../services/items';
 import { jobsService } from '../services/jobs';
@@ -15,19 +15,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
 
     const hasFolders = selectedItems.some(i => i.item_type === 'folder');
 
-    useEffect(() => {
-        if (isOpen) {
-            loadCategories();
-            setApplyRecursive(false);
-        }
-    }, [isOpen]);
-
-    useEffect(() => {
-        if (!isOpen || categories.length === 0 || selectedItems.length === 0) return;
-        prefillFromSelection();
-    }, [isOpen, categories, selectedItems]);
-
-    const prefillFromSelection = () => {
+    const prefillFromSelection = useCallback(() => {
         const itemsWithMeta = selectedItems.filter(i => i.metadata);
 
         if (itemsWithMeta.length === 0) {
@@ -65,9 +53,14 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
             }
         }
         setAttributeValues(commonValues);
-    };
+    }, [selectedItems]);
 
-    const loadCategories = async () => {
+    useEffect(() => {
+        if (!isOpen || categories.length === 0 || selectedItems.length === 0) return;
+        prefillFromSelection();
+    }, [isOpen, categories, selectedItems, prefillFromSelection]);
+
+    const loadCategories = useCallback(async () => {
         setLoading(true);
         try {
             const data = await metadataService.listCategories();
@@ -77,7 +70,14 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        if (isOpen) {
+            loadCategories();
+            setApplyRecursive(false);
+        }
+    }, [isOpen, loadCategories]);
 
     const handleSave = async () => {
         if (!selectedCategory) return;

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { PlayCircle, Trash2, Plus, Eye, Loader2 } from 'lucide-react';
 import { metadataService } from '../services/metadata';
 import { accountsService } from '../services/accounts';
@@ -42,7 +42,7 @@ export default function RulesManager() {
         return values;
     }, [targetValues]);
 
-    const loadData = async () => {
+    const loadData = useCallback(async () => {
         setLoading(true);
         try {
             const [rulesData, categoriesData, accountsData] = await Promise.all([
@@ -58,11 +58,11 @@ export default function RulesManager() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [showToast]);
 
     useEffect(() => {
         loadData();
-    }, []);
+    }, [loadData]);
 
     useEffect(() => {
         setTargetValues({});

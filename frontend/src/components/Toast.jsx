@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { X, Check, AlertCircle, Info, AlertTriangle } from 'lucide-react';
 
 export default function Toast({ id, type, message, onClose, duration = 5000 }) {

@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Fragment, useState, useEffect, useMemo, useCallback } from 'react';
 import { itemsService } from '../services/items';
 import { metadataService } from '../services/metadata';
 import { accountsService } from '../services/accounts';
@@ -160,19 +159,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
 
     const hasFolders = selectedItems.some(i => i.item_type === 'folder');
 
-    useEffect(() => {
-        if (isOpen) {
-            loadCategories();
-            setApplyRecursive(false);
-        }
-    }, [isOpen]);
-
-    useEffect(() => {
-        if (!isOpen || categories.length === 0 || selectedItems.length === 0) return;
-        prefillFromSelection();
-    }, [isOpen, categories, selectedItems]);
-
-    const prefillFromSelection = () => {
+    const prefillFromSelection = useCallback(() => {
         const itemsWithMeta = selectedItems.filter(i => i.metadata);
 
         if (itemsWithMeta.length === 0) {
@@ -210,9 +197,9 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
             }
         }
         setAttributeValues(commonValues);
-    };
+    }, [selectedItems]);
 
-    const loadCategories = async () => {
+    const loadCategories = useCallback(async () => {
         setLoading(true);
         try {
             const data = await metadataService.listCategories();
@@ -222,7 +209,19 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        if (isOpen) {
+            loadCategories();
+            setApplyRecursive(false);
+        }
+    }, [isOpen, loadCategories]);
+
+    useEffect(() => {
+        if (!isOpen || categories.length === 0 || selectedItems.length === 0) return;
+        prefillFromSelection();
+    }, [isOpen, categories, selectedItems, prefillFromSelection]);
 
     const handleSave = async () => {
         if (!selectedCategory) return;
@@ -496,7 +495,6 @@ export default function AllFiles() {
     const [page, setPage] = useState(1);
     const [totalPages, setTotalPages] = useState(1);
 
-    const [searchParams, setSearchParams] = useSearchParams();
     const [filters, setFilters] = useState({
         extensions: [],
         size_min: '',
@@ -525,7 +523,7 @@ export default function AllFiles() {
         metadataService.listCategories().then(setMetaCategories).catch(console.error);
     }, []);
 
-    const fetchItems = async (overridePage) => {
+    const fetchItems = useCallback(async (overridePage) => {
         setLoading(true);
         try {
             const effectivePage = overridePage ?? page;
@@ -550,11 +548,11 @@ export default function AllFiles() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [page, searchTerm, sort.by, sort.order, searchScope, pathPrefix, filters]);
 
     useEffect(() => {
         fetchItems();
-    }, [page, sort, filters, pathPrefix]);
+    }, [fetchItems]);
 
     // Selection Logic (copied from FileBrowser)
     const toggleSelection = (id, index, multiSelect, rangeSelect) => {
@@ -661,7 +659,7 @@ export default function AllFiles() {
                         All Files
                     </button>
                     {breadcrumbSegments.map((seg) => (
-                        <React.Fragment key={seg.path}>
+                        <Fragment key={seg.path}>
                             <ChevronRight size={16} className="text-muted-foreground" />
                             <button
                                 onClick={() => { setSearchTerm(''); setPathPrefix(seg.path); setPage(1); }}
@@ -669,7 +667,7 @@ export default function AllFiles() {
                             >
                                 {seg.label}
                             </button>
-                        </React.Fragment>
+                        </Fragment>
                     ))}
                     <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-0.5 rounded-full ml-2">{total} items</span>
                 </div>

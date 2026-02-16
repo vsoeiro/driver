@@ -1,4 +1,3 @@
-import React from 'react'
 import { Routes, Route } from 'react-router-dom'
 import FileBrowser from './pages/FileBrowser'
 import AllFiles from './pages/AllFiles'

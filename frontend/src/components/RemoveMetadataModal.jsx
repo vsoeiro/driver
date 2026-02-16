@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { metadataService } from '../services/metadata';
 import { jobsService } from '../services/jobs';
 import { File, Loader2 } from 'lucide-react';

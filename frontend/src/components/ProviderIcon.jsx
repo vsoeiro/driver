@@ -1,5 +1,3 @@
-import React from 'react';
-
 export default function ProviderIcon({ provider, className = 'w-4 h-4' }) {
     const normalized = (provider || '').toLowerCase();
 

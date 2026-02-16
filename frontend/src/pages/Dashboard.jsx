@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { accountsService } from '../services/accounts';
 const { getAccounts, linkAccount } = accountsService;
 import { Link } from 'react-router-dom';

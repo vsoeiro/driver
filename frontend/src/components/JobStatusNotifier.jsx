@@ -1,7 +1,6 @@
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useToast } from '../contexts/ToastContext';
 import { getJobs } from '../services/jobs';
-import { CheckCircle, XCircle } from 'lucide-react';
 
 export default function JobStatusNotifier() {
     const { showToast } = useToast();

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, CheckCircle, XCircle, Clock, PlayCircle, Eye, AlertTriangle, Undo2, Trash2 } from 'lucide-react';
 import { createMetadataUndoJob, deleteJob, getJobs } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
@@ -12,7 +12,7 @@ export default function Jobs() {
     const [deletingJobId, setDeletingJobId] = useState(null);
     const { showToast } = useToast();
 
-    const fetchJobs = async () => {
+    const fetchJobs = useCallback(async () => {
         setLoading(true);
         try {
             const data = await getJobs();
@@ -23,13 +23,13 @@ export default function Jobs() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [showToast]);
 
     useEffect(() => {
         fetchJobs();
         const interval = setInterval(fetchJobs, 5000); // Poll every 5 seconds
         return () => clearInterval(interval);
-    }, []);
+    }, [fetchJobs]);
 
     const getStatusIcon = (status) => {
         switch (status) {
@@ -53,7 +53,7 @@ export default function Jobs() {
             await createMetadataUndoJob(batchId);
             showToast(`Undo job created for batch ${batchId.slice(0, 8)}...`, 'success');
             fetchJobs();
-        } catch (error) {
+        } catch {
             showToast('Failed to create undo job', 'error');
         } finally {
             setUndoingBatchId(null);
@@ -67,7 +67,7 @@ export default function Jobs() {
             setJobs((prev) => prev.filter((job) => job.id !== jobId));
             if (selectedJob?.id === jobId) setSelectedJob(null);
             showToast('Job removed from history', 'success');
-        } catch (error) {
+        } catch {
             showToast('Failed to remove job', 'error');
         } finally {
             setDeletingJobId(null);
@@ -76,7 +76,6 @@ export default function Jobs() {
 
     const formatDate = (dateString) => {
         if (!dateString) return '-';
-        const date = new Date(dateString);
         return new Date(dateString).toLocaleDateString('en-GB', {
             day: '2-digit',
             month: '2-digit',

@@ -5,10 +5,10 @@ import { useUpload } from '../hooks/useUpload';
 import { driveService } from '../services/drive';
 import { metadataService } from '../services/metadata';
 const { getDownloadUrl } = driveService;
-const { deleteItemMetadata, batchDeleteMetadata } = metadataService;
+const { batchDeleteMetadata } = metadataService;
 import {
-    Folder, File, MoreVertical, Download, Trash2,
-    UploadCloud, FolderPlus, ArrowLeft, Loader2, Home, ArrowRightLeft, Database, XCircle, CheckSquare, Square, Check, Search, X, ChevronDown
+    Folder, File, Download, Trash2,
+    UploadCloud, FolderPlus, Loader2, ArrowRightLeft, Database, XCircle, CheckSquare, Square, Search, X, ChevronDown
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import MoveModal from '../components/MoveModal';
@@ -16,12 +16,12 @@ import MetadataModal from '../components/MetadataModal';
 
 export default function FileBrowser() {
     const { accountId, folderId } = useParams();
-    const { files, breadcrumbs, loading, error, refresh, handleDelete, handleBatchDelete, handleCreateFolder, searchQuery, setSearchQuery } = useDrive(accountId, folderId);
+    const { files, breadcrumbs, loading, error, refresh, handleBatchDelete, handleCreateFolder, searchQuery, setSearchQuery } = useDrive(accountId, folderId);
     const { upload, uploading, progress: uploadProgress } = useUpload(accountId, folderId, refresh);
 
     // Listen for job completion to auto-refresh
     React.useEffect(() => {
-        const handleJobCompleted = (event) => {
+        const handleJobCompleted = () => {
             console.log('Job completed, refreshing file list...');
             refresh();
         };

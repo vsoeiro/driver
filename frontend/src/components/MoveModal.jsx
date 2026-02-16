@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, Fragment } from 'react';
 import { X, FolderInput, Check, ChevronRight, Folder } from 'lucide-react';
 import { getAccounts } from '../services/accounts';
 import { getFiles, getFolderFiles } from '../services/drive';
@@ -16,33 +16,22 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
 
     const { showToast } = useToast();
 
-    useEffect(() => {
-        if (isOpen) {
-            loadAccounts();
-        }
-    }, [isOpen]);
-
-    useEffect(() => {
-        if (selectedAccount) {
-            loadFolders(selectedAccount, currentFolderId);
-        }
-    }, [selectedAccount, currentFolderId]);
-
-    const loadAccounts = async () => {
+    const loadAccounts = useCallback(async () => {
         try {
             const data = await getAccounts();
             setAccounts(data);
             // Default to current account if available, or first account
-            if (!selectedAccount && data.length > 0) {
-                setSelectedAccount(sourceAccountId || data[0].id);
-            }
+            setSelectedAccount((current) => {
+                if (current || data.length === 0) return current;
+                return sourceAccountId || data[0].id;
+            });
         } catch (error) {
             console.error('Failed to load accounts:', error);
             showToast('Failed to load accounts', 'error');
         }
-    };
+    }, [sourceAccountId, showToast]);
 
-    const loadFolders = async (accountId, folderId) => {
+    const loadFolders = useCallback(async (accountId, folderId) => {
         setLoading(true);
         console.log(`Loading folders for account ${accountId}, folder ${folderId}`);
         try {
@@ -60,7 +49,19 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
         } finally {
             setLoading(false);
         }
-    };
+    }, [showToast]);
+
+    useEffect(() => {
+        if (isOpen) {
+            loadAccounts();
+        }
+    }, [isOpen, loadAccounts]);
+
+    useEffect(() => {
+        if (selectedAccount) {
+            loadFolders(selectedAccount, currentFolderId);
+        }
+    }, [selectedAccount, currentFolderId, loadFolders]);
 
     const handleMove = async () => {
         if (!selectedAccount || !item) return;
@@ -158,11 +159,11 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
                         <div className="border rounded-md overflow-hidden">
                             <div className="bg-muted/50 px-3 py-2 text-xs text-muted-foreground border-b flex items-center gap-1 overflow-x-auto">
                                 <span onClick={() => { setCurrentPath([]); setCurrentFolderId('root'); }} className="cursor-pointer hover:text-foreground">Root</span>
-                                {currentPath.map((p, i) => (
-                                    <React.Fragment key={p.id}>
+                                {currentPath.map((p) => (
+                                    <Fragment key={p.id}>
                                         <ChevronRight className="w-3 h-3" />
                                         <span className="whitespace-nowrap">{p.name}</span>
-                                    </React.Fragment>
+                                    </Fragment>
                                 ))}
                             </div>
 

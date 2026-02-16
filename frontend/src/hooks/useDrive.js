@@ -53,31 +53,19 @@ export function useDrive(accountId, folderId) {
     }, [fetchFiles]);
 
     const handleDelete = async (itemId) => {
-        try {
-            await deleteItem(accountId, itemId);
-            fetchFiles();
-        } catch (e) {
-            throw e;
-        }
+        await deleteItem(accountId, itemId);
+        fetchFiles();
     };
 
     const handleBatchDelete = async (itemIds) => {
-        try {
-            // If single item, fallback to simple delete? No, batch endpoint handles list.
-            await batchDeleteItems(accountId, Array.from(itemIds));
-            fetchFiles();
-        } catch (e) {
-            throw e;
-        }
+        // If single item, fallback to simple delete? No, batch endpoint handles list.
+        await batchDeleteItems(accountId, Array.from(itemIds));
+        fetchFiles();
     };
 
     const handleCreateFolder = async (name) => {
-        try {
-            await createFolder(accountId, folderId || 'root', name);
-            fetchFiles();
-        } catch (e) {
-            throw e;
-        }
+        await createFolder(accountId, folderId || 'root', name);
+        fetchFiles();
     };
 
     return { files, breadcrumbs, loading, error, refresh: fetchFiles, handleDelete, handleBatchDelete, handleCreateFolder, searchQuery, setSearchQuery };

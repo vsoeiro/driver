@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { metadataService } from '../services/metadata';
 import { itemsService } from '../services/items';
 import { accountsService } from '../services/accounts';
@@ -170,7 +170,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
         );
     };
 
-    const fetchItems = async (overridePage) => {
+    const fetchItems = useCallback(async (overridePage) => {
         setLoading(true);
         try {
             const effectivePage = overridePage ?? page;
@@ -202,11 +202,11 @@ const CategoryItemsTable = ({ category, onBack }) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [page, sort.by, sort.order, category.id, appliedSearchTerm, searchScope, filters]);
 
     useEffect(() => {
         fetchItems();
-    }, [page, sort, category.id, appliedSearchTerm, searchScope, filters]);
+    }, [fetchItems]);
 
     useEffect(() => {
         setSelectedItems(new Set());
@@ -536,11 +536,7 @@ export default function MetadataManager() {
     const [deleteCategoryTarget, setDeleteCategoryTarget] = useState(null);
     const [deletingCategory, setDeletingCategory] = useState(false);
 
-    useEffect(() => {
-        loadCategories();
-    }, []);
-
-    const loadCategories = async () => {
+    const loadCategories = useCallback(async () => {
         try {
             setLoading(true);
             const data = await metadataService.getCategoryStats();
@@ -551,7 +547,11 @@ export default function MetadataManager() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [showToast]);
+
+    useEffect(() => {
+        loadCategories();
+    }, [loadCategories]);
 
     const handleCreateCategory = async (e) => {
         e.preventDefault();

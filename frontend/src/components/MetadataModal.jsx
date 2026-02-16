@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Modal from './Modal';
 import { metadataService } from '../services/metadata';
 import { jobsService } from '../services/jobs';
@@ -16,19 +16,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
     const [selectedCategoryId, setSelectedCategoryId] = useState('');
     const [formValues, setFormValues] = useState({});
 
-    useEffect(() => {
-        console.log("MetadataModal item:", item);
-        if (isOpen && item) {
-            loadData();
-        } else {
-            // Reset state
-            setSelectedCategoryId('');
-            setFormValues({});
-            setHistory([]);
-        }
-    }, [isOpen, item]);
-
-    const loadData = async () => {
+    const loadData = useCallback(async () => {
         try {
             setLoading(true);
             const [cats, meta] = await Promise.all([
@@ -49,7 +37,19 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
         } finally {
             setLoading(false);
         }
-    };
+    }, [accountId, item, showToast]);
+
+    useEffect(() => {
+        console.log("MetadataModal item:", item);
+        if (isOpen && item) {
+            loadData();
+        } else {
+            // Reset state
+            setSelectedCategoryId('');
+            setFormValues({});
+            setHistory([]);
+        }
+    }, [isOpen, item, loadData]);
 
     const handleSave = async (e) => {
         e.preventDefault();

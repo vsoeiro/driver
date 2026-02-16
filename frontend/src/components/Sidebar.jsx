@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { NavLink, useParams } from 'react-router-dom';
 import { accountsService } from '../services/accounts';
 import { driveService } from '../services/drive';
