@@ -122,3 +122,10 @@ class JobApplyRuleRequest(BaseModel):
 
     rule_id: UUID
 
+
+class JobExtractComicAssetsRequest(BaseModel):
+    """Schema for comic asset extraction request."""
+
+    account_id: UUID
+    item_ids: list[str]
+

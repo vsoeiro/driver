@@ -197,6 +197,10 @@ class MetadataCategory(Base):
     )
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    managed_by_plugin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    plugin_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    is_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
@@ -228,6 +232,10 @@ class MetadataAttribute(Base):
     data_type: Mapped[str] = mapped_column(String(20), nullable=False)  # text, number, date, boolean, select
     options: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # For 'select' type: {"options": ["A", "B"]}
     is_required: Mapped[bool] = mapped_column(default=False)
+    managed_by_plugin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    plugin_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    plugin_field_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    is_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     category: Mapped["MetadataCategory"] = relationship(back_populates="attributes")
 
@@ -263,6 +271,31 @@ class ItemMetadata(Base):
 
     __table_args__ = (
         UniqueConstraint("account_id", "item_id", name="uq_item_metadata_account_item"),
+    )
+
+
+class MetadataPlugin(Base):
+    """Plugin registry for managed metadata schemas."""
+
+    __tablename__ = "metadata_plugins"
+
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    category_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("metadata_categories.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
 
@@ -394,6 +427,4 @@ class Item(Base):
     __table_args__ = (
         UniqueConstraint('account_id', 'item_id', name='uq_items_account_item'),
     )
-
-
 

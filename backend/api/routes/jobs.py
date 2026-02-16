@@ -14,6 +14,7 @@ from backend.schemas.jobs import (
     JobRemoveMetadataRecursiveRequest,
     JobUndoMetadataBatchRequest,
     JobApplyRuleRequest,
+    JobExtractComicAssetsRequest,
 )
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
@@ -187,6 +188,20 @@ async def create_apply_rule_job(
     job_in = JobCreate(
         type="apply_metadata_rule",
         payload=request.model_dump(mode="json"),
+    )
+    return await job_service.create_job(job_in)
+
+
+@router.post("/comics/extract", response_model=Job, status_code=status.HTTP_201_CREATED)
+async def create_extract_comic_assets_job(
+    request: JobExtractComicAssetsRequest,
+    job_service: JobServiceDep,
+) -> Job:
+    """Create a job that extracts comic cover/page metadata for selected items/folders."""
+    payload = request.model_dump(mode="json")
+    job_in = JobCreate(
+        type="extract_comic_assets",
+        payload=payload,
     )
     return await job_service.create_job(job_in)
 

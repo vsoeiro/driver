@@ -4,6 +4,7 @@ import uuid
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import OperationalError
 from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -27,12 +28,14 @@ from backend.schemas.metadata import (
     ItemMetadata as ItemMetadataSchema,
     ItemMetadataHistory as ItemMetadataHistorySchema,
     MetadataAttribute as MetadataAttributeSchema,
+    MetadataPlugin as MetadataPluginSchema,
     MetadataRule as MetadataRuleSchema,
     MetadataRuleCreate,
     MetadataRulePreviewRequest,
     MetadataRulePreviewResponse,
     MetadataRuleUpdate,
 )
+from backend.services.metadata_plugins import COMIC_PLUGIN_KEY, MetadataPluginService
 from backend.services.metadata_versioning import apply_metadata_change, normalize_metadata_values, undo_metadata_batch
 from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
@@ -44,7 +47,12 @@ router = APIRouter(prefix="/metadata", tags=["Metadata"])
 @router.get("/categories", response_model=list[MetadataCategorySchema])
 async def list_categories(session: AsyncSession = Depends(get_session)):
     """List all metadata categories with their attributes."""
-    query = select(MetadataCategory).options(selectinload(MetadataCategory.attributes))
+    query = (
+        select(MetadataCategory)
+        .where(MetadataCategory.is_active.is_(True))
+        .options(selectinload(MetadataCategory.attributes))
+        .order_by(MetadataCategory.name.asc())
+    )
     result = await session.execute(query)
     return result.scalars().all()
 
@@ -73,6 +81,7 @@ async def get_category_stats(session: AsyncSession = Depends(get_session)):
             func.coalesce(count_subq.c.item_count, 0).label("item_count"),
         )
         .outerjoin(count_subq, MetadataCategory.id == count_subq.c.category_id)
+        .where(MetadataCategory.is_active.is_(True))
         .options(selectinload(MetadataCategory.attributes))
         .order_by(MetadataCategory.name)
     )
@@ -85,6 +94,10 @@ async def get_category_stats(session: AsyncSession = Depends(get_session)):
             "id": str(cat.id),
             "name": cat.name,
             "description": cat.description,
+            "is_active": cat.is_active,
+            "managed_by_plugin": cat.managed_by_plugin,
+            "plugin_key": cat.plugin_key,
+            "is_locked": cat.is_locked,
             "created_at": cat.created_at,
             "attributes": [
                 {
@@ -94,6 +107,10 @@ async def get_category_stats(session: AsyncSession = Depends(get_session)):
                     "data_type": attr.data_type,
                     "options": attr.options,
                     "is_required": attr.is_required,
+                    "managed_by_plugin": attr.managed_by_plugin,
+                    "plugin_key": attr.plugin_key,
+                    "plugin_field_key": attr.plugin_field_key,
+                    "is_locked": attr.is_locked,
                 }
                 for attr in cat.attributes
             ],
@@ -137,6 +154,11 @@ async def delete_category(category_id: UUID, session: AsyncSession = Depends(get
     category = await session.get(MetadataCategory, category_id)
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
+    if category.is_locked or category.managed_by_plugin:
+        raise HTTPException(
+            status_code=400,
+            detail="Plugin-managed category cannot be deleted. Deactivate the plugin instead.",
+        )
 
     # Remove metadata assignments that reference this category.
     # `item_metadata.category_id` is not a FK, so this cleanup is manual.
@@ -158,6 +180,8 @@ async def create_attribute(
     category = await session.get(MetadataCategory, category_id)
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
+    if not category.is_active:
+        raise HTTPException(status_code=400, detail="Cannot add attributes to an inactive category")
 
     db_attribute = MetadataAttribute(category_id=category_id, **attribute.model_dump())
     session.add(db_attribute)
@@ -172,6 +196,8 @@ async def delete_attribute(attribute_id: UUID, session: AsyncSession = Depends(g
     attribute = await session.get(MetadataAttribute, attribute_id)
     if not attribute:
         raise HTTPException(status_code=404, detail="Attribute not found")
+    if attribute.is_locked or attribute.managed_by_plugin:
+        raise HTTPException(status_code=400, detail="Plugin-managed attribute cannot be deleted")
 
     await session.delete(attribute)
     await session.commit()
@@ -187,6 +213,8 @@ async def update_attribute(
     db_attribute = await session.get(MetadataAttribute, attribute_id)
     if not db_attribute:
         raise HTTPException(status_code=404, detail="Attribute not found")
+    if db_attribute.is_locked or db_attribute.managed_by_plugin:
+        raise HTTPException(status_code=400, detail="Plugin-managed attribute cannot be edited")
 
     updates = attribute.model_dump(exclude_unset=True)
     if "data_type" in updates and updates["data_type"] != "select":
@@ -232,6 +260,8 @@ async def upsert_item_metadata(
     category = await session.get(MetadataCategory, metadata.category_id)
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
+    if not category.is_active:
+        raise HTTPException(status_code=400, detail="Category is inactive")
 
     # 3. Upsert Item record
     # We need to fetch details from Graph API to populate Item table
@@ -540,3 +570,53 @@ async def preview_metadata_rule(
         already_compliant=already_compliant,
         sample_item_ids=sample_item_ids,
     )
+
+
+@router.get("/plugins", response_model=list[MetadataPluginSchema])
+async def list_metadata_plugins(session: AsyncSession = Depends(get_session)):
+    """List metadata plugins."""
+    service = MetadataPluginService(session)
+    plugins = await service.list_plugins()
+    return plugins
+
+
+@router.post("/plugins/{plugin_key}/activate", response_model=MetadataPluginSchema)
+async def activate_metadata_plugin(plugin_key: str, session: AsyncSession = Depends(get_session)):
+    """Activate a metadata plugin and ensure managed schema exists."""
+    if plugin_key != COMIC_PLUGIN_KEY:
+        raise HTTPException(status_code=404, detail="Unknown plugin")
+
+    service = MetadataPluginService(session)
+    try:
+        plugin = await service.activate_comic_plugin()
+    except ValueError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OperationalError as exc:
+        await session.rollback()
+        if "no such table: metadata_plugins" in str(exc).lower():
+            raise HTTPException(status_code=409, detail="Database migration required: run alembic upgrade head") from exc
+        raise
+
+    await session.commit()
+    await session.refresh(plugin)
+    return plugin
+
+
+@router.post("/plugins/{plugin_key}/deactivate", response_model=MetadataPluginSchema)
+async def deactivate_metadata_plugin(plugin_key: str, session: AsyncSession = Depends(get_session)):
+    """Deactivate a metadata plugin."""
+    if plugin_key != COMIC_PLUGIN_KEY:
+        raise HTTPException(status_code=404, detail="Unknown plugin")
+
+    service = MetadataPluginService(session)
+    try:
+        plugin = await service.deactivate_comic_plugin()
+    except OperationalError as exc:
+        await session.rollback()
+        if "no such table: metadata_plugins" in str(exc).lower():
+            raise HTTPException(status_code=409, detail="Database migration required: run alembic upgrade head") from exc
+        raise
+    await session.commit()
+    await session.refresh(plugin)
+    return plugin

@@ -28,6 +28,10 @@ class MetadataAttributeUpdate(BaseModel):
 class MetadataAttribute(MetadataAttributeBase):
     id: UUID
     category_id: UUID
+    managed_by_plugin: bool = False
+    plugin_key: str | None = None
+    plugin_field_key: str | None = None
+    is_locked: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -45,7 +49,23 @@ class MetadataCategoryCreate(MetadataCategoryBase):
 class MetadataCategory(MetadataCategoryBase):
     id: UUID
     created_at: datetime
+    is_active: bool = True
+    managed_by_plugin: bool = False
+    plugin_key: str | None = None
+    is_locked: bool = False
     attributes: list[MetadataAttribute] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MetadataPlugin(BaseModel):
+    key: str
+    name: str
+    description: str | None = None
+    is_active: bool
+    category_id: UUID | None = None
+    created_at: datetime
+    updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
