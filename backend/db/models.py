@@ -11,6 +11,8 @@ from sqlalchemy import (
     String,
     Text,
     JSON,
+    Integer,
+    Boolean,
     ForeignKey,
     BigInteger,
     UniqueConstraint,
@@ -137,6 +139,21 @@ class Job(Base):
     payload: Mapped[dict] = mapped_column(JSON, nullable=True)  # Stored as JSON string
     result: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # Stored as JSON string
     retry_count: Mapped[int] = mapped_column(default=0)
+    max_retries: Mapped[int] = mapped_column(Integer, default=3)
+    progress_current: Mapped[int] = mapped_column(Integer, default=0)
+    progress_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    progress_percent: Mapped[int] = mapped_column(Integer, default=0)
+    metrics: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    next_retry_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dead_lettered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    dead_letter_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
@@ -222,6 +239,97 @@ class ItemMetadata(Base):
         nullable=False,
     )
     values: Mapped[dict] = mapped_column(JSON, default={})  # Key: Attribute ID, Value: User Input
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "item_id", name="uq_item_metadata_account_item"),
+    )
+
+
+class ItemMetadataHistory(Base):
+    """History of metadata changes per item."""
+
+    __tablename__ = "item_metadata_history"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    metadata_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("item_metadata.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+    )
+    item_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    action: Mapped[str] = mapped_column(String(20), nullable=False)  # CREATE, UPDATE, DELETE, UNDO
+    previous_category_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    previous_values: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    previous_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    new_category_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    new_values: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    new_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+
+class MetadataRule(Base):
+    """Automatic metadata rule."""
+
+    __tablename__ = "metadata_rules"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    name: Mapped[str] = mapped_column(String(150), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("linked_accounts.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    priority: Mapped[int] = mapped_column(Integer, default=100)
+    path_contains: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    path_prefix: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    target_category_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("metadata_categories.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    target_values: Mapped[dict] = mapped_column(JSON, default={})
+    include_folders: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
@@ -271,7 +379,6 @@ class Item(Base):
     __table_args__ = (
         UniqueConstraint('account_id', 'item_id', name='uq_items_account_item'),
     )
-
 
 
 

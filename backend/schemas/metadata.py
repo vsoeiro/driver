@@ -69,8 +69,84 @@ class ItemMetadataUpdate(BaseModel):
 class ItemMetadata(ItemMetadataBase):
     id: UUID
     account_id: UUID
+    version: int = 1
     updated_at: datetime
     category_name: str | None = None
 
     class Config:
         from_attributes = True
+
+
+class ItemMetadataHistory(BaseModel):
+    id: UUID
+    account_id: UUID
+    item_id: str
+    action: str
+    previous_category_id: UUID | None = None
+    previous_values: dict | None = None
+    previous_version: int | None = None
+    new_category_id: UUID | None = None
+    new_values: dict | None = None
+    new_version: int | None = None
+    batch_id: UUID | None = None
+    job_id: UUID | None = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class MetadataRuleBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=150)
+    description: str | None = None
+    account_id: UUID | None = None
+    is_active: bool = True
+    priority: int = 100
+    path_contains: str | None = None
+    path_prefix: str | None = None
+    target_category_id: UUID
+    target_values: dict = {}
+    include_folders: bool = False
+
+
+class MetadataRuleCreate(MetadataRuleBase):
+    pass
+
+
+class MetadataRuleUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    account_id: UUID | None = None
+    is_active: bool | None = None
+    priority: int | None = None
+    path_contains: str | None = None
+    path_prefix: str | None = None
+    target_category_id: UUID | None = None
+    target_values: dict | None = None
+    include_folders: bool | None = None
+
+
+class MetadataRule(MetadataRuleBase):
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class MetadataRulePreviewRequest(BaseModel):
+    account_id: UUID | None = None
+    path_contains: str | None = None
+    path_prefix: str | None = None
+    include_folders: bool = False
+    target_category_id: UUID
+    target_values: dict = {}
+    limit: int = 50
+
+
+class MetadataRulePreviewResponse(BaseModel):
+    total_matches: int
+    to_change: int
+    already_compliant: int
+    sample_item_ids: list[str]

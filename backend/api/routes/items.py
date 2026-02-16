@@ -1,5 +1,6 @@
 """Item API routes."""
 
+import uuid
 from uuid import UUID
 from typing import Optional
 
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.api.dependencies import get_session
 from backend.db.models import Item, ItemMetadata, LinkedAccount, MetadataCategory
 from backend.schemas.items import ItemListResponse, BatchMetadataUpdate
+from backend.services.metadata_versioning import apply_metadata_change
 
 router = APIRouter(prefix="/items", tags=["Items"])
 
@@ -207,6 +209,7 @@ async def list_items(
                 "item_id": metadata.item_id,
                 "category_id": metadata.category_id,
                 "values": metadata.values,
+                "version": metadata.version,
                 "updated_at": metadata.updated_at,
                 "category_name": category_name,
             }
@@ -240,7 +243,7 @@ async def list_items(
     )
 
 
-@router.post("/metadata/batch", status_code=204)
+@router.post("/metadata/batch")
 async def batch_update_metadata(
     batch_data: BatchMetadataUpdate,
     session: AsyncSession = Depends(get_session),
@@ -265,20 +268,29 @@ async def batch_update_metadata(
     existing_records = {r.item_id: r for r in result.scalars().all()}
 
     # 2. Iterate and upsert
+    batch_id = uuid.uuid4()
+    updated = 0
+    created = 0
     for item_id in batch_data.item_ids:
-        if item_id in existing_records:
-            # Update
-            record = existing_records[item_id]
-            record.category_id = batch_data.category_id
-            record.values = batch_data.values
-        else:
-            # Create
-            new_record = ItemMetadata(
-                account_id=batch_data.account_id,
-                item_id=item_id,
-                category_id=batch_data.category_id,
-                values=batch_data.values
-            )
-            session.add(new_record)
-            
+        existing = existing_records.get(item_id)
+        change = await apply_metadata_change(
+            session,
+            account_id=batch_data.account_id,
+            item_id=item_id,
+            category_id=batch_data.category_id,
+            values=batch_data.values,
+            batch_id=batch_id,
+        )
+        if change["changed"]:
+            if existing:
+                updated += 1
+            else:
+                created += 1
+
     await session.commit()
+    return {
+        "batch_id": str(batch_id),
+        "updated": updated,
+        "created": created,
+        "total": len(batch_data.item_ids),
+    }

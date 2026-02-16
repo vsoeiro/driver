@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import traceback
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
@@ -68,14 +69,27 @@ class BackgroundWorker:
 
             try:
                 logger.info(f"Executing job {job.id} ({job.type})")
-                
-                # Execute the handler with the payload and session
-                result = await handler(job.payload, session)
-                
+
+                started = datetime.now(UTC)
+                payload = dict(job.payload or {})
+                payload["_job_id"] = str(job.id)
+
+                # Execute the handler with payload/session.
+                result = await handler(payload, session)
+
+                elapsed = (datetime.now(UTC) - started).total_seconds()
+                if isinstance(result, dict):
+                    metrics = dict(result.get("metrics") or {})
+                    metrics["duration_seconds"] = round(elapsed, 3)
+                    result["metrics"] = metrics
+
                 await job_service.complete_job(job.id, result)
             except Exception as e:
                 error_msg = str(e)
                 stack_trace = traceback.format_exc()
                 logger.error(f"Job {job.id} failed: {error_msg}")
-                # We can store the stack trace in the result if needed, or just the error
+                try:
+                    await session.rollback()
+                except Exception:
+                    pass
                 await job_service.fail_job(job.id, f"{error_msg}\n{stack_trace}")

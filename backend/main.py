@@ -18,7 +18,7 @@ from backend.core.config import get_settings
 from backend.core.exceptions import DriveOrganizerError
 from backend.db.session import async_session_maker
 from backend.services.sync_scheduler import DailySyncScheduler
-from backend.workers.handlers import move, upload, metadata as metadata_handler, sync as sync_handler  # noqa: F401
+from backend.workers.handlers import move, upload, metadata as metadata_handler, sync as sync_handler, rules as rules_handler  # noqa: F401
 from backend.workers.runner import BackgroundWorker
 
 logging.basicConfig(

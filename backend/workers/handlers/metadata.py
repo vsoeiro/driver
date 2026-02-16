@@ -1,6 +1,7 @@
 """Metadata update job handler."""
 
 import logging
+import uuid
 from datetime import datetime, UTC
 from typing import Any
 from uuid import UUID
@@ -9,9 +10,11 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.models import Item, ItemMetadata, LinkedAccount, MetadataAttribute, MetadataCategory
+from backend.services.metadata_versioning import apply_metadata_change
 from backend.services.providers.base import DriveProviderClient
 from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
+from backend.workers.job_progress import JobProgressReporter
 from backend.workers.dispatcher import register_handler
 
 logger = logging.getLogger(__name__)
@@ -33,6 +36,8 @@ async def update_metadata_handler(payload: dict, session: AsyncSession) -> dict:
     root_item_id = payload["root_item_id"]
     metadata_updates = payload["metadata"]
     category_name = payload["category_name"]
+    progress = JobProgressReporter.from_payload(session, payload)
+    batch_id = uuid.UUID(payload.get("batch_id")) if payload.get("batch_id") else uuid.uuid4()
 
     # 1. Fetch account
     account = await session.get(LinkedAccount, account_id)
@@ -76,7 +81,7 @@ async def update_metadata_handler(payload: dict, session: AsyncSession) -> dict:
     client = build_drive_client(account, token_manager)
 
     # 3. Start recursive update
-    stats = {"processed": 0, "updated": 0, "errors": 0}
+    stats = {"processed": 0, "updated": 0, "errors": 0, "batch_id": str(batch_id)}
     
     # Check root item type
     root_item = await client.get_item_metadata(account, root_item_id)
@@ -104,6 +109,7 @@ async def update_metadata_handler(payload: dict, session: AsyncSession) -> dict:
 
 
     if root_item.item_type == "folder":
+        await progress.set_total(None)
         await _update_metadata_recursive(
             client, 
             session, 
@@ -112,7 +118,9 @@ async def update_metadata_handler(payload: dict, session: AsyncSession) -> dict:
             category.id, 
             metadata_values_to_set, 
             stats,
-            current_path=root_path
+            current_path=root_path,
+            progress=progress,
+            batch_id=batch_id,
         )
     else:
         # It's a single file
@@ -121,10 +129,15 @@ async def update_metadata_handler(payload: dict, session: AsyncSession) -> dict:
             account.id, 
             root_item.id, 
             category.id, 
-            metadata_values_to_set
+            metadata_values_to_set,
+            batch_id=batch_id,
+            job_id=progress.job_id,
         )
          stats["processed"] += 1
          stats["updated"] += 1
+         await progress.set_total(1)
+         await progress.increment()
+         await progress.update_metrics(updated=stats["updated"], errors=stats["errors"])
 
     return stats
 
@@ -138,6 +151,8 @@ async def _update_metadata_recursive(
     new_values: dict[str, Any],
     stats: dict,
     current_path: str,
+    progress: JobProgressReporter,
+    batch_id: uuid.UUID,
 ):
     """Recursively update metadata for all files in a folder."""
     
@@ -150,6 +165,12 @@ async def _update_metadata_recursive(
         return
 
     items_to_process = children.items
+    discovered = len(items_to_process)
+    if discovered > 0:
+        if progress.total is None:
+            await progress.set_total(discovered)
+        else:
+            await progress.set_total(progress.total + discovered)
     
     while True:
         for item in items_to_process:
@@ -159,12 +180,27 @@ async def _update_metadata_recursive(
 
             if item.item_type == "folder":
                 await _update_metadata_recursive(
-                    client, session, account, item.id, category_id, new_values, stats, current_path=item_path
+                    client,
+                    session,
+                    account,
+                    item.id,
+                    category_id,
+                    new_values,
+                    stats,
+                    current_path=item_path,
+                    progress=progress,
+                    batch_id=batch_id,
                 )
             else:
                 try:
                     await _update_single_item(
-                        session, account.id, item.id, category_id, new_values
+                        session,
+                        account.id,
+                        item.id,
+                        category_id,
+                        new_values,
+                        batch_id=batch_id,
+                        job_id=progress.job_id,
                     )
                     stats["updated"] += 1
                 except Exception as e:
@@ -172,11 +208,23 @@ async def _update_metadata_recursive(
                     stats["errors"] += 1
                 finally:
                     stats["processed"] += 1
+                    if stats["processed"] % 10 == 0:
+                        await progress.update_metrics(
+                            updated=stats["updated"],
+                            errors=stats["errors"],
+                        )
+                    await progress.increment()
         
         if children.next_link:
             try:
                 children = await client.list_items_by_next_link(account, children.next_link)
                 items_to_process = children.items
+                discovered = len(items_to_process)
+                if discovered > 0:
+                    if progress.total is None:
+                        await progress.set_total(discovered)
+                    else:
+                        await progress.set_total(progress.total + discovered)
             except Exception as e:
                 logger.error(f"Failed to fetch next page for folder {folder_id}: {e}")
                 break
@@ -190,39 +238,28 @@ async def _update_single_item(
     item_id: str,
     category_id: UUID,
     new_values: dict[str, Any],
+    batch_id: uuid.UUID | None = None,
+    job_id: uuid.UUID | None = None,
 ):
     """Update or create metadata for a single item."""
-    # Check if metadata exists
     stmt = select(ItemMetadata).where(
         ItemMetadata.account_id == account_id,
         ItemMetadata.item_id == item_id,
-        ItemMetadata.category_id == category_id
     )
     result = await session.execute(stmt)
-    item_metadata = result.scalar_one_or_none()
+    existing = result.scalar_one_or_none()
+    merged_values = dict(existing.values) if existing and existing.values else {}
+    merged_values.update(new_values)
 
-    if item_metadata:
-        # Update existing
-        # Merge new values with existing ones
-        current_values = dict(item_metadata.values)
-        current_values.update(new_values)
-        item_metadata.values = current_values
-    else:
-        # Create new
-        item_metadata = ItemMetadata(
-            account_id=account_id,
-            item_id=item_id,
-            category_id=category_id,
-            values=new_values
-        )
-        session.add(item_metadata)
-    
-    # Flush explicitly to detect errors early? 
-    # Or rely on final commit in runner.
-    # The runner commits at the end of the job. 
-    # But if there are too many items, we might want to commit in batches?
-    # For now, let's keep it simple. The runner transaction will handle it.
-    # Only concern is memory if updating 10k items.
+    await apply_metadata_change(
+        session,
+        account_id=account_id,
+        item_id=item_id,
+        category_id=category_id,
+        values=merged_values,
+        batch_id=batch_id,
+        job_id=job_id,
+    )
 
 
 async def upsert_item_record(
@@ -294,6 +331,8 @@ async def apply_metadata_recursive_handler(
     category_id = UUID(payload["category_id"])
     values = payload.get("values", {})
     include_folders = payload.get("include_folders", False)
+    batch_id = UUID(payload.get("batch_id")) if payload.get("batch_id") else uuid.uuid4()
+    progress = JobProgressReporter.from_payload(session, payload)
 
     query = select(Item).where(
         Item.account_id == account_id,
@@ -306,7 +345,14 @@ async def apply_metadata_recursive_handler(
     result = await session.execute(query)
     items = result.scalars().all()
 
-    stats = {"total": len(items), "created": 0, "updated": 0, "errors": 0}
+    stats = {
+        "total": len(items),
+        "created": 0,
+        "updated": 0,
+        "errors": 0,
+        "batch_id": str(batch_id),
+    }
+    await progress.set_total(len(items))
     batch_count = 0
 
     for item in items:
@@ -317,25 +363,24 @@ async def apply_metadata_recursive_handler(
             )
             meta_result = await session.execute(stmt)
             existing = meta_result.scalar_one_or_none()
+            merged_values = dict(existing.values) if existing and existing.values else {}
+            merged_values.update(values)
 
-            if existing:
-                if existing.category_id != category_id:
-                    existing.category_id = category_id
-                    existing.values = values
+            changed = await apply_metadata_change(
+                session,
+                account_id=account_id,
+                item_id=item.item_id,
+                category_id=category_id,
+                values=merged_values,
+                batch_id=batch_id,
+                job_id=progress.job_id,
+            )
+
+            if changed["changed"]:
+                if existing:
+                    stats["updated"] += 1
                 else:
-                    current = dict(existing.values)
-                    current.update(values)
-                    existing.values = current
-                stats["updated"] += 1
-            else:
-                new_meta = ItemMetadata(
-                    account_id=account_id,
-                    item_id=item.item_id,
-                    category_id=category_id,
-                    values=values,
-                )
-                session.add(new_meta)
-                stats["created"] += 1
+                    stats["created"] += 1
 
             batch_count += 1
             if batch_count >= 50:
@@ -345,6 +390,14 @@ async def apply_metadata_recursive_handler(
         except Exception as e:
             logger.error(f"Failed to apply metadata to item {item.item_id}: {e}")
             stats["errors"] += 1
+        finally:
+            await progress.increment()
+            if progress.current % 10 == 0:
+                await progress.update_metrics(
+                    created=stats["created"],
+                    updated=stats["updated"],
+                    errors=stats["errors"],
+                )
 
     if batch_count > 0:
         await session.commit()
@@ -367,6 +420,8 @@ async def remove_metadata_recursive_handler(
     """
     account_id = UUID(payload["account_id"])
     path_prefix = payload["path_prefix"].rstrip("/")
+    batch_id = UUID(payload.get("batch_id")) if payload.get("batch_id") else uuid.uuid4()
+    progress = JobProgressReporter.from_payload(session, payload)
 
     sub = select(Item.item_id).where(
         Item.account_id == account_id,
@@ -384,12 +439,23 @@ async def remove_metadata_recursive_handler(
     metadata_list = result.scalars().all()
 
     deleted = 0
+    await progress.set_total(len(metadata_list))
     for meta in metadata_list:
-        await session.delete(meta)
-        deleted += 1
+        changed = await apply_metadata_change(
+            session,
+            account_id=meta.account_id,
+            item_id=meta.item_id,
+            category_id=None,
+            values=None,
+            batch_id=batch_id,
+            job_id=progress.job_id,
+        )
+        if changed["changed"]:
+            deleted += 1
+        await progress.increment()
 
     if deleted > 0:
         await session.commit()
 
-    return {"deleted": deleted}
+    return {"deleted": deleted, "batch_id": str(batch_id)}
 

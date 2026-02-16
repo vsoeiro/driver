@@ -12,6 +12,7 @@ class JobBase(BaseModel):
 
     type: str
     payload: dict | None = None
+    max_retries: int = 3
 
 
 class JobCreate(JobBase):
@@ -26,6 +27,14 @@ class JobUpdate(BaseModel):
     status: str | None = None
     result: dict | None = None
     retry_count: int | None = None
+    progress_current: int | None = None
+    progress_total: int | None = None
+    progress_percent: int | None = None
+    metrics: dict | None = None
+    next_retry_at: datetime | None = None
+    last_error: str | None = None
+    dead_lettered_at: datetime | None = None
+    dead_letter_reason: str | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
 
@@ -37,6 +46,15 @@ class Job(JobBase):
     status: str
     result: dict | None = None
     retry_count: int
+    max_retries: int
+    progress_current: int
+    progress_total: int | None = None
+    progress_percent: int
+    metrics: dict | None = None
+    next_retry_at: datetime | None = None
+    last_error: str | None = None
+    dead_lettered_at: datetime | None = None
+    dead_letter_reason: str | None = None
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -91,4 +109,16 @@ class JobRemoveMetadataRecursiveRequest(BaseModel):
 
     account_id: UUID
     path_prefix: str
+
+
+class JobUndoMetadataBatchRequest(BaseModel):
+    """Schema for metadata batch undo job request."""
+
+    batch_id: UUID
+
+
+class JobApplyRuleRequest(BaseModel):
+    """Schema for metadata rule apply job request."""
+
+    rule_id: UUID
 

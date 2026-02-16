@@ -3,13 +3,17 @@
 This module provides endpoints for creating and managing background jobs.
 """
 
-from fastapi import APIRouter, status, UploadFile, File, Form
+from uuid import UUID
+
+from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form
 
 from backend.api.dependencies import JobServiceDep
 from backend.schemas.jobs import (
     Job, JobCreate, JobMoveRequest, JobMetadataUpdateRequest,
     JobSyncRequest, JobApplyMetadataRecursiveRequest,
     JobRemoveMetadataRecursiveRequest,
+    JobUndoMetadataBatchRequest,
+    JobApplyRuleRequest,
 )
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
@@ -159,3 +163,44 @@ async def create_remove_metadata_recursive_job(
     )
 
     return await job_service.create_job(job_in)
+
+
+@router.post("/metadata-undo", response_model=Job, status_code=status.HTTP_201_CREATED)
+async def create_metadata_undo_job(
+    request: JobUndoMetadataBatchRequest,
+    job_service: JobServiceDep,
+) -> Job:
+    """Create a job that undoes metadata changes from a batch."""
+    job_in = JobCreate(
+        type="undo_metadata_batch",
+        payload=request.model_dump(mode="json"),
+    )
+    return await job_service.create_job(job_in)
+
+
+@router.post("/apply-rule", response_model=Job, status_code=status.HTTP_201_CREATED)
+async def create_apply_rule_job(
+    request: JobApplyRuleRequest,
+    job_service: JobServiceDep,
+) -> Job:
+    """Create a job that applies one metadata rule."""
+    job_in = JobCreate(
+        type="apply_metadata_rule",
+        payload=request.model_dump(mode="json"),
+    )
+    return await job_service.create_job(job_in)
+
+
+@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_job(
+    job_id: UUID,
+    job_service: JobServiceDep,
+) -> None:
+    """Delete one finalized job from history."""
+    try:
+        await job_service.delete_job(job_id)
+    except ValueError as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc

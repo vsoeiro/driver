@@ -1,12 +1,12 @@
 """Job service for managing background jobs."""
 
-import json
 import logging
-from datetime import datetime, UTC
+import math
+from datetime import datetime, UTC, timedelta
 from typing import Sequence
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.models import Job
@@ -43,10 +43,17 @@ class JobService:
         """
         payload_json = job_in.payload if job_in.payload else {}
         
+        max_retries = max(0, job_in.max_retries)
+
         job = Job(
             type=job_in.type,
             payload=payload_json,
             status="PENDING",
+            max_retries=max_retries,
+            progress_current=0,
+            progress_total=None,
+            progress_percent=0,
+            metrics={},
         )
         self.session.add(job)
         await self.session.commit()
@@ -70,7 +77,15 @@ class JobService:
         # as long as we commit the status change quickly.
         stmt = (
             select(Job)
-            .where(Job.status == "PENDING")
+            .where(
+                or_(
+                    Job.status == "PENDING",
+                    and_(
+                        Job.status == "RETRY_SCHEDULED",
+                        or_(Job.next_retry_at.is_(None), Job.next_retry_at <= datetime.now(UTC)),
+                    ),
+                )
+            )
             .order_by(Job.created_at.asc())
             .limit(1)
             .with_for_update(skip_locked=True)
@@ -85,7 +100,15 @@ class JobService:
             # Fallback for drivers not supporting FOR UPDATE with SKIP LOCKED
             stmt = (
                 select(Job)
-                .where(Job.status == "PENDING")
+                .where(
+                    or_(
+                        Job.status == "PENDING",
+                        and_(
+                            Job.status == "RETRY_SCHEDULED",
+                            or_(Job.next_retry_at.is_(None), Job.next_retry_at <= datetime.now(UTC)),
+                        ),
+                    )
+                )
                 .order_by(Job.created_at.asc())
                 .limit(1)
             )
@@ -95,6 +118,8 @@ class JobService:
         if job:
             job.status = "RUNNING"
             job.started_at = datetime.now(UTC)
+            job.last_error = None
+            job.next_retry_at = None
             await self.session.commit()
             await self.session.refresh(job)
             logger.info(f"Picked up job {job.id}")
@@ -123,6 +148,7 @@ class JobService:
             .values(
                 status="COMPLETED",
                 result=result or {},
+                progress_percent=100,
                 completed_at=datetime.now(UTC),
             )
             .returning(Job)
@@ -134,7 +160,7 @@ class JobService:
         return job
 
     async def fail_job(self, job_id: UUID, error: str) -> Job:
-        """Mark a job as FAILED.
+        """Mark a job as retry scheduled or dead-letter/failed.
 
         Parameters
         ----------
@@ -148,22 +174,78 @@ class JobService:
         Job
             Updated job instance.
         """
+        job = await self.session.get(Job, job_id)
+        if not job:
+            raise ValueError(f"Job {job_id} not found")
+
+        now = datetime.now(UTC)
+        next_retry_count = (job.retry_count or 0) + 1
+        retry_allowed = next_retry_count <= (job.max_retries or 0)
+
+        if retry_allowed:
+            # Exponential backoff: 2, 4, 8, ... capped to 300 seconds.
+            delay_seconds = min(300, int(math.pow(2, next_retry_count)))
+            job.status = "RETRY_SCHEDULED"
+            job.retry_count = next_retry_count
+            job.last_error = error
+            job.next_retry_at = now + timedelta(seconds=delay_seconds)
+            job.result = {"error": error, "retry_in_seconds": delay_seconds}
+            job.completed_at = None
+            logger.warning(
+                "Job %s failed (attempt %s/%s). Retrying in %ss.",
+                job_id,
+                next_retry_count,
+                job.max_retries,
+                delay_seconds,
+            )
+        else:
+            dead_lettered = (job.max_retries or 0) > 0
+            job.status = "DEAD_LETTER" if dead_lettered else "FAILED"
+            job.retry_count = next_retry_count
+            job.last_error = error
+            job.result = {"error": error}
+            job.completed_at = now
+            if dead_lettered:
+                job.dead_lettered_at = now
+                job.dead_letter_reason = error
+            logger.error(f"Job {job_id} failed permanently: {error}")
+
+        self.session.add(job)
+        await self.session.commit()
+        return job
+
+    async def update_job_progress(
+        self,
+        job_id: UUID,
+        *,
+        current: int,
+        total: int | None = None,
+        metrics: dict | None = None,
+    ) -> Job:
+        """Persist job progress and metrics."""
+        current = max(0, current)
+        progress_percent = 0
+        if total is not None and total > 0:
+            progress_percent = min(100, max(0, int((current / total) * 100)))
+
+        values = {
+            "progress_current": current,
+            "progress_total": total,
+            "progress_percent": progress_percent,
+        }
+        if metrics is not None:
+            values["metrics"] = metrics
+
         stmt = (
             update(Job)
             .where(Job.id == job_id)
-            .values(
-                status="FAILED",
-                result={"error": error},
-                completed_at=datetime.now(UTC),
-            )
+            .values(**values)
             .returning(Job)
         )
         result = await self.session.execute(stmt)
         job = result.scalar_one()
         await self.session.commit()
-        logger.error(f"Job {job_id} failed: {error}")
         return job
-
 
     async def get_jobs(self, limit: int = 50, offset: int = 0) -> Sequence[Job]:
         """Get a list of jobs ordered by creation date (newest first).
@@ -188,3 +270,16 @@ class JobService:
         )
         result = await self.session.execute(stmt)
         return result.scalars().all()
+
+    async def delete_job(self, job_id: UUID) -> None:
+        """Delete a finalized job from history."""
+        job = await self.session.get(Job, job_id)
+        if not job:
+            raise ValueError(f"Job {job_id} not found")
+
+        finalized_statuses = {"COMPLETED", "FAILED", "DEAD_LETTER"}
+        if job.status not in finalized_statuses:
+            raise ValueError("Only finalized jobs can be deleted")
+
+        await self.session.delete(job)
+        await self.session.commit()

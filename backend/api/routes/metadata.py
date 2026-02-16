@@ -1,5 +1,6 @@
 """Metadata API routes."""
 
+import uuid
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -8,15 +9,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.api.dependencies import get_session
-from backend.db.models import Item, ItemMetadata, MetadataAttribute, MetadataCategory, LinkedAccount
+from backend.db.models import (
+    Item,
+    ItemMetadata,
+    ItemMetadataHistory,
+    MetadataAttribute,
+    MetadataCategory,
+    MetadataRule,
+    LinkedAccount,
+)
 from backend.schemas.metadata import (
     ItemMetadataCreate,
     MetadataAttributeCreate,
     MetadataCategoryCreate,
     MetadataCategory as MetadataCategorySchema,
     ItemMetadata as ItemMetadataSchema,
+    ItemMetadataHistory as ItemMetadataHistorySchema,
     MetadataAttribute as MetadataAttributeSchema,
+    MetadataRule as MetadataRuleSchema,
+    MetadataRuleCreate,
+    MetadataRulePreviewRequest,
+    MetadataRulePreviewResponse,
+    MetadataRuleUpdate,
 )
+from backend.services.metadata_versioning import apply_metadata_change, normalize_metadata_values, undo_metadata_batch
 from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
 
@@ -193,15 +209,7 @@ async def upsert_item_metadata(
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
 
-    # 3. Check existing metadata
-    query = select(ItemMetadata).where(
-        ItemMetadata.account_id == metadata.account_id,
-        ItemMetadata.item_id == metadata.item_id
-    )
-    result = await session.execute(query)
-    existing_metadata = result.scalar_one_or_none()
-
-    # 4. Upsert Item record
+    # 3. Upsert Item record
     # We need to fetch details from Graph API to populate Item table
     from datetime import datetime, UTC
     
@@ -284,22 +292,24 @@ async def upsert_item_metadata(
         logger = logging.getLogger(__name__)
         logger.error(f"Failed to sync Item record for {metadata.item_id}: {e}")
 
-    if existing_metadata:
-        # Update existing
-        existing_metadata.category_id = metadata.category_id
-        existing_metadata.values = metadata.values
-        
-        session.add(existing_metadata)
-        await session.commit()
-        await session.refresh(existing_metadata)
-        return existing_metadata
-    else:
-        # Create new
-        new_metadata = ItemMetadata(**metadata.model_dump())
-        session.add(new_metadata)
-        await session.commit()
-        await session.refresh(new_metadata)
-        return new_metadata
+    await apply_metadata_change(
+        session,
+        account_id=metadata.account_id,
+        item_id=metadata.item_id,
+        category_id=metadata.category_id,
+        values=normalize_metadata_values(metadata.values),
+    )
+    await session.commit()
+
+    query = select(ItemMetadata).where(
+        ItemMetadata.account_id == metadata.account_id,
+        ItemMetadata.item_id == metadata.item_id,
+    )
+    refreshed = await session.execute(query)
+    current = refreshed.scalar_one_or_none()
+    if not current:
+        raise HTTPException(status_code=500, detail="Failed to save metadata")
+    return current
 
 
 @router.delete("/items/{account_id}/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -317,7 +327,13 @@ async def delete_item_metadata(
     if not metadata:
         raise HTTPException(status_code=404, detail="Metadata not found")
 
-    await session.delete(metadata)
+    await apply_metadata_change(
+        session,
+        account_id=account_id,
+        item_id=item_id,
+        category_id=None,
+        values=None,
+    )
     await session.commit()
 
 
@@ -338,7 +354,165 @@ async def batch_delete_item_metadata(
     if not metadata_list:
         return
 
+    batch_id = uuid.uuid4()
     for metadata in metadata_list:
-        await session.delete(metadata)
+        await apply_metadata_change(
+            session,
+            account_id=metadata.account_id,
+            item_id=metadata.item_id,
+            category_id=None,
+            values=None,
+            batch_id=batch_id,
+        )
     
     await session.commit()
+
+
+@router.get(
+    "/items/{account_id}/{item_id}/history",
+    response_model=list[ItemMetadataHistorySchema],
+)
+async def get_item_metadata_history(
+    account_id: UUID,
+    item_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """List metadata change history for one item."""
+    stmt = (
+        select(ItemMetadataHistory)
+        .where(
+            ItemMetadataHistory.account_id == account_id,
+            ItemMetadataHistory.item_id == item_id,
+        )
+        .order_by(ItemMetadataHistory.created_at.desc())
+        .limit(200)
+    )
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+
+@router.post("/batches/{batch_id}/undo")
+async def undo_metadata_batch_route(
+    batch_id: UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    """Undo metadata changes from a batch id."""
+    stats = await undo_metadata_batch(session, batch_id=batch_id)
+    await session.commit()
+    return {"batch_id": str(batch_id), **stats}
+
+
+@router.get("/rules", response_model=list[MetadataRuleSchema])
+async def list_metadata_rules(session: AsyncSession = Depends(get_session)):
+    """List metadata rules by priority."""
+    stmt = select(MetadataRule).order_by(MetadataRule.priority.asc(), MetadataRule.created_at.asc())
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+
+@router.post("/rules", response_model=MetadataRuleSchema, status_code=status.HTTP_201_CREATED)
+async def create_metadata_rule(
+    rule: MetadataRuleCreate,
+    session: AsyncSession = Depends(get_session),
+):
+    """Create a metadata rule."""
+    category = await session.get(MetadataCategory, rule.target_category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    db_rule = MetadataRule(**rule.model_dump())
+    session.add(db_rule)
+    await session.commit()
+    await session.refresh(db_rule)
+    return db_rule
+
+
+@router.patch("/rules/{rule_id}", response_model=MetadataRuleSchema)
+async def update_metadata_rule(
+    rule_id: UUID,
+    rule: MetadataRuleUpdate,
+    session: AsyncSession = Depends(get_session),
+):
+    """Update a metadata rule."""
+    db_rule = await session.get(MetadataRule, rule_id)
+    if not db_rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+
+    updates = rule.model_dump(exclude_unset=True)
+    if "target_category_id" in updates:
+        category = await session.get(MetadataCategory, updates["target_category_id"])
+        if not category:
+            raise HTTPException(status_code=404, detail="Category not found")
+
+    for key, value in updates.items():
+        setattr(db_rule, key, value)
+
+    await session.commit()
+    await session.refresh(db_rule)
+    return db_rule
+
+
+@router.delete("/rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_metadata_rule(
+    rule_id: UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    """Delete a metadata rule."""
+    db_rule = await session.get(MetadataRule, rule_id)
+    if not db_rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    await session.delete(db_rule)
+    await session.commit()
+
+
+@router.post("/rules/preview", response_model=MetadataRulePreviewResponse)
+async def preview_metadata_rule(
+    request: MetadataRulePreviewRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Preview how many items would be changed by a rule."""
+    query = select(Item).where(Item.path.isnot(None))
+    if request.account_id:
+        query = query.where(Item.account_id == request.account_id)
+    if request.path_prefix:
+        prefix = request.path_prefix.rstrip("/")
+        query = query.where(Item.path.ilike(f"{prefix}/%"))
+    if request.path_contains:
+        query = query.where(Item.path.ilike(f"%{request.path_contains}%"))
+    if not request.include_folders:
+        query = query.where(Item.item_type == "file")
+
+    result = await session.execute(query)
+    items = result.scalars().all()
+
+    target_values = normalize_metadata_values(request.target_values)
+    to_change = 0
+    already_compliant = 0
+    sample_item_ids: list[str] = []
+
+    for item in items:
+        stmt = select(ItemMetadata).where(
+            ItemMetadata.account_id == item.account_id,
+            ItemMetadata.item_id == item.item_id,
+        )
+        metadata_result = await session.execute(stmt)
+        current = metadata_result.scalar_one_or_none()
+        current_values = normalize_metadata_values(current.values) if current else {}
+        same = (
+            current is not None
+            and current.category_id == request.target_category_id
+            and current_values == target_values
+        )
+        if same:
+            already_compliant += 1
+        else:
+            to_change += 1
+            if len(sample_item_ids) < max(1, request.limit):
+                sample_item_ids.append(item.item_id)
+
+    return MetadataRulePreviewResponse(
+        total_matches=len(items),
+        to_change=to_change,
+        already_compliant=already_compliant,
+        sample_item_ids=sample_item_ids,
+    )

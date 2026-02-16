@@ -10,6 +10,7 @@ from backend.db.models import LinkedAccount
 from backend.services.providers.base import DriveProviderClient
 from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
+from backend.workers.job_progress import JobProgressReporter
 from backend.workers.dispatcher import register_handler
 from backend.workers.handlers.metadata import upsert_item_record
 
@@ -49,6 +50,7 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
     }
     """
     account_id = UUID(payload["account_id"])
+    progress = JobProgressReporter.from_payload(session, payload)
 
     # 1. Fetch account
     account = await session.get(LinkedAccount, account_id)
@@ -60,6 +62,7 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
 
     # Use context for stats and batch commit
     ctx = SyncContext(session, batch_size=50)
+    await progress.set_total(1)
 
     # 2. Get root item
     try:
@@ -70,6 +73,7 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
         
         await upsert_item_record(session, account, root_item, parent_id=None, path=root_path)
         await ctx.increment_and_commit()
+        await progress.increment()
         
         # 3. Recursive sync
         await _sync_folder_recursive(
@@ -77,7 +81,8 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
             ctx,
             account,
             root_item.id,
-            root_path
+            root_path,
+            progress,
         )
         
         # Final commit to ensure remaining items are saved
@@ -88,6 +93,10 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
         logger.error(f"Sync job failed for account {account_id}: {e}")
         raise
 
+    await progress.update_metrics(
+        processed=ctx.stats["processed"],
+        errors=ctx.stats["errors"],
+    )
     return ctx.stats
 
 
@@ -97,6 +106,7 @@ async def _sync_folder_recursive(
     account: LinkedAccount,
     folder_id: str,
     current_path: str,
+    progress: JobProgressReporter,
 ):
     """Recursively sync folder items."""
     
@@ -108,6 +118,10 @@ async def _sync_folder_recursive(
         return
 
     items_to_process = children.items
+    if progress.total is None:
+        await progress.set_total(len(items_to_process))
+    else:
+        await progress.set_total(progress.total + len(items_to_process))
     
     while True:
         for item in items_to_process:
@@ -118,10 +132,11 @@ async def _sync_folder_recursive(
                      
                 await upsert_item_record(ctx.session, account, item, parent_id=folder_id, path=item_path)
                 await ctx.increment_and_commit()
+                await progress.increment()
                 
                 if item.item_type == "folder":
                     await _sync_folder_recursive(
-                        client, ctx, account, item.id, item_path
+                        client, ctx, account, item.id, item_path, progress
                     )
             except Exception as e:
                 logger.error(f"Failed to sync item {item.id}: {e}")
@@ -131,6 +146,10 @@ async def _sync_folder_recursive(
             try:
                 children = await client.list_items_by_next_link(account, children.next_link)
                 items_to_process = children.items
+                if progress.total is None:
+                    await progress.set_total(len(items_to_process))
+                else:
+                    await progress.set_total(progress.total + len(items_to_process))
             except Exception as e:
                 logger.error(f"Failed to fetch next page for folder {folder_id}: {e}")
                 break
