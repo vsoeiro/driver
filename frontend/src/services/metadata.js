@@ -23,6 +23,11 @@ export const deleteAttribute = async (attributeId) => {
     await api.delete(`/metadata/attributes/${attributeId}`);
 };
 
+export const updateAttribute = async (attributeId, attribute) => {
+    const response = await api.patch(`/metadata/attributes/${attributeId}`, attribute);
+    return response.data;
+};
+
 export const getItemMetadata = async (accountId, itemId) => {
     const response = await api.get(`/metadata/items/${accountId}/${itemId}`);
     return response.data;
@@ -90,6 +95,7 @@ export const metadataService = {
     createCategory,
     deleteCategory,
     createAttribute,
+    updateAttribute,
     deleteAttribute,
     getItemMetadata,
     saveItemMetadata,

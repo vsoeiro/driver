@@ -13,6 +13,8 @@ import {
 import Modal from '../components/Modal';
 import MoveModal from '../components/MoveModal';
 import MetadataModal from '../components/MetadataModal';
+import BatchMetadataModal from '../components/BatchMetadataModal';
+import { useToast } from '../contexts/ToastContext';
 
 export default function FileBrowser() {
     const { accountId, folderId } = useParams();
@@ -44,12 +46,14 @@ export default function FileBrowser() {
     const [deleteModal, setDeleteModal] = useState({ isOpen: false });
     const [moveModal, setMoveModal] = useState({ isOpen: false });
     const [metadataModalOpen, setMetadataModalOpen] = useState(false);
+    const [batchMetadataModalOpen, setBatchMetadataModalOpen] = useState(false);
     const [removeMetadataModal, setRemoveMetadataModal] = useState(false);
     const [createFolderModal, setCreateFolderModal] = useState(false);
     const [metadataMenuOpen, setMetadataMenuOpen] = useState(false);
     const metadataMenuRef = useRef(null);
     const [newFolderName, setNewFolderName] = useState('');
     const [actionLoading, setActionLoading] = useState(false);
+    const { showToast } = useToast();
 
     // Reset selection on folder change
     React.useEffect(() => {
@@ -199,6 +203,19 @@ export default function FileBrowser() {
         ? files.find(f => f.id === Array.from(selectedItems)[0])
         : null;
 
+    const currentFolderPath = breadcrumbs.length > 0
+        ? `/${breadcrumbs.map((crumb) => crumb.name).join('/')}`
+        : '';
+
+    const selectedItemsForBatchEdit = sortedFiles
+        .filter((file) => selectedItems.has(file.id))
+        .map((file) => ({
+            ...file,
+            account_id: accountId,
+            item_id: file.id,
+            path: file.path || `${currentFolderPath}/${file.name}`.replace('//', '/'),
+        }));
+
     return (
         <div className="flex flex-col h-screen">
             {/* Header */}
@@ -295,8 +312,15 @@ export default function FileBrowser() {
                             <div className="absolute top-full left-0 w-48 pt-1 z-50">
                                 <div className="bg-popover border rounded-md shadow-md py-1">
                                     <button
-                                        onClick={() => { setMetadataModalOpen(true); setMetadataMenuOpen(false); }}
-                                        disabled={selectedItems.size !== 1}
+                                        onClick={() => {
+                                            if (selectedItems.size === 1) {
+                                                setMetadataModalOpen(true);
+                                            } else if (selectedItems.size > 1) {
+                                                setBatchMetadataModalOpen(true);
+                                            }
+                                            setMetadataMenuOpen(false);
+                                        }}
+                                        disabled={selectedItems.size === 0}
                                         className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
                                     >
                                         <Database size={14} /> Edit Metadata
@@ -478,7 +502,19 @@ export default function FileBrowser() {
                 item={singleSelectedItem}
                 accountId={accountId}
                 onSuccess={() => {
-                    // Optional: refresh metadata indicator if we had one
+                    refresh();
+                }}
+            />
+
+            <BatchMetadataModal
+                isOpen={batchMetadataModalOpen}
+                onClose={() => setBatchMetadataModalOpen(false)}
+                selectedItems={selectedItemsForBatchEdit}
+                showToast={showToast}
+                onSuccess={() => {
+                    setBatchMetadataModalOpen(false);
+                    setSelectedItems(new Set());
+                    refresh();
                 }}
             />
 

@@ -2,11 +2,13 @@ import { useState, useEffect, useCallback } from 'react';
 import { metadataService } from '../services/metadata';
 import { itemsService } from '../services/items';
 import { accountsService } from '../services/accounts';
+import { aiService } from '../services/ai';
+import { getSelectOptions } from '../utils/metadata';
 import {
     Plus, Trash2, ChevronRight, ChevronDown, ChevronLeft,
     Database, Loader2, Tag, Hash, ArrowLeft,
     File, Folder, ArrowUpDown, ArrowUp, ArrowDown,
-    CheckSquare, Square, Eye, Search, Filter, User
+    CheckSquare, Square, Eye, Search, Filter, User, Sparkles, Pencil
 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import Modal from '../components/Modal';
@@ -132,7 +134,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                 onChange={(e) => handleAttributeChange(attr.id, e.target.value)}
                                             >
                                                 <option value="">Any</option>
-                                                {attr.options?.options?.map(opt => (
+                                                {getSelectOptions(attr.options).map(opt => (
                                                     <option key={opt} value={opt}>{opt}</option>
                                                 ))}
                                             </select>
@@ -533,8 +535,18 @@ export default function MetadataManager() {
     const [newAttrType, setNewAttrType] = useState('text');
     const [newAttrRequired, setNewAttrRequired] = useState(false);
     const [newAttrOptions, setNewAttrOptions] = useState('');
+    const [editAttributeTarget, setEditAttributeTarget] = useState(null);
+    const [editAttrName, setEditAttrName] = useState('');
+    const [editAttrType, setEditAttrType] = useState('text');
+    const [editAttrRequired, setEditAttrRequired] = useState(false);
+    const [editAttrOptions, setEditAttrOptions] = useState('');
+    const [editingAttribute, setEditingAttribute] = useState(false);
     const [deleteCategoryTarget, setDeleteCategoryTarget] = useState(null);
     const [deletingCategory, setDeletingCategory] = useState(false);
+    const [aiModalOpen, setAiModalOpen] = useState(false);
+    const [aiGeneratingCategory, setAiGeneratingCategory] = useState(false);
+    const [aiDocumentType, setAiDocumentType] = useState('');
+    const [aiSampleText, setAiSampleText] = useState('');
 
     const loadCategories = useCallback(async () => {
         try {
@@ -625,8 +637,82 @@ export default function MetadataManager() {
         }
     };
 
+    const openEditAttributeModal = (attr) => {
+        setEditAttributeTarget(attr);
+        setEditAttrName(attr.name || '');
+        setEditAttrType(attr.data_type || 'text');
+        setEditAttrRequired(!!attr.is_required);
+        setEditAttrOptions(getSelectOptions(attr.options).join(', '));
+    };
+
+    const handleUpdateAttribute = async (e) => {
+        e.preventDefault();
+        if (!editAttributeTarget) return;
+
+        try {
+            setEditingAttribute(true);
+            let options = null;
+            if (editAttrType === 'select') {
+                const parsedOptions = editAttrOptions
+                    .split(',')
+                    .map((o) => o.trim())
+                    .filter(Boolean);
+                options = { options: parsedOptions };
+            }
+
+            await metadataService.updateAttribute(editAttributeTarget.id, {
+                name: editAttrName,
+                data_type: editAttrType,
+                is_required: editAttrRequired,
+                options,
+            });
+
+            showToast('Attribute updated', 'success');
+            setEditAttributeTarget(null);
+            await loadCategories();
+        } catch (error) {
+            showToast(error?.response?.data?.detail || 'Failed to update attribute', 'error');
+        } finally {
+            setEditingAttribute(false);
+        }
+    };
+
     const toggleExpand = (id) => {
         setExpandedCategory(expandedCategory === id ? null : id);
+    };
+
+    const handleGenerateCategoryWithAI = async (e) => {
+        e.preventDefault();
+        if (!aiDocumentType.trim()) {
+            showToast('Document type is required', 'error');
+            return;
+        }
+
+        try {
+            setAiGeneratingCategory(true);
+            const result = await aiService.suggestCategorySchema({
+                document_type: aiDocumentType.trim(),
+                sample_text: aiSampleText.trim() || null,
+                create_in_db: true,
+            });
+
+            showToast(
+                `Category "${result.suggestion.category_name}" created with ${result.suggestion.attributes.length} attributes`,
+                'success'
+            );
+            setAiModalOpen(false);
+            setAiDocumentType('');
+            setAiSampleText('');
+            await loadCategories();
+            if (result.created_category_id) {
+                setExpandedCategory(result.created_category_id);
+            }
+        } catch (error) {
+            const message = error?.response?.data?.detail || 'Failed to generate category with AI';
+            showToast(message, 'error');
+        } finally {
+            setAiGeneratingCategory(false);
+        }
     };
 
     // If viewing a specific category's items
@@ -651,12 +737,20 @@ export default function MetadataManager() {
                         {categories.length} categories
                     </span>
                 </div>
-                <button
-                    onClick={() => setCreateModalOpen(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 text-sm font-medium transition-colors"
-                >
-                    <Plus size={16} /> New Category
-                </button>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => setAiModalOpen(true)}
+                        className="flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-accent text-sm font-medium transition-colors"
+                    >
+                        <Sparkles size={16} /> AI Category
+                    </button>
+                    <button
+                        onClick={() => setCreateModalOpen(true)}
+                        className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 text-sm font-medium transition-colors"
+                    >
+                        <Plus size={16} /> New Category
+                    </button>
+                </div>
             </div>
 
             {/* Content */}
@@ -748,16 +842,26 @@ export default function MetadataManager() {
                                                             )}
                                                             {attr.data_type === 'select' && attr.options?.options && (
                                                                 <div className="text-xs text-muted-foreground">
-                                                                    Options: {attr.options.options.join(', ')}
+                                                                    Options: {getSelectOptions(attr.options).join(', ')}
                                                                 </div>
                                                             )}
                                                         </div>
-                                                        <button
-                                                            onClick={() => handleDeleteAttribute(attr.id)}
-                                                            className="text-muted-foreground hover:text-destructive p-1 rounded"
-                                                        >
-                                                            <Trash2 size={16} />
-                                                        </button>
+                                                        <div className="flex items-center gap-1">
+                                                            <button
+                                                                onClick={() => openEditAttributeModal(attr)}
+                                                                className="text-muted-foreground hover:text-primary p-1 rounded"
+                                                                title="Edit attribute"
+                                                            >
+                                                                <Pencil size={16} />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleDeleteAttribute(attr.id)}
+                                                                className="text-muted-foreground hover:text-destructive p-1 rounded"
+                                                                title="Delete attribute"
+                                                            >
+                                                                <Trash2 size={16} />
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                 ))}
                                             </div>
@@ -811,6 +915,58 @@ export default function MetadataManager() {
                             className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
                         >
                             Create
+                        </button>
+                    </div>
+                </form>
+            </Modal>
+
+            {/* AI Category Modal */}
+            <Modal
+                isOpen={aiModalOpen}
+                onClose={() => !aiGeneratingCategory && setAiModalOpen(false)}
+                title="Generate Category with AI"
+            >
+                <form onSubmit={handleGenerateCategoryWithAI} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Document Type</label>
+                        <input
+                            type="text"
+                            required
+                            className="w-full border rounded-md p-2 bg-background"
+                            value={aiDocumentType}
+                            onChange={(e) => setAiDocumentType(e.target.value)}
+                            placeholder="e.g. Invoice, Contract, Purchase Order"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Sample Text</label>
+                        <textarea
+                            className="w-full border rounded-md p-2 bg-background"
+                            rows={6}
+                            value={aiSampleText}
+                            onChange={(e) => setAiSampleText(e.target.value)}
+                            placeholder="Optional: paste sample text from this document type for better attribute suggestions."
+                        />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                        This will create the category and attributes directly in Metadata Manager.
+                    </p>
+                    <div className="flex justify-end gap-2 pt-2">
+                        <button
+                            type="button"
+                            onClick={() => setAiModalOpen(false)}
+                            disabled={aiGeneratingCategory}
+                            className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={aiGeneratingCategory || !aiDocumentType.trim()}
+                            className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {aiGeneratingCategory && <Loader2 className="animate-spin" size={14} />}
+                            Generate
                         </button>
                     </div>
                 </form>
@@ -923,6 +1079,87 @@ export default function MetadataManager() {
                             className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
                         >
                             Add Attribute
+                        </button>
+                    </div>
+                </form>
+            </Modal>
+
+            {/* Edit Attribute Modal */}
+            <Modal
+                isOpen={!!editAttributeTarget}
+                onClose={() => !editingAttribute && setEditAttributeTarget(null)}
+                title={`Edit Attribute: ${editAttributeTarget?.name || ''}`}
+            >
+                <form onSubmit={handleUpdateAttribute} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Attribute Name</label>
+                        <input
+                            type="text"
+                            required
+                            className="w-full border rounded-md p-2 bg-background"
+                            value={editAttrName}
+                            onChange={(e) => setEditAttrName(e.target.value)}
+                            placeholder="e.g. Contract Number"
+                        />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium mb-1">Type</label>
+                            <select
+                                className="w-full border rounded-md p-2 bg-background"
+                                value={editAttrType}
+                                onChange={(e) => setEditAttrType(e.target.value)}
+                            >
+                                <option value="text">Text</option>
+                                <option value="number">Number</option>
+                                <option value="date">Date</option>
+                                <option value="boolean">Boolean (Checkbox)</option>
+                                <option value="select">Select (Dropdown)</option>
+                            </select>
+                        </div>
+                        <div className="flex items-center pt-6">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={editAttrRequired}
+                                    onChange={(e) => setEditAttrRequired(e.target.checked)}
+                                    className="rounded border-gray-300"
+                                />
+                                <span className="text-sm font-medium">Required Field</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    {editAttrType === 'select' && (
+                        <div>
+                            <label className="block text-sm font-medium mb-1">Options (comma separated)</label>
+                            <input
+                                type="text"
+                                required
+                                className="w-full border rounded-md p-2 bg-background"
+                                value={editAttrOptions}
+                                onChange={(e) => setEditAttrOptions(e.target.value)}
+                                placeholder="Option A, Option B, Option C"
+                            />
+                        </div>
+                    )}
+
+                    <div className="flex justify-end gap-2 pt-2">
+                        <button
+                            type="button"
+                            onClick={() => setEditAttributeTarget(null)}
+                            disabled={editingAttribute}
+                            className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={editingAttribute || !editAttrName.trim()}
+                            className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {editingAttribute && <Loader2 className="animate-spin" size={14} />}
+                            Save Changes
                         </button>
                     </div>
                 </form>

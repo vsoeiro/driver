@@ -4,6 +4,7 @@ import { metadataService } from '../services/metadata';
 import { accountsService } from '../services/accounts';
 import { jobsService } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
+import { getSelectOptions } from '../utils/metadata';
 
 const DEFAULT_FORM = {
     name: '',
@@ -159,7 +160,7 @@ export default function RulesManager() {
                     onChange={(e) => setAttributeValue(attribute, e.target.value)}
                 >
                     <option value="">Ignore</option>
-                    {attribute.options?.options?.map((option) => (
+                    {getSelectOptions(attribute.options).map((option) => (
                         <option key={option} value={option}>{option}</option>
                     ))}
                 </select>

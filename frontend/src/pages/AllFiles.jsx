@@ -4,6 +4,7 @@ import { metadataService } from '../services/metadata';
 import { accountsService } from '../services/accounts';
 import { jobsService } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
+import { getSelectOptions } from '../utils/metadata';
 import {
     File, Folder, FolderOpen, Search, Filter, Database, CheckSquare, Square,
     Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, X, Trash2
@@ -319,7 +320,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                                                 onChange={e => setAttributeValues(prev => ({ ...prev, [attr.id]: e.target.value }))}
                                             >
                                                 <option value="">Select...</option>
-                                                {attr.options?.options?.map(opt => (
+                                                {getSelectOptions(attr.options).map(opt => (
                                                     <option key={opt} value={opt}>{opt}</option>
                                                 ))}
                                             </select>

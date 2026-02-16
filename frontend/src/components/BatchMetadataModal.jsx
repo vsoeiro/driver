@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { metadataService } from '../services/metadata';
 import { itemsService } from '../services/items';
 import { jobsService } from '../services/jobs';
+import { getSelectOptions } from '../utils/metadata';
 import { Loader2 } from 'lucide-react';
 import Modal from './Modal';
 
@@ -175,7 +176,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                                                 onChange={e => setAttributeValues(prev => ({ ...prev, [attr.id]: e.target.value }))}
                                             >
                                                 <option value="">Select...</option>
-                                                {attr.options?.options?.map(opt => (
+                                                {getSelectOptions(attr.options).map(opt => (
                                                     <option key={opt} value={opt}>{opt}</option>
                                                 ))}
                                             </select>

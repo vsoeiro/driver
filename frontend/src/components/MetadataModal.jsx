@@ -2,8 +2,10 @@ import { useState, useEffect, useCallback } from 'react';
 import Modal from './Modal';
 import { metadataService } from '../services/metadata';
 import { jobsService } from '../services/jobs';
+import { aiService } from '../services/ai';
 import { useToast } from '../contexts/ToastContext';
-import { Loader2, AlertTriangle } from 'lucide-react';
+import { Loader2, AlertTriangle, Sparkles } from 'lucide-react';
+import { getSelectOptions } from '../utils/metadata';
 
 export default function MetadataModal({ isOpen, onClose, item, accountId, onSuccess }) {
     const { showToast } = useToast();
@@ -11,6 +13,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [history, setHistory] = useState([]);
+    const [aiFilling, setAiFilling] = useState(false);
 
     // Form State
     const [selectedCategoryId, setSelectedCategoryId] = useState('');
@@ -40,7 +43,6 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
     }, [accountId, item, showToast]);
 
     useEffect(() => {
-        console.log("MetadataModal item:", item);
         if (isOpen && item) {
             loadData();
         } else {
@@ -50,6 +52,97 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
             setHistory([]);
         }
     }, [isOpen, item, loadData]);
+
+    const normalizeAiValue = (attribute, value) => {
+        if (value === undefined || value === null || value === '') return value;
+
+        if (attribute.data_type === 'boolean') {
+            if (typeof value === 'boolean') return value;
+            if (typeof value === 'number') return value !== 0;
+            if (typeof value === 'string') {
+                const normalized = value.trim().toLowerCase();
+                if (['true', 'yes', '1', 'y'].includes(normalized)) return true;
+                if (['false', 'no', '0', 'n'].includes(normalized)) return false;
+            }
+            return Boolean(value);
+        }
+
+        if (attribute.data_type === 'number') {
+            const parsed = Number(value);
+            return Number.isNaN(parsed) ? value : parsed;
+        }
+
+        if (attribute.data_type === 'date') {
+            const strValue = String(value);
+            return strValue.length >= 10 ? strValue.slice(0, 10) : strValue;
+        }
+
+        return value;
+    };
+
+    const handleFillWithAI = async () => {
+        if (!selectedCategoryId) {
+            showToast('Select a category first', 'error');
+            return;
+        }
+        if (!item?.name) {
+            showToast('File name is not available for AI extraction', 'error');
+            return;
+        }
+
+        try {
+            setAiFilling(true);
+            const fileFormat = item.extension || item.mime_type || null;
+            const fileContext = [
+                `File name: ${item.name}`,
+                item.path ? `Path: ${item.path}` : null,
+                item.item_type ? `Type: ${item.item_type}` : null,
+                fileFormat ? `Format: ${fileFormat}` : null,
+                item.size !== undefined && item.size !== null ? `Size bytes: ${item.size}` : null,
+                item.created_at ? `Created at: ${item.created_at}` : null,
+                item.modified_at ? `Modified at: ${item.modified_at}` : null,
+            ]
+                .filter(Boolean)
+                .join('\n');
+
+            const result = await aiService.extractMetadata({
+                category_id: selectedCategoryId,
+                document_text: fileContext,
+                apply_to_item: false,
+            });
+
+            const category = categories.find(c => c.id === selectedCategoryId);
+            const attrsById = new Map((category?.attributes || []).map(a => [a.id, a]));
+            const normalizedValues = {};
+
+            Object.entries(result.values || {}).forEach(([attrId, rawValue]) => {
+                const attr = attrsById.get(attrId);
+                if (!attr) return;
+                normalizedValues[attrId] = normalizeAiValue(attr, rawValue);
+            });
+
+            const filledCount = Object.keys(normalizedValues).length;
+            if (filledCount === 0) {
+                showToast('AI could not match values to this category attributes. Try more document text.', 'error');
+                return;
+            }
+
+            setFormValues(prev => ({ ...prev, ...normalizedValues }));
+
+            const confidenceText = typeof result.confidence === 'number'
+                ? ` (${Math.round(result.confidence * 100)}% confidence)`
+                : '';
+            showToast(
+                `AI filled ${filledCount} field(s)${confidenceText}`,
+                'success'
+            );
+        } catch (error) {
+            const message = error?.response?.data?.detail || 'Failed to extract metadata with AI';
+            showToast(message, 'error');
+        } finally {
+            setAiFilling(false);
+        }
+    };
 
     const handleSave = async (e) => {
         e.preventDefault();
@@ -127,7 +220,12 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
     const selectedCategory = categories.find(c => c.id === selectedCategoryId);
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={`Metadata for ${item?.name}`}>
+        <Modal
+            isOpen={isOpen}
+            onClose={onClose}
+            title={`Metadata for ${item?.name}`}
+            maxWidthClass="max-w-2xl"
+        >
             {loading ? (
                 <div className="flex justify-center p-8">
                     <Loader2 className="animate-spin text-primary" size={32} />
@@ -164,6 +262,31 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                             ))}
                         </select>
                     </div>
+
+                    {selectedCategory && (
+                        <div className="space-y-2 border rounded-md p-3 bg-muted/20">
+                            <div className="flex items-center justify-between gap-3">
+                                <div>
+                                    <h4 className="text-sm font-medium">AI Assist</h4>
+                                    <p className="text-xs text-muted-foreground">
+                                        AI will infer metadata from the file name automatically.
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={handleFillWithAI}
+                                    disabled={aiFilling || !item?.name}
+                                    className="px-3 py-2 text-sm font-medium border rounded-md hover:bg-accent disabled:opacity-50 flex items-center gap-2"
+                                >
+                                    {aiFilling ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />}
+                                    Fill with AI
+                                </button>
+                            </div>
+                            <div className="text-xs text-muted-foreground bg-background border rounded-md p-2">
+                                Source context: <span className="font-medium">{item?.name || '-'}</span>
+                            </div>
+                        </div>
+                    )}
 
                     {selectedCategory && (
                         <div className="space-y-3 border-t pt-4">
@@ -223,7 +346,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                                                 onChange={e => handleInputChange(attr.id, e.target.value)}
                                             >
                                                 <option value="">Select...</option>
-                                                {attr.options?.options?.map(opt => (
+                                                {getSelectOptions(attr.options).map(opt => (
                                                     <option key={opt} value={opt}>{opt}</option>
                                                 ))}
                                             </select>
