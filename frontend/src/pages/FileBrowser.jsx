@@ -4,17 +4,20 @@ import { useDrive } from '../hooks/useDrive';
 import { useUpload } from '../hooks/useUpload';
 import { driveService } from '../services/drive';
 import { metadataService } from '../services/metadata';
+import { jobsService } from '../services/jobs';
 const { getDownloadUrl } = driveService;
 const { batchDeleteMetadata } = metadataService;
 import {
     Folder, File, Download, Trash2,
-    UploadCloud, FolderPlus, Loader2, ArrowRightLeft, Database, XCircle, CheckSquare, Square, Search, X, ChevronDown
+    UploadCloud, FolderPlus, Loader2, ArrowRightLeft, Database, XCircle, CheckSquare, Square, Search, X, ChevronDown, BookOpen
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import MoveModal from '../components/MoveModal';
 import MetadataModal from '../components/MetadataModal';
 import BatchMetadataModal from '../components/BatchMetadataModal';
 import { useToast } from '../contexts/ToastContext';
+
+const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'pdf', 'epub']);
 
 export default function FileBrowser() {
     const { accountId, folderId } = useParams();
@@ -170,6 +173,19 @@ export default function FileBrowser() {
         }
     };
 
+    const executeMapComics = async () => {
+        setActionLoading(true);
+        try {
+            await jobsService.createExtractComicAssetsJob(accountId, Array.from(selectedItems));
+            showToast('Comic mapping job created. It can process selected files and folders recursively.', 'success');
+            setMetadataMenuOpen(false);
+        } catch (e) {
+            showToast(`Failed to create comic mapping job: ${e.message}`, 'error');
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
     const executeCreateFolder = async (e) => {
         e.preventDefault();
         if (!newFolderName.trim()) return;
@@ -215,6 +231,18 @@ export default function FileBrowser() {
             item_id: file.id,
             path: file.path || `${currentFolderPath}/${file.name}`.replace('//', '/'),
         }));
+
+    const canMapComics = useMemo(() => {
+        if (selectedItems.size === 0) return false;
+        const selected = sortedFiles.filter((file) => selectedItems.has(file.id));
+        return selected.every((item) => {
+            if (item.item_type === 'folder') return true;
+            const dotIndex = item.name.lastIndexOf('.');
+            if (dotIndex < 0) return false;
+            const ext = item.name.slice(dotIndex + 1).toLowerCase();
+            return COMIC_MAPPABLE_EXTS.has(ext);
+        });
+    }, [selectedItems, sortedFiles]);
 
     return (
         <div className="flex flex-col h-screen">
@@ -330,6 +358,14 @@ export default function FileBrowser() {
                                         className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 text-destructive hover:text-destructive"
                                     >
                                         <XCircle size={14} /> Remove Metadata
+                                    </button>
+                                    <button
+                                        onClick={executeMapComics}
+                                        disabled={!canMapComics || actionLoading}
+                                        className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
+                                    >
+                                        {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
+                                        Map Comics
                                     </button>
                                 </div>
                             </div>

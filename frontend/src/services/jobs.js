@@ -94,6 +94,14 @@ export const createApplyRuleJob = async (ruleId) => {
     return response.data;
 };
 
+export const createExtractComicAssetsJob = async (accountId, itemIds) => {
+    const response = await api.post('/jobs/comics/extract', {
+        account_id: accountId,
+        item_ids: itemIds,
+    });
+    return response.data;
+};
+
 export const jobsService = {
     createMoveJob,
     getJobs,
@@ -105,6 +113,7 @@ export const jobsService = {
     removeMetadataRecursive,
     createMetadataUndoJob,
     createApplyRuleJob,
+    createExtractComicAssetsJob,
 };
 
 export default jobsService;

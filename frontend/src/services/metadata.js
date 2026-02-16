@@ -88,10 +88,28 @@ export const getCategoryStats = async () => {
     return response.data;
 };
 
+export const listPlugins = async () => {
+    const response = await api.get('/metadata/plugins');
+    return response.data;
+};
+
+export const activatePlugin = async (pluginKey) => {
+    const response = await api.post(`/metadata/plugins/${pluginKey}/activate`);
+    return response.data;
+};
+
+export const deactivatePlugin = async (pluginKey) => {
+    const response = await api.post(`/metadata/plugins/${pluginKey}/deactivate`);
+    return response.data;
+};
+
 export const metadataService = {
     getCategories,
     listCategories: getCategories,
     getCategoryStats,
+    listPlugins,
+    activatePlugin,
+    deactivatePlugin,
     createCategory,
     deleteCategory,
     createAttribute,

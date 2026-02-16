@@ -8,6 +8,7 @@ import JobStatusNotifier from './components/JobStatusNotifier'
 import MetadataManager from './pages/MetadataManager'
 import RulesManager from './pages/RulesManager'
 import AdminSettings from './pages/AdminSettings'
+import PluginsManager from './pages/PluginsManager'
 
 function App() {
     return (
@@ -26,6 +27,7 @@ function App() {
                         <Route path="/all-files" element={<AllFiles />} />
                         <Route path="/jobs" element={<Jobs />} />
                         <Route path="/metadata" element={<MetadataManager />} />
+                        <Route path="/plugins" element={<PluginsManager />} />
                         <Route path="/rules" element={<RulesManager />} />
                         <Route path="/admin/settings" element={<AdminSettings />} />
                     </Route>

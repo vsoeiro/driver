@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useMemo, useCallback } from 'react';
+import { Fragment, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { itemsService } from '../services/items';
 import { metadataService } from '../services/metadata';
 import { accountsService } from '../services/accounts';
@@ -7,10 +7,12 @@ import { useToast } from '../contexts/ToastContext';
 import { getSelectOptions } from '../utils/metadata';
 import {
     File, Folder, FolderOpen, Search, Filter, Database, CheckSquare, Square,
-    Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, X, Trash2
+    Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, X, Trash2, ChevronDown, BookOpen
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import ProviderIcon from '../components/ProviderIcon';
+
+const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'pdf', 'epub']);
 
 // Filter Component
 const FilterBar = ({ onFilter, filters, accounts, categories }) => {
@@ -516,12 +518,26 @@ export default function AllFiles() {
 
     const [batchModalOpen, setBatchModalOpen] = useState(false);
     const [removeModalOpen, setRemoveModalOpen] = useState(false);
+    const [metadataMenuOpen, setMetadataMenuOpen] = useState(false);
+    const [actionLoading, setActionLoading] = useState(false);
+    const metadataMenuRef = useRef(null);
 
     const { showToast } = useToast();
 
     useEffect(() => {
         accountsService.getAccounts().then(setAccounts).catch(console.error);
         metadataService.listCategories().then(setMetaCategories).catch(console.error);
+    }, []);
+
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (metadataMenuRef.current && !metadataMenuRef.current.contains(event.target)) {
+                setMetadataMenuOpen(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
     const fetchItems = useCallback(async (overridePage) => {
@@ -610,6 +626,18 @@ export default function AllFiles() {
         return items.filter(i => selectedItems.has(i.id));
     };
 
+    const canMapComics = useMemo(() => {
+        if (selectedItems.size === 0) return false;
+        const selected = items.filter((item) => selectedItems.has(item.id));
+        return selected.every((item) => {
+            if (item.item_type === 'folder') return true;
+            const dotIndex = item.name.lastIndexOf('.');
+            if (dotIndex < 0) return false;
+            const ext = item.name.slice(dotIndex + 1).toLowerCase();
+            return COMIC_MAPPABLE_EXTS.has(ext);
+        });
+    }, [selectedItems, items]);
+
     const getAccountName = (accountId) => {
         const acc = accounts.find(a => a.id === accountId);
         return acc ? acc.email : (accountId ? accountId.slice(0, 8) : '-');
@@ -628,6 +656,37 @@ export default function AllFiles() {
         setSearchTerm('');
         setPathPrefix('');
         setPage(1);
+    };
+
+    const executeMapComics = async () => {
+        if (selectedItems.size === 0) return;
+        if (!canMapComics) {
+            showToast('Map Comics is only available for folders or files with extensions: CBZ, ZIP, PDF, EPUB.', 'error');
+            return;
+        }
+        setActionLoading(true);
+        try {
+            const selected = getSelectedObjects();
+            const byAccount = {};
+            for (const item of selected) {
+                if (!byAccount[item.account_id]) byAccount[item.account_id] = [];
+                byAccount[item.account_id].push(item.item_id);
+            }
+
+            const entries = Object.entries(byAccount);
+            await Promise.all(
+                entries.map(([accountId, itemIds]) =>
+                    jobsService.createExtractComicAssetsJob(accountId, itemIds)
+                )
+            );
+
+            showToast(`Comic mapping job(s) created for ${entries.length} account(s).`, 'success');
+            setMetadataMenuOpen(false);
+        } catch (error) {
+            showToast(`Failed to create comic mapping job: ${error.message}`, 'error');
+        } finally {
+            setActionLoading(false);
+        }
     };
 
 
@@ -703,20 +762,56 @@ export default function AllFiles() {
                 <div className="flex items-center gap-2">
                     <span className="font-medium mr-2 whitespace-nowrap w-24 text-right tabular-nums">{selectedItems.size} selected</span>
                     <div className="h-4 w-px bg-border mx-2" />
-                    <button
-                        onClick={() => setBatchModalOpen(true)}
-                        disabled={selectedItems.size === 0}
-                        className="flex items-center gap-2 px-3 py-1.5 hover:bg-background rounded-md disabled:opacity-50"
+                    <div
+                        className={`relative ${selectedItems.size === 0 ? 'pointer-events-none opacity-50' : ''}`}
+                        ref={metadataMenuRef}
                     >
-                        <Database size={16} /> Edit Metadata
-                    </button>
-                    <button
-                        onClick={() => setRemoveModalOpen(true)}
-                        disabled={selectedItems.size === 0}
-                        className="flex items-center gap-2 px-3 py-1.5 hover:bg-red-50 text-red-600 rounded-md disabled:opacity-50"
-                    >
-                        <Trash2 size={16} /> Remove Metadata
-                    </button>
+                        <button
+                            onClick={() => setMetadataMenuOpen(!metadataMenuOpen)}
+                            disabled={selectedItems.size === 0}
+                            className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:cursor-not-allowed"
+                            title="Metadata Actions"
+                        >
+                            <Database size={16} />
+                            <span className="hidden sm:inline">Metadata</span>
+                            <ChevronDown size={14} className={`transition-transform ${metadataMenuOpen ? 'rotate-180' : ''}`} />
+                        </button>
+
+                        {metadataMenuOpen && (
+                            <div className="absolute top-full left-0 w-52 pt-1 z-50">
+                                <div className="bg-popover border rounded-md shadow-md py-1">
+                                    <button
+                                        onClick={() => {
+                                            setBatchModalOpen(true);
+                                            setMetadataMenuOpen(false);
+                                        }}
+                                        disabled={selectedItems.size === 0}
+                                        className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
+                                    >
+                                        <Database size={14} /> Edit Metadata
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setRemoveModalOpen(true);
+                                            setMetadataMenuOpen(false);
+                                        }}
+                                        disabled={selectedItems.size === 0}
+                                        className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 text-destructive hover:text-destructive disabled:opacity-50"
+                                    >
+                                        <Trash2 size={14} /> Remove Metadata
+                                    </button>
+                                    <button
+                                        onClick={executeMapComics}
+                                        disabled={!canMapComics || actionLoading}
+                                        className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
+                                    >
+                                        {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
+                                        Map Comics
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
 
                 </div>
 

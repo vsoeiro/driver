@@ -3,6 +3,8 @@ import { metadataService } from '../services/metadata';
 import { itemsService } from '../services/items';
 import { accountsService } from '../services/accounts';
 import { aiService } from '../services/ai';
+import { driveService } from '../services/drive';
+import { getCategoryPluginView } from '../plugins/metadataCategoryViews';
 import { getSelectOptions } from '../utils/metadata';
 import {
     Plus, Trash2, ChevronRight, ChevronDown, ChevronLeft,
@@ -33,11 +35,15 @@ const CategoryItemsTable = ({ category, onBack }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [appliedSearchTerm, setAppliedSearchTerm] = useState('');
     const [searchScope, setSearchScope] = useState('both');
+    const [viewMode, setViewMode] = useState('table');
+    const [coverUrlsByItemId, setCoverUrlsByItemId] = useState({});
     const [filters, setFilters] = useState({
         account_id: '',
         item_type: '',
         attributes: {}
     });
+    const pluginView = getCategoryPluginView(category);
+    const supportsGallery = !!pluginView?.modes?.includes('gallery');
 
     useEffect(() => {
         accountsService.getAccounts().then(setAccounts).catch(console.error);
@@ -214,6 +220,57 @@ const CategoryItemsTable = ({ category, onBack }) => {
         setSelectedItems(new Set());
     }, [items]);
 
+    useEffect(() => {
+        if (!supportsGallery) {
+            setViewMode('table');
+        }
+    }, [supportsGallery, category?.id]);
+
+    useEffect(() => {
+        if (!supportsGallery || viewMode !== 'gallery') {
+            setCoverUrlsByItemId({});
+            return;
+        }
+
+        const coverAttr = (category.attributes || []).find(
+            (attr) => attr.plugin_field_key === pluginView?.gallery?.coverField
+        );
+        if (!coverAttr) {
+            setCoverUrlsByItemId({});
+            return;
+        }
+
+        let cancelled = false;
+
+        const resolveCoverUrls = async () => {
+            const pairs = await Promise.all(
+                items.map(async (item) => {
+                    const coverItemId = item.metadata?.values?.[coverAttr.id];
+                    if (!coverItemId) return [item.id, null];
+                    try {
+                        const url = await driveService.getDownloadUrl(item.account_id, coverItemId);
+                        return [item.id, url];
+                    } catch (_) {
+                        return [item.id, null];
+                    }
+                })
+            );
+
+            if (cancelled) return;
+            const next = {};
+            for (const [itemId, url] of pairs) {
+                if (url) next[itemId] = url;
+            }
+            setCoverUrlsByItemId(next);
+        };
+
+        resolveCoverUrls();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [supportsGallery, viewMode, items, category.attributes, pluginView]);
+
     const handleSort = (column) => {
         if (sort.by === column) {
             setSort(prev => ({ ...prev, order: prev.order === 'asc' ? 'desc' : 'asc' }));
@@ -256,10 +313,20 @@ const CategoryItemsTable = ({ category, onBack }) => {
     };
 
     const attributes = category.attributes || [];
+    const titleAttr = pluginView?.gallery?.titleField
+        ? attributes.find((attr) => attr.plugin_field_key === pluginView.gallery.titleField)
+        : null;
+    const subtitleAttr = pluginView?.gallery?.subtitleField
+        ? attributes.find((attr) => attr.plugin_field_key === pluginView.gallery.subtitleField)
+        : null;
+    const pageCountAttr = pluginView?.gallery?.pageCountField
+        ? attributes.find((attr) => attr.plugin_field_key === pluginView.gallery.pageCountField)
+        : null;
 
     const fixedColTemplate = '40px 40px 2fr 120px 80px';
     const attrCols = attributes.map(() => 'minmax(100px, 1fr)').join(' ');
     const gridTemplate = `${fixedColTemplate} ${attrCols} 140px minmax(180px,1fr)`;
+    const tableMinWidth = Math.max(1200, 780 + attributes.length * 180);
 
     const toggleSelection = (id, index, multiSelect, rangeSelect) => {
         const newSelection = new Set(multiSelect ? selectedItems : []);
@@ -318,6 +385,22 @@ const CategoryItemsTable = ({ category, onBack }) => {
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
+                    {supportsGallery && (
+                        <div className="inline-flex items-center border rounded-md overflow-hidden">
+                            <button
+                                onClick={() => setViewMode('table')}
+                                className={`px-3 py-1.5 text-sm ${viewMode === 'table' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}
+                            >
+                                Table
+                            </button>
+                            <button
+                                onClick={() => setViewMode('gallery')}
+                                className={`px-3 py-1.5 text-sm ${viewMode === 'gallery' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}
+                            >
+                                Gallery
+                            </button>
+                        </div>
+                    )}
                     <select
                         className="border rounded-md px-2 py-1.5 text-sm bg-background"
                         value={searchScope}
@@ -401,92 +484,152 @@ const CategoryItemsTable = ({ category, onBack }) => {
                         No items found in this category.
                     </div>
                 ) : (
-                    <div className="border rounded-lg overflow-hidden bg-card select-none">
-                        {/* Table Header */}
-                        <div
-                            className="gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center sticky top-0"
-                            style={{ display: 'grid', gridTemplateColumns: gridTemplate }}
-                        >
-                            <div className="flex justify-center">
-                                <button onClick={toggleSelectAll}>
-                                    {selectedItems.size === items.length && items.length > 0 ? <CheckSquare size={16} /> : <Square size={16} />}
-                                </button>
+                    viewMode === 'gallery' && supportsGallery ? (
+                        <div className="border rounded-lg bg-card p-4">
+                            <div className="grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-4">
+                                {items.map((item, index) => {
+                                    const isSelected = selectedItems.has(item.id);
+                                    const title = titleAttr ? item.metadata?.values?.[titleAttr.id] || item.name : item.name;
+                                    const subtitle = subtitleAttr ? item.metadata?.values?.[subtitleAttr.id] : null;
+                                    const pageCount = pageCountAttr ? item.metadata?.values?.[pageCountAttr.id] : null;
+                                    return (
+                                        <button
+                                            key={item.id}
+                                            onClick={(e) => toggleSelection(item.id, index, !e.altKey, e.shiftKey)}
+                                            className={`text-left border rounded-md bg-background overflow-hidden transition-colors ${
+                                                isSelected ? 'ring-2 ring-primary border-primary/40' : 'hover:border-primary/40'
+                                            }`}
+                                        >
+                                            <div className="aspect-[3/4] bg-muted/40">
+                                                {coverUrlsByItemId[item.id] ? (
+                                                    <img
+                                                        src={coverUrlsByItemId[item.id]}
+                                                        alt={String(title)}
+                                                        className="w-full h-full object-cover"
+                                                        loading="lazy"
+                                                    />
+                                                ) : (
+                                                    <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground">
+                                                        No cover
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="p-2 space-y-0.5">
+                                                <div className="text-xs font-semibold truncate" title={String(title)}>
+                                                    {title}
+                                                </div>
+                                                {subtitle ? (
+                                                    <div className="text-[11px] text-muted-foreground truncate" title={String(subtitle)}>
+                                                        {subtitle}
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-[11px] text-muted-foreground truncate" title={item.name}>
+                                                        {item.name}
+                                                    </div>
+                                                )}
+                                                {pageCount !== null && pageCount !== undefined && pageCount !== '' && (
+                                                    <div className="text-[11px] text-muted-foreground">
+                                                        {pageCount} pages
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </button>
+                                    );
+                                })}
                             </div>
-                            <div></div>
-                            <div className="cursor-pointer flex items-center gap-1 hover:text-foreground" onClick={() => handleSort('name')}>
-                                Name {renderSortIcon('name')}
-                            </div>
-                            <div className="flex items-center gap-1 hover:text-foreground">
-                                Account
-                            </div>
-                            <div className="cursor-pointer flex items-center gap-1 hover:text-foreground justify-end" onClick={() => handleSort('size')}>
-                                Size {renderSortIcon('size')}
-                            </div>
-                            {attributes.map(attr => (
-                                <div key={attr.id} className="flex items-center gap-1 truncate" title={attr.name}>
-                                    {attr.name}
-                                </div>
-                            ))}
-                            <div className="cursor-pointer flex items-center gap-1 hover:text-foreground justify-end" onClick={() => handleSort('modified_at')}>
-                                Modified {renderSortIcon('modified_at')}
-                            </div>
-                            <div className="text-right">Path</div>
                         </div>
-
-                        {/* Table Rows */}
-                        <div className="divide-y">
-                            {items.map((item, index) => {
-                                const isFolder = item.item_type === 'folder';
-                                const isSelected = selectedItems.has(item.id);
-                                return (
+                    ) : (
+                        <div className="border rounded-lg bg-card select-none overflow-hidden">
+                            <div className="overflow-x-auto">
+                                <div style={{ minWidth: `${tableMinWidth}px` }}>
+                                    {/* Table Header */}
                                     <div
-                                        key={item.id}
-                                        className={`gap-4 p-3 items-center hover:bg-muted/30 transition-colors ${isSelected ? 'bg-muted/40' : ''}`}
+                                        className="gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center sticky top-0"
                                         style={{ display: 'grid', gridTemplateColumns: gridTemplate }}
-                                        onClick={(e) => toggleSelection(item.id, index, !e.altKey, e.shiftKey)}
                                     >
                                         <div className="flex justify-center">
-                                            <div className={`cursor-pointer ${isSelected ? 'text-primary' : 'text-muted-foreground/50'}`}>
-                                                {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
-                                            </div>
+                                            <button onClick={toggleSelectAll}>
+                                                {selectedItems.size === items.length && items.length > 0 ? <CheckSquare size={16} /> : <Square size={16} />}
+                                            </button>
                                         </div>
-                                        <div className="flex justify-center text-muted-foreground">
-                                            {isFolder ? (
-                                                <Folder className="text-blue-500 fill-blue-500/20" size={20} />
-                                            ) : (
-                                                <File className="text-gray-400" size={20} />
-                                            )}
+                                        <div></div>
+                                        <div className="cursor-pointer flex items-center gap-1 hover:text-foreground" onClick={() => handleSort('name')}>
+                                            Name {renderSortIcon('name')}
                                         </div>
-                                        <div className="min-w-0 truncate font-medium" title={item.name}>
-                                            {item.name}
+                                        <div className="flex items-center gap-1 hover:text-foreground">
+                                            Account
                                         </div>
-                                        <div className="flex items-center gap-1 text-sm text-foreground">
-                                            <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                                                <User size={12} className="text-primary" />
-                                            </div>
-                                            <span className="truncate" title={getAccountName(item.account_id)}>
-                                                {getAccountName(item.account_id)}
-                                            </span>
-                                        </div>
-                                        <div className="text-right text-sm text-muted-foreground tabular-nums">
-                                            {formatSize(item.size)}
+                                        <div className="cursor-pointer flex items-center gap-1 hover:text-foreground justify-end" onClick={() => handleSort('size')}>
+                                            Size {renderSortIcon('size')}
                                         </div>
                                         {attributes.map(attr => (
-                                            <div key={attr.id} className="text-sm text-foreground truncate" title={getAttributeValue(item, attr)}>
-                                                {getAttributeValue(item, attr)}
+                                            <div key={attr.id} className="flex items-center gap-1 truncate" title={attr.name}>
+                                                {attr.name}
                                             </div>
                                         ))}
-                                        <div className="text-right text-sm text-muted-foreground tabular-nums">
-                                            {formatDate(item.modified_at)}
+                                        <div className="cursor-pointer flex items-center gap-1 hover:text-foreground justify-end" onClick={() => handleSort('modified_at')}>
+                                            Modified {renderSortIcon('modified_at')}
                                         </div>
-                                        <div className="text-right text-xs text-muted-foreground truncate" title={item.path}>
-                                            {item.path}
-                                        </div>
+                                        <div className="text-right">Path</div>
                                     </div>
-                                );
-                            })}
+
+                                    {/* Table Rows */}
+                                    <div className="divide-y">
+                                        {items.map((item, index) => {
+                                            const isFolder = item.item_type === 'folder';
+                                            const isSelected = selectedItems.has(item.id);
+                                            return (
+                                                <div
+                                                    key={item.id}
+                                                    className={`gap-4 p-3 items-center hover:bg-muted/30 transition-colors ${isSelected ? 'bg-muted/40' : ''}`}
+                                                    style={{ display: 'grid', gridTemplateColumns: gridTemplate }}
+                                                    onClick={(e) => toggleSelection(item.id, index, !e.altKey, e.shiftKey)}
+                                                >
+                                                    <div className="flex justify-center">
+                                                        <div className={`cursor-pointer ${isSelected ? 'text-primary' : 'text-muted-foreground/50'}`}>
+                                                            {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex justify-center text-muted-foreground">
+                                                        {isFolder ? (
+                                                            <Folder className="text-blue-500 fill-blue-500/20" size={20} />
+                                                        ) : (
+                                                            <File className="text-gray-400" size={20} />
+                                                        )}
+                                                    </div>
+                                                    <div className="min-w-0 truncate font-medium" title={item.name}>
+                                                        {item.name}
+                                                    </div>
+                                                    <div className="flex items-center gap-1 text-sm text-foreground">
+                                                        <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                                                            <User size={12} className="text-primary" />
+                                                        </div>
+                                                        <span className="truncate" title={getAccountName(item.account_id)}>
+                                                            {getAccountName(item.account_id)}
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-right text-sm text-muted-foreground tabular-nums">
+                                                        {formatSize(item.size)}
+                                                    </div>
+                                                    {attributes.map(attr => (
+                                                        <div key={attr.id} className="text-sm text-foreground truncate" title={getAttributeValue(item, attr)}>
+                                                            {getAttributeValue(item, attr)}
+                                                        </div>
+                                                    ))}
+                                                    <div className="text-right text-sm text-muted-foreground tabular-nums">
+                                                        {formatDate(item.modified_at)}
+                                                    </div>
+                                                    <div className="text-right text-xs text-muted-foreground truncate" title={item.path}>
+                                                        {item.path}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                    </div>
+                    )
                 )}
             </main>
 
@@ -581,6 +724,10 @@ export default function MetadataManager() {
 
     const openDeleteCategoryModal = (category, e) => {
         e.stopPropagation();
+        if (category.is_locked || category.managed_by_plugin) {
+            showToast('Plugin-managed categories cannot be deleted. Deactivate the plugin instead.', 'error');
+            return;
+        }
         setDeleteCategoryTarget(category);
     };
 
@@ -626,10 +773,14 @@ export default function MetadataManager() {
         }
     };
 
-    const handleDeleteAttribute = async (id) => {
+    const handleDeleteAttribute = async (attr) => {
+        if (attr.is_locked || attr.managed_by_plugin) {
+            showToast('Plugin-managed attributes cannot be deleted', 'error');
+            return;
+        }
         if (!window.confirm('Delete this attribute?')) return;
         try {
-            await metadataService.deleteAttribute(id);
+            await metadataService.deleteAttribute(attr.id);
             showToast('Attribute deleted', 'success');
             loadCategories();
         } catch (error) {
@@ -638,6 +789,10 @@ export default function MetadataManager() {
     };
 
     const openEditAttributeModal = (attr) => {
+        if (attr.is_locked || attr.managed_by_plugin) {
+            showToast('Plugin-managed attributes cannot be edited', 'error');
+            return;
+        }
         setEditAttributeTarget(attr);
         setEditAttrName(attr.name || '');
         setEditAttrType(attr.data_type || 'text');
@@ -714,6 +869,7 @@ export default function MetadataManager() {
             setAiGeneratingCategory(false);
         }
     };
+
 
     // If viewing a specific category's items
     if (viewingCategory) {
@@ -805,7 +961,8 @@ export default function MetadataManager() {
                                         </button>
                                         <button
                                             onClick={(e) => openDeleteCategoryModal(cat, e)}
-                                            className="p-2 hover:bg-destructive/10 text-muted-foreground hover:text-destructive rounded-md transition-colors"
+                                            disabled={cat.is_locked || cat.managed_by_plugin}
+                                            className="p-2 hover:bg-destructive/10 text-muted-foreground hover:text-destructive rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                                             title="Delete category"
                                         >
                                             <Trash2 size={18} />
@@ -849,14 +1006,16 @@ export default function MetadataManager() {
                                                         <div className="flex items-center gap-1">
                                                             <button
                                                                 onClick={() => openEditAttributeModal(attr)}
-                                                                className="text-muted-foreground hover:text-primary p-1 rounded"
+                                                                disabled={attr.is_locked || attr.managed_by_plugin}
+                                                                className="text-muted-foreground hover:text-primary p-1 rounded disabled:opacity-40 disabled:cursor-not-allowed"
                                                                 title="Edit attribute"
                                                             >
                                                                 <Pencil size={16} />
                                                             </button>
                                                             <button
-                                                                onClick={() => handleDeleteAttribute(attr.id)}
-                                                                className="text-muted-foreground hover:text-destructive p-1 rounded"
+                                                                onClick={() => handleDeleteAttribute(attr)}
+                                                                disabled={attr.is_locked || attr.managed_by_plugin}
+                                                                className="text-muted-foreground hover:text-destructive p-1 rounded disabled:opacity-40 disabled:cursor-not-allowed"
                                                                 title="Delete attribute"
                                                             >
                                                                 <Trash2 size={16} />

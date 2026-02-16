@@ -17,6 +17,7 @@ import {
     Settings,
     Menu,
     ChevronDown,
+    Plug,
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -61,6 +62,7 @@ export default function Sidebar() {
     const quickLinks = [
         { to: '/jobs', label: 'Jobs', icon: Activity },
         { to: '/metadata', label: 'Metadata', icon: Database },
+        { to: '/plugins', label: 'Plugins', icon: Plug },
         { to: '/all-files', label: 'File Library', icon: FileText },
         { to: '/rules', label: 'Rules', icon: Wand2 },
         { to: '/admin/settings', label: 'Admin', icon: Settings },
