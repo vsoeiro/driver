@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # --- Attribute Schemas ---
@@ -29,8 +29,7 @@ class MetadataAttribute(MetadataAttributeBase):
     id: UUID
     category_id: UUID
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- Category Schemas ---
@@ -46,17 +45,16 @@ class MetadataCategoryCreate(MetadataCategoryBase):
 class MetadataCategory(MetadataCategoryBase):
     id: UUID
     created_at: datetime
-    attributes: list[MetadataAttribute] = []
+    attributes: list[MetadataAttribute] = Field(default_factory=list)
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- Item Metadata Schemas ---
 class ItemMetadataBase(BaseModel):
     item_id: str
     category_id: UUID
-    values: dict = {}
+    values: dict = Field(default_factory=dict)
 
 
 class ItemMetadataCreate(ItemMetadataBase):
@@ -73,8 +71,7 @@ class ItemMetadata(ItemMetadataBase):
     updated_at: datetime
     category_name: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ItemMetadataHistory(BaseModel):
@@ -92,8 +89,7 @@ class ItemMetadataHistory(BaseModel):
     job_id: UUID | None = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MetadataRuleBase(BaseModel):
@@ -105,7 +101,7 @@ class MetadataRuleBase(BaseModel):
     path_contains: str | None = None
     path_prefix: str | None = None
     target_category_id: UUID
-    target_values: dict = {}
+    target_values: dict = Field(default_factory=dict)
     include_folders: bool = False
 
 
@@ -131,8 +127,7 @@ class MetadataRule(MetadataRuleBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MetadataRulePreviewRequest(BaseModel):
@@ -141,7 +136,7 @@ class MetadataRulePreviewRequest(BaseModel):
     path_prefix: str | None = None
     include_folders: bool = False
     target_category_id: UUID
-    target_values: dict = {}
+    target_values: dict = Field(default_factory=dict)
     limit: int = 50
 
 

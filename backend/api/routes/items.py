@@ -107,7 +107,7 @@ async def list_items(
                 if value:
                     # Filter ItemMetadata.values JSON where key matches attr_id and value matches
                     query = query.where(ItemMetadata.values[attr_id].as_string() == str(value))
-        except Exception as e:
+        except Exception:
             # Silently ignore invalid JSON filters for now or log them
             pass
 
