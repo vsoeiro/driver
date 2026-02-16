@@ -7,9 +7,10 @@ import { jobsService } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
 import {
     File, Folder, FolderOpen, Search, Filter, Database, CheckSquare, Square,
-    Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, User, X, Trash2
+    Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, X, Trash2
 } from 'lucide-react';
 import Modal from '../components/Modal';
+import ProviderIcon from '../components/ProviderIcon';
 
 // Filter Component
 const FilterBar = ({ onFilter, filters, accounts, categories }) => {
@@ -615,6 +616,8 @@ export default function AllFiles() {
         return acc ? acc.email : (accountId ? accountId.slice(0, 8) : '-');
     };
 
+    const getAccountById = (accountId) => accounts.find((a) => a.id === accountId);
+
     const handleFolderClick = (item) => {
         const folderPath = item.path || `/${item.name}`;
         setSearchTerm('');
@@ -824,7 +827,7 @@ export default function AllFiles() {
                                         </div>
                                         <div className="flex items-center gap-1 text-sm text-foreground">
                                             <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                                                <User size={12} className="text-primary" />
+                                                <ProviderIcon provider={getAccountById(item.account_id)?.provider} className="w-3 h-3" />
                                             </div>
                                             <span className="truncate" title={getAccountName(item.account_id)}>
                                                 {getAccountName(item.account_id)}

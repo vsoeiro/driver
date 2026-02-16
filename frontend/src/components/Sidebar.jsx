@@ -2,15 +2,18 @@ import React, { useEffect, useState } from 'react';
 import { NavLink, useParams } from 'react-router-dom';
 import { accountsService } from '../services/accounts';
 import { driveService } from '../services/drive';
+import ProviderIcon from './ProviderIcon';
+import ProviderPickerModal from './ProviderPickerModal';
 
 const { getAccounts, linkAccount } = accountsService;
 const { getQuota } = driveService;
-import { HardDrive, Plus, Cloud, Loader2, User, Activity, Database, FileText } from 'lucide-react';
+import { Plus, Cloud, Activity, Database, FileText, Wand2 } from 'lucide-react';
 
 export default function Sidebar() {
     const { accountId } = useParams();
     const [accounts, setAccounts] = useState([]);
     const [quotas, setQuotas] = useState({});
+    const [pickerOpen, setPickerOpen] = useState(false);
 
     useEffect(() => {
         getAccounts().then(async (data) => {
@@ -69,7 +72,7 @@ export default function Sidebar() {
                                 }
                             `}
                         >
-                            <User size={18} className="shrink-0" />
+                            <ProviderIcon provider={acc.provider} className="w-[18px] h-[18px] shrink-0" />
                             <div className="flex-1 min-w-0 flex flex-col">
                                 <span className="truncate font-medium leading-none">{acc.display_name}</span>
                                 <span className={`text-xs truncate ${acc.id === accountId ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>
@@ -104,18 +107,11 @@ export default function Sidebar() {
 
                 <div className="space-y-2">
                     <button
-                        onClick={() => handleLinkAccount('microsoft')}
+                        onClick={() => setPickerOpen(true)}
                         className="flex w-full items-center gap-3 bg-primary/10 text-primary hover:bg-primary/20 px-3 py-2 rounded-md text-sm font-medium transition-colors"
                     >
                         <Plus size={18} className="shrink-0" />
-                        <span>Link Microsoft</span>
-                    </button>
-                    <button
-                        onClick={() => handleLinkAccount('google')}
-                        className="flex w-full items-center gap-3 bg-accent text-accent-foreground hover:bg-accent/80 px-3 py-2 rounded-md text-sm font-medium transition-colors"
-                    >
-                        <Plus size={18} className="shrink-0" />
-                        <span>Link Google</span>
+                        <span>Link Account</span>
                     </button>
                 </div>
             </div>
@@ -160,7 +156,28 @@ export default function Sidebar() {
                     <FileText size={18} className="shrink-0" />
                     <span>All Files</span>
                 </NavLink>
+                <NavLink
+                    to="/rules"
+                    className={({ isActive }) => `
+                        flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
+                        ${isActive
+                            ? 'bg-primary text-primary-foreground shadow-sm'
+                            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                        }
+                    `}
+                >
+                    <Wand2 size={18} className="shrink-0" />
+                    <span>Rules</span>
+                </NavLink>
             </div>
+            <ProviderPickerModal
+                isOpen={pickerOpen}
+                onClose={() => setPickerOpen(false)}
+                onSelect={(provider) => {
+                    setPickerOpen(false);
+                    handleLinkAccount(provider);
+                }}
+            />
         </aside>
     );
 }

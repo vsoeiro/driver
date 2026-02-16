@@ -44,6 +44,40 @@ export const batchDeleteMetadata = async (accountId, itemIds) => {
     });
 };
 
+export const getItemMetadataHistory = async (accountId, itemId) => {
+    const response = await api.get(`/metadata/items/${accountId}/${itemId}/history`);
+    return response.data;
+};
+
+export const undoMetadataBatch = async (batchId) => {
+    const response = await api.post(`/metadata/batches/${batchId}/undo`);
+    return response.data;
+};
+
+export const listRules = async () => {
+    const response = await api.get('/metadata/rules');
+    return response.data;
+};
+
+export const createRule = async (rule) => {
+    const response = await api.post('/metadata/rules', rule);
+    return response.data;
+};
+
+export const updateRule = async (ruleId, rule) => {
+    const response = await api.patch(`/metadata/rules/${ruleId}`, rule);
+    return response.data;
+};
+
+export const deleteRule = async (ruleId) => {
+    await api.delete(`/metadata/rules/${ruleId}`);
+};
+
+export const previewRule = async (payload) => {
+    const response = await api.post('/metadata/rules/preview', payload);
+    return response.data;
+};
+
 export const getCategoryStats = async () => {
     const response = await api.get('/metadata/categories/stats');
     return response.data;
@@ -61,6 +95,13 @@ export const metadataService = {
     saveItemMetadata,
     deleteItemMetadata,
     batchDeleteMetadata,
+    getItemMetadataHistory,
+    undoMetadataBatch,
+    listRules,
+    createRule,
+    updateRule,
+    deleteRule,
+    previewRule,
 };
 
 export default metadataService;

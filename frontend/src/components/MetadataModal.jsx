@@ -10,6 +10,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
     const [categories, setCategories] = useState([]);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [history, setHistory] = useState([]);
 
     // Form State
     const [selectedCategoryId, setSelectedCategoryId] = useState('');
@@ -23,6 +24,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
             // Reset state
             setSelectedCategoryId('');
             setFormValues({});
+            setHistory([]);
         }
     }, [isOpen, item]);
 
@@ -39,6 +41,8 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                 setSelectedCategoryId(meta.category_id);
                 setFormValues(meta.values || {});
             }
+            const historyData = await metadataService.getItemMetadataHistory(accountId, item.id);
+            setHistory(historyData || []);
         } catch (error) {
             console.error(error);
             showToast('Failed to load metadata', 'error');
@@ -101,6 +105,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
             }
 
             if (onSuccess) onSuccess();
+            await loadData();
             onClose();
         } catch (error) {
             console.error(error);
@@ -245,6 +250,27 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                             {saving && <Loader2 className="animate-spin" size={14} />}
                             Save
                         </button>
+                    </div>
+
+                    <div className="border-t pt-4">
+                        <h4 className="text-sm font-semibold mb-2">Metadata History</h4>
+                        {history.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">No metadata changes for this item yet.</p>
+                        ) : (
+                            <div className="max-h-48 overflow-auto border rounded-md divide-y">
+                                {history.map((entry) => (
+                                    <div key={entry.id} className="px-3 py-2 text-xs">
+                                        <div className="font-medium">{entry.action}</div>
+                                        <div className="text-muted-foreground">
+                                            {new Date(entry.created_at).toLocaleString('en-GB')}
+                                        </div>
+                                        {entry.batch_id && (
+                                            <div className="text-muted-foreground">Batch: {entry.batch_id}</div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 </form>
             )}

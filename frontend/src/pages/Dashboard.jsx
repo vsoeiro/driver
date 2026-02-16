@@ -3,10 +3,13 @@ import { accountsService } from '../services/accounts';
 const { getAccounts, linkAccount } = accountsService;
 import { Link } from 'react-router-dom';
 import { Plus, HardDrive, Calendar, ArrowRight } from 'lucide-react';
+import ProviderIcon from '../components/ProviderIcon';
+import ProviderPickerModal from '../components/ProviderPickerModal';
 
 export default function Dashboard() {
     const [accounts, setAccounts] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [pickerOpen, setPickerOpen] = useState(false);
 
     useEffect(() => {
         getAccounts().then(data => {
@@ -24,18 +27,11 @@ export default function Dashboard() {
                 <h1 className="text-3xl font-bold tracking-tight">Connected Accounts</h1>
                 <div className="flex items-center gap-2">
                     <button
-                        onClick={() => linkAccount('microsoft')}
+                        onClick={() => setPickerOpen(true)}
                         className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md hover:bg-primary/90 transition-colors"
                     >
                         <Plus size={20} />
-                        Link Microsoft
-                    </button>
-                    <button
-                        onClick={() => linkAccount('google')}
-                        className="flex items-center gap-2 bg-accent text-accent-foreground px-4 py-2 rounded-md hover:bg-accent/90 transition-colors"
-                    >
-                        <Plus size={20} />
-                        Link Google
+                        Link Account
                     </button>
                 </div>
             </header>
@@ -49,20 +45,12 @@ export default function Dashboard() {
                     <HardDrive className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
                     <h3 className="text-lg font-medium">No accounts linked</h3>
                     <p className="text-muted-foreground mb-6">Connect a cloud account to get started.</p>
-                    <div className="flex justify-center gap-2">
-                        <button
-                            onClick={() => linkAccount('microsoft')}
-                            className="bg-primary text-primary-foreground px-4 py-2 rounded-md hover:bg-primary/90"
-                        >
-                            Link Microsoft
-                        </button>
-                        <button
-                            onClick={() => linkAccount('google')}
-                            className="bg-accent text-accent-foreground px-4 py-2 rounded-md hover:bg-accent/90"
-                        >
-                            Link Google
-                        </button>
-                    </div>
+                    <button
+                        onClick={() => setPickerOpen(true)}
+                        className="bg-primary text-primary-foreground px-4 py-2 rounded-md hover:bg-primary/90"
+                    >
+                        Link Account
+                    </button>
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -74,7 +62,7 @@ export default function Dashboard() {
                         >
                             <div className="flex items-start justify-between mb-4">
                                 <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400">
-                                    <HardDrive size={24} />
+                                    <ProviderIcon provider={acc.provider} className="w-6 h-6" />
                                 </div>
                                 <span className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 text-xs font-medium px-2.5 py-0.5 rounded-full">
                                     Active
@@ -95,6 +83,14 @@ export default function Dashboard() {
                     ))}
                 </div>
             )}
+            <ProviderPickerModal
+                isOpen={pickerOpen}
+                onClose={() => setPickerOpen(false)}
+                onSelect={(provider) => {
+                    setPickerOpen(false);
+                    linkAccount(provider);
+                }}
+            />
         </div>
     );
 }

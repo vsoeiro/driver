@@ -22,6 +22,10 @@ export const getJobs = async () => {
     return response.data;
 };
 
+export const deleteJob = async (jobId) => {
+    await api.delete(`/jobs/${jobId}`);
+};
+
 export const uploadFileBackground = async (accountId, folderId, file, onProgress) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -71,13 +75,30 @@ export const removeMetadataRecursive = async (accountId, pathPrefix) => {
     return response.data;
 };
 
+export const createMetadataUndoJob = async (batchId) => {
+    const response = await api.post('/jobs/metadata-undo', {
+        batch_id: batchId,
+    });
+    return response.data;
+};
+
+export const createApplyRuleJob = async (ruleId) => {
+    const response = await api.post('/jobs/apply-rule', {
+        rule_id: ruleId,
+    });
+    return response.data;
+};
+
 export const jobsService = {
     createMoveJob,
     getJobs,
+    deleteJob,
     uploadFileBackground,
     createMetadataUpdateJob,
     applyMetadataRecursive,
     removeMetadataRecursive,
+    createMetadataUndoJob,
+    createApplyRuleJob,
 };
 
 export default jobsService;
