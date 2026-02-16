@@ -7,6 +7,7 @@ import { ToastProvider } from './contexts/ToastContext'
 import JobStatusNotifier from './components/JobStatusNotifier'
 import MetadataManager from './pages/MetadataManager'
 import RulesManager from './pages/RulesManager'
+import AdminSettings from './pages/AdminSettings'
 
 function App() {
     return (
@@ -26,6 +27,7 @@ function App() {
                         <Route path="/jobs" element={<Jobs />} />
                         <Route path="/metadata" element={<MetadataManager />} />
                         <Route path="/rules" element={<RulesManager />} />
+                        <Route path="/admin/settings" element={<AdminSettings />} />
                     </Route>
                 </Routes>
             </div>

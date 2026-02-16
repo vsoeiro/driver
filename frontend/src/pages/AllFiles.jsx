@@ -656,7 +656,7 @@ export default function AllFiles() {
                         onClick={clearPathPrefix}
                         className={`text-lg font-semibold hover:text-primary transition-colors ${!pathPrefix ? 'text-foreground' : 'text-muted-foreground'}`}
                     >
-                        All Files
+                        File Library
                     </button>
                     {breadcrumbSegments.map((seg) => (
                         <Fragment key={seg.path}>

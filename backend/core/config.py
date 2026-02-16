@@ -11,6 +11,7 @@ from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from dotenv import load_dotenv
+from backend.services.cron_utils import validate_cron_expression
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_DIR / ".env")
@@ -69,17 +70,26 @@ class Settings(BaseSettings):
     port: int = 8000
     debug: bool = False
     enable_daily_sync_scheduler: bool = Field(default=True, alias="ENABLE_DAILY_SYNC_SCHEDULER")
-    daily_sync_hour: int = Field(default=0, alias="DAILY_SYNC_HOUR")
-    daily_sync_minute: int = Field(default=0, alias="DAILY_SYNC_MINUTE")
+    daily_sync_cron: str | None = Field(default=None, alias="DAILY_SYNC_CRON")
+    daily_sync_hour: int | None = Field(default=None, alias="DAILY_SYNC_HOUR")
+    daily_sync_minute: int | None = Field(default=None, alias="DAILY_SYNC_MINUTE")
 
     @model_validator(mode="after")
     def assemble_db_connection(self) -> "Settings":
         if self.database_url.startswith("sqlite:///") and "aiosqlite" not in self.database_url:
             self.database_url = self.database_url.replace("sqlite:///", "sqlite+aiosqlite:///")
-        if not 0 <= self.daily_sync_hour <= 23:
-            raise ValueError("DAILY_SYNC_HOUR must be between 0 and 23")
-        if not 0 <= self.daily_sync_minute <= 59:
-            raise ValueError("DAILY_SYNC_MINUTE must be between 0 and 59")
+        if self.daily_sync_cron is None:
+            if self.daily_sync_hour is not None or self.daily_sync_minute is not None:
+                hour = self.daily_sync_hour if self.daily_sync_hour is not None else 0
+                minute = self.daily_sync_minute if self.daily_sync_minute is not None else 0
+                if not 0 <= hour <= 23:
+                    raise ValueError("DAILY_SYNC_HOUR must be between 0 and 23")
+                if not 0 <= minute <= 59:
+                    raise ValueError("DAILY_SYNC_MINUTE must be between 0 and 59")
+                self.daily_sync_cron = f"{minute} {hour} * * *"
+            else:
+                self.daily_sync_cron = "0 0 * * *"
+        validate_cron_expression(self.daily_sync_cron)
         return self
 
     @property

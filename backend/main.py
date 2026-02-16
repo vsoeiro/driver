@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.api.routes import accounts, auth, drive, jobs, metadata, items
+from backend.api.routes import accounts, admin, auth, drive, jobs, metadata, items
 from backend.core.config import get_settings
 from backend.core.exceptions import DriveOrganizerError
 from backend.db.session import async_session_maker
@@ -51,32 +51,20 @@ async def lifespan(app: FastAPI):
     worker = BackgroundWorker(async_session_maker)
     worker_task = asyncio.create_task(worker.start())
 
-    scheduler = None
-    scheduler_task = None
-    if settings.enable_daily_sync_scheduler:
-        scheduler = DailySyncScheduler(
-            async_session_maker,
-            hour=settings.daily_sync_hour,
-            minute=settings.daily_sync_minute,
-        )
-        scheduler_task = asyncio.create_task(scheduler.start())
-        logger.info(
-            "Daily sync scheduler enabled at %02d:%02d (server local time).",
-            settings.daily_sync_hour,
-            settings.daily_sync_minute,
-        )
+    scheduler = DailySyncScheduler(async_session_maker)
+    scheduler_task = asyncio.create_task(scheduler.start())
+    logger.info("Daily sync scheduler started with dynamic runtime settings.")
     
     logger.info("Starting Drive Organizer API on %s:%s", settings.host, settings.port)
     yield
     
     # Shutdown background worker
-    if scheduler and scheduler_task:
-        logger.info("Stopping daily sync scheduler...")
-        scheduler.stop()
-        try:
-            await scheduler_task
-        except asyncio.CancelledError:
-            pass
+    logger.info("Stopping daily sync scheduler...")
+    scheduler.stop()
+    try:
+        await scheduler_task
+    except asyncio.CancelledError:
+        pass
 
     logger.info("Stopping background worker...")
     worker.stop()
@@ -127,6 +115,7 @@ def create_app() -> FastAPI:
     app.include_router(jobs.router, prefix="/api/v1")
     app.include_router(metadata.router, prefix="/api/v1")
     app.include_router(items.router, prefix="/api/v1")
+    app.include_router(admin.router, prefix="/api/v1")
 
     @app.exception_handler(DriveOrganizerError)
     async def handle_drive_organizer_error(_, exc: DriveOrganizerError) -> JSONResponse:

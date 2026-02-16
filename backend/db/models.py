@@ -27,6 +27,21 @@ class Base(DeclarativeBase):
     pass
 
 
+class AppSetting(Base):
+    """Application-level persisted settings."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(120), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
 class LinkedAccount(Base):
     """Linked Microsoft account model.
 
@@ -379,7 +394,6 @@ class Item(Base):
     __table_args__ = (
         UniqueConstraint('account_id', 'item_id', name='uq_items_account_item'),
     )
-
 
 
 

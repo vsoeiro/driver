@@ -27,6 +27,7 @@ Variaveis principais:
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`
 - `SECRET_KEY`, `ENCRYPTION_KEY`
 - `DATABASE_URL`
+- `ENABLE_DAILY_SYNC_SCHEDULER`, `DAILY_SYNC_CRON`
 
 ## Rodando o backend
 
@@ -40,6 +41,7 @@ Endpoints uteis:
 
 - Health: `http://localhost:8000/health`
 - OpenAPI: `http://localhost:8000/docs`
+- Admin runtime settings: `http://localhost:5173/admin/settings` (frontend) -> `GET/PUT /api/v1/admin/settings`
 
 ## Rodando o frontend
 

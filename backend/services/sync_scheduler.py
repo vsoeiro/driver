@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from backend.core.config import get_settings
+from backend.services.app_settings import AppSettingsService, RuntimeSettings
+from backend.services.cron_utils import next_run_datetime
 from backend.db.models import LinkedAccount
 from backend.schemas.jobs import JobCreate
 from backend.services.jobs import JobService
@@ -17,43 +20,63 @@ logger = logging.getLogger(__name__)
 
 
 class DailySyncScheduler:
-    """Enqueue one sync job per active account every day at a fixed time."""
+    """Enqueue one sync job per active account based on persisted cron settings."""
 
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
-        hour: int = 0,
-        minute: int = 0,
     ) -> None:
         self.session_factory = session_factory
-        self.hour = hour
-        self.minute = minute
         self._running = False
         self._stop_event = asyncio.Event()
 
     async def start(self) -> None:
         """Run the scheduling loop until stopped."""
         self._running = True
-        logger.info(
-            "Daily sync scheduler started. Next runs at %02d:%02d (server local time).",
-            self.hour,
-            self.minute,
-        )
+        logger.info("Daily sync scheduler started.")
+        active_signature: tuple[bool, str] | None = None
+        next_run: datetime | None = None
 
         while self._running:
+            runtime_settings = await self._get_runtime_settings()
+            signature = (
+                runtime_settings.enable_daily_sync_scheduler,
+                runtime_settings.daily_sync_cron,
+            )
             now = datetime.now().astimezone()
-            sleep_seconds = self._seconds_until_next_run(now, self.hour, self.minute)
 
-            try:
-                await asyncio.wait_for(self._stop_event.wait(), timeout=sleep_seconds)
-                break
-            except asyncio.TimeoutError:
-                pass
+            if signature != active_signature:
+                active_signature = signature
+                if runtime_settings.enable_daily_sync_scheduler:
+                    next_run = next_run_datetime(now, runtime_settings.daily_sync_cron)
+                    logger.info(
+                        "Daily sync scheduler enabled. Cron='%s', next run at %s.",
+                        runtime_settings.daily_sync_cron,
+                        next_run.isoformat(),
+                    )
+                else:
+                    next_run = None
+                    logger.info("Daily sync scheduler disabled by runtime settings.")
 
-            if not self._running:
-                break
+            if not runtime_settings.enable_daily_sync_scheduler:
+                if await self._wait_or_stop(30):
+                    break
+                continue
+
+            if next_run is None:
+                next_run = next_run_datetime(now, runtime_settings.daily_sync_cron)
+
+            if now < next_run:
+                wait_seconds = min((next_run - now).total_seconds(), 30)
+                if await self._wait_or_stop(wait_seconds):
+                    break
+                continue
 
             await self.enqueue_sync_jobs_for_all_accounts()
+            next_run = next_run_datetime(
+                datetime.now().astimezone(),
+                runtime_settings.daily_sync_cron,
+            )
 
         logger.info("Daily sync scheduler stopped.")
 
@@ -89,10 +112,24 @@ class DailySyncScheduler:
             )
             return len(account_ids)
 
-    @staticmethod
-    def _seconds_until_next_run(now: datetime, hour: int, minute: int) -> float:
-        """Compute seconds until the next run at `hour:minute`."""
-        next_run = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if next_run <= now:
-            next_run = next_run + timedelta(days=1)
-        return (next_run - now).total_seconds()
+    async def _get_runtime_settings(self):
+        try:
+            async with self.session_factory() as session:
+                service = AppSettingsService(session)
+                return await service.get_runtime_settings()
+        except Exception:
+            settings = get_settings()
+            logger.exception(
+                "Failed to read runtime settings from database. Falling back to .env defaults."
+            )
+            return RuntimeSettings(
+                enable_daily_sync_scheduler=settings.enable_daily_sync_scheduler,
+                daily_sync_cron=settings.daily_sync_cron,
+            )
+
+    async def _wait_or_stop(self, timeout_seconds: float) -> bool:
+        try:
+            await asyncio.wait_for(self._stop_event.wait(), timeout=max(timeout_seconds, 0))
+            return True
+        except asyncio.TimeoutError:
+            return False

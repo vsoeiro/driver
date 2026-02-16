@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { NavLink, useParams } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { NavLink, useLocation, useParams } from 'react-router-dom';
 import { accountsService } from '../services/accounts';
 import { driveService } from '../services/drive';
 import ProviderIcon from './ProviderIcon';
@@ -7,13 +7,26 @@ import ProviderPickerModal from './ProviderPickerModal';
 
 const { getAccounts, linkAccount } = accountsService;
 const { getQuota } = driveService;
-import { Plus, Cloud, Activity, Database, FileText, Wand2 } from 'lucide-react';
+import {
+    Plus,
+    Cloud,
+    Activity,
+    Database,
+    FileText,
+    Wand2,
+    Settings,
+    Menu,
+    ChevronDown,
+} from 'lucide-react';
 
 export default function Sidebar() {
     const { accountId } = useParams();
+    const location = useLocation();
     const [accounts, setAccounts] = useState([]);
     const [quotas, setQuotas] = useState({});
     const [pickerOpen, setPickerOpen] = useState(false);
+    const [menuOpen, setMenuOpen] = useState(false);
+    const menuRef = useRef(null);
 
     useEffect(() => {
         getAccounts().then(async (data) => {
@@ -45,6 +58,38 @@ export default function Sidebar() {
 
     const activeAccount = accounts.find(a => a.id === accountId);
     const activeQuota = activeAccount ? quotas[activeAccount.id] : null;
+    const quickLinks = [
+        { to: '/jobs', label: 'Jobs', icon: Activity },
+        { to: '/metadata', label: 'Metadata', icon: Database },
+        { to: '/all-files', label: 'File Library', icon: FileText },
+        { to: '/rules', label: 'Rules', icon: Wand2 },
+        { to: '/admin/settings', label: 'Admin', icon: Settings },
+    ];
+
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (menuRef.current && !menuRef.current.contains(event.target)) {
+                setMenuOpen(false);
+            }
+        };
+
+        const handleEscape = (event) => {
+            if (event.key === 'Escape') {
+                setMenuOpen(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        document.addEventListener('keydown', handleEscape);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+            document.removeEventListener('keydown', handleEscape);
+        };
+    }, []);
+
+    useEffect(() => {
+        setMenuOpen(false);
+    }, [location.pathname]);
 
     return (
         <aside className="w-64 border-r bg-muted/10 flex flex-col h-screen sticky top-0">
@@ -116,59 +161,41 @@ export default function Sidebar() {
                 </div>
             </div>
 
-            <div className="px-4 pb-4">
-                <NavLink
-                    to="/jobs"
-                    className={({ isActive }) => `
-                        flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
-                        ${isActive
-                            ? 'bg-primary text-primary-foreground shadow-sm'
-                            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                        }
-                    `}
-                >
-                    <Activity size={18} className="shrink-0" />
-                    <span>Jobs</span>
-                </NavLink>
-                <NavLink
-                    to="/metadata"
-                    className={({ isActive }) => `
-                        flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
-                        ${isActive
-                            ? 'bg-primary text-primary-foreground shadow-sm'
-                            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                        }
-                    `}
-                >
-                    <Database size={18} className="shrink-0" />
-                    <span>Metadata</span>
-                </NavLink>
-                <NavLink
-                    to="/all-files"
-                    className={({ isActive }) => `
-                        flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
-                        ${isActive
-                            ? 'bg-primary text-primary-foreground shadow-sm'
-                            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                        }
-                    `}
-                >
-                    <FileText size={18} className="shrink-0" />
-                    <span>All Files</span>
-                </NavLink>
-                <NavLink
-                    to="/rules"
-                    className={({ isActive }) => `
-                        flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
-                        ${isActive
-                            ? 'bg-primary text-primary-foreground shadow-sm'
-                            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                        }
-                    `}
-                >
-                    <Wand2 size={18} className="shrink-0" />
-                    <span>Rules</span>
-                </NavLink>
+            <div className="px-4 pb-4" ref={menuRef}>
+                <div className="relative">
+                    <button
+                        type="button"
+                        onClick={() => setMenuOpen((prev) => !prev)}
+                        className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-md text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors border bg-background/70"
+                    >
+                        <span className="inline-flex items-center gap-2">
+                            <Menu size={16} className="shrink-0" />
+                            Menu
+                        </span>
+                        <ChevronDown size={16} className={`transition-transform ${menuOpen ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {menuOpen && (
+                        <div className="absolute bottom-full left-0 right-0 mb-2 border rounded-md bg-popover shadow-lg p-1 z-20">
+                            {quickLinks.map(({ to, label, icon: Icon }) => (
+                                <NavLink
+                                    key={to}
+                                    to={to}
+                                    className={({ isActive }) => `
+                                        flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
+                                        ${isActive
+                                            ? 'bg-primary text-primary-foreground shadow-sm'
+                                            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                                        }
+                                    `}
+                                >
+                                    <Icon size={16} className="shrink-0" />
+                                    <span>{label}</span>
+                                </NavLink>
+                            ))}
+                        </div>
+                    )}
+                </div>
             </div>
             <ProviderPickerModal
                 isOpen={pickerOpen}

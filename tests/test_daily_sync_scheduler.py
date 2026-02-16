@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+from backend.services.cron_utils import seconds_until_next_run
 from backend.services.sync_scheduler import DailySyncScheduler
 
 
@@ -20,13 +21,13 @@ class _SessionContext:
 
 def test_seconds_until_next_run_same_day():
     now = datetime(2026, 2, 15, 23, 50, 0, tzinfo=UTC)
-    seconds = DailySyncScheduler._seconds_until_next_run(now, hour=23, minute=55)
+    seconds = seconds_until_next_run(now, "55 23 * * *")
     assert seconds == 300
 
 
 def test_seconds_until_next_run_next_day():
     now = datetime(2026, 2, 15, 23, 50, 0, tzinfo=UTC)
-    seconds = DailySyncScheduler._seconds_until_next_run(now, hour=0, minute=0)
+    seconds = seconds_until_next_run(now, "0 0 * * *")
     assert seconds == 600
 
 
