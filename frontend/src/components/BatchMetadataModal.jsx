@@ -2,6 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { metadataService } from '../services/metadata';
 import { itemsService } from '../services/items';
 import { jobsService } from '../services/jobs';
+import { driveService } from '../services/drive';
+import { getCategoryPluginView } from '../plugins/metadataCategoryViews';
+import { buildCoverCacheKey, getCachedCoverUrl, setCachedCoverUrl } from '../utils/coverCache';
 import { getSelectOptions } from '../utils/metadata';
 import { Loader2 } from 'lucide-react';
 import Modal from './Modal';
@@ -13,6 +16,8 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
     const [applyRecursive, setApplyRecursive] = useState(false);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [coverUrl, setCoverUrl] = useState(null);
+    const [coverLoading, setCoverLoading] = useState(false);
 
     const hasFolders = selectedItems.some(i => i.item_type === 'folder');
 
@@ -139,10 +144,85 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
     };
 
     const currentCategory = categories.find(c => c.id === selectedCategory);
+    const pluginView = getCategoryPluginView(currentCategory);
+    const coverAttr = currentCategory?.attributes?.find(
+        (attr) => attr.plugin_field_key === pluginView?.gallery?.coverField
+    );
+    const singleItem = selectedItems.length === 1 ? selectedItems[0] : null;
+    const coverItemId = coverAttr ? attributeValues?.[coverAttr.id] : null;
+    const showCoverPanel = !!(
+        singleItem &&
+        singleItem.item_type !== 'folder' &&
+        currentCategory &&
+        coverAttr &&
+        coverItemId
+    );
+
+    useEffect(() => {
+        if (!isOpen || !showCoverPanel || !singleItem?.account_id) {
+            setCoverUrl(null);
+            setCoverLoading(false);
+            return;
+        }
+
+        let cancelled = false;
+        const cacheKey = buildCoverCacheKey(singleItem.account_id, String(coverItemId));
+        const cached = getCachedCoverUrl(cacheKey);
+        if (cached) {
+            setCoverUrl(cached);
+            return;
+        }
+
+        const loadCover = async () => {
+            try {
+                setCoverLoading(true);
+                const url = await driveService.getDownloadUrl(singleItem.account_id, String(coverItemId));
+                if (cancelled || !url) return;
+                setCachedCoverUrl(cacheKey, url);
+                setCoverUrl(url);
+            } catch (_) {
+                if (!cancelled) setCoverUrl(null);
+            } finally {
+                if (!cancelled) setCoverLoading(false);
+            }
+        };
+
+        loadCover();
+        return () => {
+            cancelled = true;
+        };
+    }, [isOpen, showCoverPanel, singleItem, coverItemId]);
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={`Edit Metadata for ${selectedItems.length} item${selectedItems.length > 1 ? 's' : ''}`}>
-            <div className="space-y-4">
+        <Modal
+            isOpen={isOpen}
+            onClose={onClose}
+            title={`Edit Metadata for ${selectedItems.length} item${selectedItems.length > 1 ? 's' : ''}`}
+            maxWidthClass={showCoverPanel ? 'max-w-5xl' : 'max-w-2xl'}
+        >
+            <div className={`grid gap-4 ${showCoverPanel ? 'grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]' : 'grid-cols-1'}`}>
+                {showCoverPanel && (
+                    <aside className="border rounded-md bg-muted/20 p-3 h-fit lg:sticky lg:top-0">
+                        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                            Cover Preview
+                        </div>
+                        <div className="w-full aspect-[3/4] rounded-md overflow-hidden border bg-background">
+                            {coverLoading ? (
+                                <div className="w-full h-full flex items-center justify-center">
+                                    <Loader2 className="animate-spin text-primary" size={24} />
+                                </div>
+                            ) : coverUrl ? (
+                                <img src={coverUrl} alt={singleItem?.name || 'Cover'} className="w-full h-full object-cover" />
+                            ) : (
+                                <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground">
+                                    No cover available
+                                </div>
+                            )}
+                        </div>
+                    </aside>
+                )}
+
+                <div className="space-y-4">
                 {loading ? (
                     <div className="flex justify-center"><Loader2 className="animate-spin" /></div>
                 ) : (
@@ -226,6 +306,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                         {saving && <Loader2 className="animate-spin" size={14} />}
                         Save Changes
                     </button>
+                </div>
                 </div>
             </div>
         </Modal>

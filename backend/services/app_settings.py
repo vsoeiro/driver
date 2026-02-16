@@ -123,7 +123,7 @@ class AppSettingsService:
                 raise ValueError("ai_timeout_seconds must be greater than 0")
             rows[self.AI_TIMEOUT_SECONDS_KEY].value = str(ai_timeout_seconds)
 
-        return RuntimeSettings(
+        runtime = RuntimeSettings(
             enable_daily_sync_scheduler=_to_bool(rows[self.ENABLE_DAILY_SYNC_KEY].value),
             daily_sync_cron=rows[self.DAILY_SYNC_CRON_KEY].value,
             ai_enabled=_to_bool(rows[self.AI_ENABLED_KEY].value),
@@ -133,6 +133,8 @@ class AppSettingsService:
             ai_temperature=self._parse_float(rows[self.AI_TEMPERATURE_KEY].value, default=0.1),
             ai_timeout_seconds=self._parse_int(rows[self.AI_TIMEOUT_SECONDS_KEY].value, default=120),
         )
+        await self.session.commit()
+        return runtime
 
     async def _get_settings_map(self) -> dict[str, AppSetting]:
         result = await self.session.execute(

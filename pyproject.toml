@@ -19,6 +19,7 @@ dependencies = [
     "python-multipart>=0.0.22",
     "aiosqlite>=0.22.1",
     "pypdf>=5.2.0",
+    "pillow>=11.1.0",
 ]
 
 [project.optional-dependencies]

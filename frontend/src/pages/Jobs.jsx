@@ -3,34 +3,54 @@ import { RefreshCw, CheckCircle, XCircle, Clock, PlayCircle, Eye, AlertTriangle,
 import { cancelJob, createMetadataUndoJob, deleteJob, getJobs } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
 import Modal from '../components/Modal';
+import { formatJobStatus, formatJobType } from '../utils/jobLabels';
 
 export default function Jobs() {
     const [jobs, setJobs] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [page, setPage] = useState(1);
+    const [hasNextPage, setHasNextPage] = useState(false);
     const [selectedJob, setSelectedJob] = useState(null);
     const [undoingBatchId, setUndoingBatchId] = useState(null);
     const [deletingJobId, setDeletingJobId] = useState(null);
     const [cancellingJobId, setCancellingJobId] = useState(null);
     const { showToast } = useToast();
+    const PAGE_SIZE = 20;
 
-    const fetchJobs = useCallback(async () => {
+    const fetchJobs = useCallback(async (pageNumber = page) => {
         setLoading(true);
         try {
-            const data = await getJobs();
+            const offset = (pageNumber - 1) * PAGE_SIZE;
+            const data = await getJobs(PAGE_SIZE, offset);
             setJobs(data);
+            setHasNextPage(data.length === PAGE_SIZE);
         } catch (error) {
             console.error('Failed to load jobs:', error);
             showToast('Failed to load jobs', 'error');
         } finally {
             setLoading(false);
         }
-    }, [showToast]);
+    }, [showToast, page]);
 
     useEffect(() => {
         fetchJobs();
         const interval = setInterval(fetchJobs, 5000); // Poll every 5 seconds
         return () => clearInterval(interval);
     }, [fetchJobs]);
+
+    const goToPreviousPage = () => {
+        if (page <= 1) return;
+        const nextPage = page - 1;
+        setPage(nextPage);
+        fetchJobs(nextPage);
+    };
+
+    const goToNextPage = () => {
+        if (!hasNextPage) return;
+        const nextPage = page + 1;
+        setPage(nextPage);
+        fetchJobs(nextPage);
+    };
 
     const getStatusIcon = (status) => {
         switch (status) {
@@ -49,12 +69,6 @@ export default function Jobs() {
             default:
                 return <Clock className="w-4 h-4" />;
         }
-    };
-
-    const getStatusLabel = (status) => {
-        if (status === 'CANCEL_REQUESTED') return 'cancelling';
-        if (status === 'CANCELLED') return 'cancelled';
-        return status.toLowerCase();
     };
 
     const triggerUndo = async (batchId) => {
@@ -142,10 +156,11 @@ export default function Jobs() {
                     </div>
                 ) : (
                     <div className="border rounded-lg overflow-hidden bg-card">
-                        <div className="grid grid-cols-[130px_1fr_170px_110px_150px_78px] gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
+                        <div className="grid grid-cols-[130px_1fr_150px_150px_110px_140px_78px] gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
                             <div>Status</div>
                             <div>Type</div>
                             <div className="text-right">Created</div>
+                            <div className="text-right">Finished</div>
                             <div className="text-right">Duration</div>
                             <div>Progress</div>
                             <div className="text-center"></div>
@@ -158,6 +173,7 @@ export default function Jobs() {
                                 const duration = started && completed
                                     ? ((completed - started) / 1000).toFixed(1) + 's'
                                     : '-';
+                                const finishedAt = job.completed_at || job.dead_lettered_at || null;
                                 const progressPercent = job.progress_percent ?? 0;
                                 const canUndo = job.status === 'COMPLETED' && job.result?.batch_id;
                                 const canDelete = ['COMPLETED', 'FAILED', 'DEAD_LETTER', 'CANCELLED'].includes(job.status);
@@ -166,7 +182,7 @@ export default function Jobs() {
                                 return (
                                     <div
                                         key={job.id}
-                                        className="grid grid-cols-[130px_1fr_170px_110px_150px_78px] gap-4 p-3 items-center hover:bg-muted/30 transition-colors pointer-events-none"
+                                        className="grid grid-cols-[130px_1fr_150px_150px_110px_140px_78px] gap-4 p-3 items-center hover:bg-muted/30 transition-colors pointer-events-none"
                                     >
                                         <div className="pointer-events-auto">
                                             <div className={`inline-flex items-center gap-2 font-medium ${job.status === 'COMPLETED' ? 'text-green-600' :
@@ -176,14 +192,17 @@ export default function Jobs() {
                                                             job.status === 'CANCELLED' ? 'text-zinc-500' : 'text-zinc-500'
                                                 }`}>
                                                 {getStatusIcon(job.status)}
-                                                <span className="capitalize">{getStatusLabel(job.status)}</span>
+                                                <span>{formatJobStatus(job.status)}</span>
                                             </div>
                                         </div>
-                                        <div className="font-medium text-foreground truncate pointer-events-auto capitalize">
-                                            {job.type.replace(/_/g, ' ')}
+                                        <div className="font-medium text-foreground truncate pointer-events-auto">
+                                            {formatJobType(job.type)}
                                         </div>
                                         <div className="text-right text-muted-foreground tabular-nums pointer-events-auto">
                                             {formatDate(job.created_at)}
+                                        </div>
+                                        <div className="text-right text-muted-foreground tabular-nums pointer-events-auto">
+                                            {formatDate(finishedAt)}
                                         </div>
                                         <div className="text-right text-muted-foreground tabular-nums font-mono pointer-events-auto">
                                             {duration}
@@ -246,6 +265,24 @@ export default function Jobs() {
                         </div>
                     </div>
                 )}
+
+                <div className="flex items-center justify-end gap-2 mt-3">
+                    <button
+                        onClick={goToPreviousPage}
+                        disabled={page <= 1 || loading}
+                        className="px-3 py-1.5 border rounded-md text-sm hover:bg-accent disabled:opacity-50"
+                    >
+                        Previous
+                    </button>
+                    <span className="text-sm text-muted-foreground">Page {page}</span>
+                    <button
+                        onClick={goToNextPage}
+                        disabled={!hasNextPage || loading}
+                        className="px-3 py-1.5 border rounded-md text-sm hover:bg-accent disabled:opacity-50"
+                    >
+                        Next
+                    </button>
+                </div>
             </div>
 
             {/* Details Modal */}
@@ -266,13 +303,13 @@ export default function Jobs() {
                                                 selectedJob.status === 'CANCELLED' ? 'text-zinc-500' : 'text-zinc-500'
                                     }`}>
                                     {getStatusIcon(selectedJob.status)}
-                                    <span className="capitalize">{getStatusLabel(selectedJob.status)}</span>
+                                    <span>{formatJobStatus(selectedJob.status)}</span>
                                 </div>
                             </div>
                             <div className="text-right">
                                 <span className="text-sm text-muted-foreground block mb-1">Type</span>
-                                <span className="font-medium text-foreground capitalize">
-                                    {selectedJob.type.replace(/_/g, ' ')}
+                                <span className="font-medium text-foreground">
+                                    {formatJobType(selectedJob.type)}
                                 </span>
                             </div>
                         </div>
@@ -297,7 +334,7 @@ export default function Jobs() {
                             )}
                             {selectedJob.dead_lettered_at && (
                                 <div className="text-xs text-red-600">
-                                    Dead-letter: {formatDate(selectedJob.dead_lettered_at)}
+                                    Dead Letter: {formatDate(selectedJob.dead_lettered_at)}
                                 </div>
                             )}
                         </div>

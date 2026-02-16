@@ -79,6 +79,19 @@ class Settings(BaseSettings):
     ai_model: str = Field(default="llama3.1:8b", alias="AI_MODEL")
     ai_temperature: float = Field(default=0.1, alias="AI_TEMPERATURE")
     ai_timeout_seconds: int = Field(default=120, alias="AI_TIMEOUT_SECONDS")
+    comic_cover_storage_account_id: str | None = Field(default=None, alias="COMIC_COVER_STORAGE_ACCOUNT_ID")
+    comic_cover_storage_parent_folder_id: str = Field(default="root", alias="COMIC_COVER_STORAGE_PARENT_FOLDER_ID")
+    comic_cover_storage_folder_name: str = Field(
+        default="__driver_comic_covers__",
+        alias="COMIC_COVER_STORAGE_FOLDER_NAME",
+    )
+    comic_cover_max_width: int = Field(default=700, alias="COMIC_COVER_MAX_WIDTH")
+    comic_cover_max_height: int = Field(default=1050, alias="COMIC_COVER_MAX_HEIGHT")
+    comic_cover_target_bytes: int = Field(default=250000, alias="COMIC_COVER_TARGET_BYTES")
+    comic_cover_jpeg_quality_steps: str = Field(
+        default="84,78,72,66,60",
+        alias="COMIC_COVER_JPEG_QUALITY_STEPS",
+    )
 
     @model_validator(mode="after")
     def assemble_db_connection(self) -> "Settings":
@@ -103,6 +116,16 @@ class Settings(BaseSettings):
             raise ValueError("AI_TEMPERATURE must be between 0 and 2")
         if self.ai_timeout_seconds <= 0:
             raise ValueError("AI_TIMEOUT_SECONDS must be greater than 0")
+        if self.comic_cover_storage_parent_folder_id.strip() == "":
+            self.comic_cover_storage_parent_folder_id = "root"
+        self.comic_cover_storage_folder_name = self.comic_cover_storage_folder_name.strip() or "__driver_comic_covers__"
+        if self.comic_cover_max_width <= 0:
+            raise ValueError("COMIC_COVER_MAX_WIDTH must be greater than 0")
+        if self.comic_cover_max_height <= 0:
+            raise ValueError("COMIC_COVER_MAX_HEIGHT must be greater than 0")
+        if self.comic_cover_target_bytes <= 0:
+            raise ValueError("COMIC_COVER_TARGET_BYTES must be greater than 0")
+        _ = [int(part.strip()) for part in self.comic_cover_jpeg_quality_steps.split(",") if part.strip()]
         return self
 
     @property

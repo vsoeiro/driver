@@ -129,3 +129,9 @@ class JobExtractComicAssetsRequest(BaseModel):
     account_id: UUID
     item_ids: list[str]
 
+
+class JobReindexComicCoversRequest(BaseModel):
+    """Schema for plugin-driven comic cover reindex request."""
+
+    plugin_key: str = "comicrack_core"
+

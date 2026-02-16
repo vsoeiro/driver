@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useToast } from '../contexts/ToastContext';
 import { getJobs } from '../services/jobs';
+import { formatJobType } from '../utils/jobLabels';
 
 export default function JobStatusNotifier() {
     const { showToast } = useToast();
@@ -35,7 +36,7 @@ export default function JobStatusNotifier() {
                         if (job.status === 'COMPLETED') {
                             showToast(
                                 <div className="flex items-center gap-2">
-                                    <span>Job <strong>{job.type.replace(/_/g, ' ')}</strong> completed successfully!</span>
+                                    <span>Job <strong>{formatJobType(job.type)}</strong> completed successfully!</span>
                                 </div>,
                                 'success'
                             );
@@ -44,7 +45,7 @@ export default function JobStatusNotifier() {
                         } else if (job.status === 'FAILED') {
                             showToast(
                                 <div className="flex items-center gap-2">
-                                    <span>Job <strong>{job.type.replace(/_/g, ' ')}</strong> failed.</span>
+                                    <span>Job <strong>{formatJobType(job.type)}</strong> failed.</span>
                                 </div>,
                                 'error'
                             );

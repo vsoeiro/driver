@@ -3,8 +3,11 @@ import Modal from './Modal';
 import { metadataService } from '../services/metadata';
 import { jobsService } from '../services/jobs';
 import { aiService } from '../services/ai';
+import { driveService } from '../services/drive';
 import { useToast } from '../contexts/ToastContext';
 import { Loader2, AlertTriangle, Sparkles } from 'lucide-react';
+import { getCategoryPluginView } from '../plugins/metadataCategoryViews';
+import { buildCoverCacheKey, getCachedCoverUrl, setCachedCoverUrl } from '../utils/coverCache';
 import { getSelectOptions } from '../utils/metadata';
 
 export default function MetadataModal({ isOpen, onClose, item, accountId, onSuccess }) {
@@ -14,6 +17,8 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
     const [saving, setSaving] = useState(false);
     const [history, setHistory] = useState([]);
     const [aiFilling, setAiFilling] = useState(false);
+    const [coverUrl, setCoverUrl] = useState(null);
+    const [coverLoading, setCoverLoading] = useState(false);
 
     // Form State
     const [selectedCategoryId, setSelectedCategoryId] = useState('');
@@ -215,185 +220,248 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
         }));
     };
 
-    if (!isOpen) return null;
-
     const selectedCategory = categories.find(c => c.id === selectedCategoryId);
+    const pluginView = getCategoryPluginView(selectedCategory);
+    const coverAttr = selectedCategory?.attributes?.find(
+        (attr) => attr.plugin_field_key === pluginView?.gallery?.coverField
+    );
+    const coverItemId = coverAttr ? formValues?.[coverAttr.id] : null;
+    const showCoverPanel = !!(selectedCategory && coverAttr && item?.item_type !== 'folder');
+
+    useEffect(() => {
+        if (!isOpen || !showCoverPanel || !coverItemId || !accountId) {
+            setCoverUrl(null);
+            setCoverLoading(false);
+            return;
+        }
+
+        let cancelled = false;
+        const cacheKey = buildCoverCacheKey(accountId, String(coverItemId));
+        const cached = getCachedCoverUrl(cacheKey);
+        if (cached) {
+            setCoverUrl(cached);
+            return;
+        }
+
+        const loadCover = async () => {
+            try {
+                setCoverLoading(true);
+                const url = await driveService.getDownloadUrl(accountId, String(coverItemId));
+                if (cancelled || !url) return;
+                setCachedCoverUrl(cacheKey, url);
+                setCoverUrl(url);
+            } catch (_) {
+                if (!cancelled) setCoverUrl(null);
+            } finally {
+                if (!cancelled) setCoverLoading(false);
+            }
+        };
+
+        loadCover();
+        return () => {
+            cancelled = true;
+        };
+    }, [isOpen, showCoverPanel, coverItemId, accountId]);
 
     return (
         <Modal
             isOpen={isOpen}
             onClose={onClose}
             title={`Metadata for ${item?.name}`}
-            maxWidthClass="max-w-2xl"
+            maxWidthClass="max-w-5xl"
         >
             {loading ? (
                 <div className="flex justify-center p-8">
                     <Loader2 className="animate-spin text-primary" size={32} />
                 </div>
             ) : (
-                <form onSubmit={handleSave} className="space-y-4">
-                    {item?.item_type === 'folder' && (
-                        <div className="bg-yellow-500/10 border-l-4 border-yellow-500 p-4 mb-4">
-                            <div className="flex">
-                                <div className="flex-shrink-0">
-                                    <AlertTriangle className="h-5 w-5 text-yellow-500" aria-hidden="true" />
+                <form onSubmit={handleSave}>
+                    <div className={`grid gap-4 ${showCoverPanel ? 'grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]' : 'grid-cols-1'}`}>
+                        {showCoverPanel && (
+                            <aside className="border rounded-md bg-muted/20 p-3 h-fit lg:sticky lg:top-0">
+                                <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                                    Cover Preview
                                 </div>
-                                <div className="ml-3">
-                                    <p className="text-sm text-yellow-700 dark:text-yellow-400">
-                                        You are editing a folder. Changes will be applied effectively to <strong>all files</strong> inside this folder recursively. This process runs in the background.
-                                    </p>
+                                <div className="w-full aspect-[3/4] rounded-md overflow-hidden border bg-background">
+                                    {coverLoading ? (
+                                        <div className="w-full h-full flex items-center justify-center">
+                                            <Loader2 className="animate-spin text-primary" size={24} />
+                                        </div>
+                                    ) : coverUrl ? (
+                                        <img src={coverUrl} alt={item?.name || 'Cover'} className="w-full h-full object-cover" />
+                                    ) : (
+                                        <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground">
+                                            No cover available
+                                        </div>
+                                    )}
                                 </div>
+                            </aside>
+                        )}
+
+                        <div className="space-y-4 min-w-0">
+                            {item?.item_type === 'folder' && (
+                                <div className="bg-yellow-500/10 border-l-4 border-yellow-500 p-4 mb-4">
+                                    <div className="flex">
+                                        <div className="flex-shrink-0">
+                                            <AlertTriangle className="h-5 w-5 text-yellow-500" aria-hidden="true" />
+                                        </div>
+                                        <div className="ml-3">
+                                            <p className="text-sm text-yellow-700 dark:text-yellow-400">
+                                                You are editing a folder. Changes will be applied effectively to <strong>all files</strong> inside this folder recursively. This process runs in the background.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div>
+                                <label className="block text-sm font-medium mb-1">Category</label>
+                                <select
+                                    className="w-full border rounded-md p-2 bg-background"
+                                    value={selectedCategoryId}
+                                    onChange={e => {
+                                        setSelectedCategoryId(e.target.value);
+                                    }}
+                                >
+                                    <option value="">Select a category...</option>
+                                    {categories.map(cat => (
+                                        <option key={cat.id} value={cat.id}>{cat.name}</option>
+                                    ))}
+                                </select>
                             </div>
-                        </div>
-                    )}
 
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Category</label>
-                        <select
-                            className="w-full border rounded-md p-2 bg-background"
-                            value={selectedCategoryId}
-                            onChange={e => {
-                                setSelectedCategoryId(e.target.value);
-                            }}
-                        >
-                            <option value="">Select a category...</option>
-                            {categories.map(cat => (
-                                <option key={cat.id} value={cat.id}>{cat.name}</option>
-                            ))}
-                        </select>
-                    </div>
-
-                    {selectedCategory && (
-                        <div className="space-y-2 border rounded-md p-3 bg-muted/20">
-                            <div className="flex items-center justify-between gap-3">
-                                <div>
-                                    <h4 className="text-sm font-medium">AI Assist</h4>
-                                    <p className="text-xs text-muted-foreground">
-                                        AI will infer metadata from the file name automatically.
-                                    </p>
+                            {selectedCategory && (
+                                <div className="space-y-2 border rounded-md p-3 bg-muted/20">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                            <h4 className="text-sm font-medium">AI Assist</h4>
+                                            <p className="text-xs text-muted-foreground">
+                                                AI will infer metadata from the file name automatically.
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={handleFillWithAI}
+                                            disabled={aiFilling || !item?.name}
+                                            className="px-3 py-2 text-sm font-medium border rounded-md hover:bg-accent disabled:opacity-50 flex items-center gap-2"
+                                        >
+                                            {aiFilling ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />}
+                                            Fill with AI
+                                        </button>
+                                    </div>
+                                    <div className="text-xs text-muted-foreground bg-background border rounded-md p-2">
+                                        Source context: <span className="font-medium">{item?.name || '-'}</span>
+                                    </div>
                                 </div>
+                            )}
+
+                            {selectedCategory && (
+                                <div className="space-y-3 border-t pt-4">
+                                    {selectedCategory.attributes.length === 0 ? (
+                                        <p className="text-sm text-muted-foreground italic">No attributes defined for this category.</p>
+                                    ) : (
+                                        selectedCategory.attributes.map(attr => (
+                                            <div key={attr.id}>
+                                                <label className="block text-sm font-medium mb-1">
+                                                    {attr.name}
+                                                    {attr.is_required && <span className="text-destructive ml-1">*</span>}
+                                                </label>
+
+                                                {attr.data_type === 'text' && (
+                                                    <input
+                                                        type="text"
+                                                        className="w-full border rounded-md p-2 bg-background"
+                                                        value={formValues[attr.id] || ''}
+                                                        onChange={e => handleInputChange(attr.id, e.target.value)}
+                                                    />
+                                                )}
+
+                                                {attr.data_type === 'number' && (
+                                                    <input
+                                                        type="number"
+                                                        className="w-full border rounded-md p-2 bg-background"
+                                                        value={formValues[attr.id] || ''}
+                                                        onChange={e => handleInputChange(attr.id, e.target.value)}
+                                                    />
+                                                )}
+
+                                                {attr.data_type === 'date' && (
+                                                    <input
+                                                        type="date"
+                                                        className="w-full border rounded-md p-2 bg-background"
+                                                        value={formValues[attr.id] || ''}
+                                                        onChange={e => handleInputChange(attr.id, e.target.value)}
+                                                    />
+                                                )}
+
+                                                {attr.data_type === 'boolean' && (
+                                                    <div className="flex items-center gap-2">
+                                                        <input
+                                                            type="checkbox"
+                                                            className="rounded border-gray-300"
+                                                            checked={!!formValues[attr.id]}
+                                                            onChange={e => handleInputChange(attr.id, e.target.checked)}
+                                                        />
+                                                        <span className="text-sm text-muted-foreground">Yes</span>
+                                                    </div>
+                                                )}
+
+                                                {attr.data_type === 'select' && (
+                                                    <select
+                                                        className="w-full border rounded-md p-2 bg-background"
+                                                        value={formValues[attr.id] || ''}
+                                                        onChange={e => handleInputChange(attr.id, e.target.value)}
+                                                    >
+                                                        <option value="">Select...</option>
+                                                        {getSelectOptions(attr.options).map(opt => (
+                                                            <option key={opt} value={opt}>{opt}</option>
+                                                        ))}
+                                                    </select>
+                                                )}
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            )}
+
+                            <div className="flex justify-end gap-2 pt-4 border-t mt-4">
                                 <button
                                     type="button"
-                                    onClick={handleFillWithAI}
-                                    disabled={aiFilling || !item?.name}
-                                    className="px-3 py-2 text-sm font-medium border rounded-md hover:bg-accent disabled:opacity-50 flex items-center gap-2"
+                                    onClick={onClose}
+                                    className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent"
                                 >
-                                    {aiFilling ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />}
-                                    Fill with AI
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={!selectedCategoryId || saving}
+                                    className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
+                                >
+                                    {saving && <Loader2 className="animate-spin" size={14} />}
+                                    Save
                                 </button>
                             </div>
-                            <div className="text-xs text-muted-foreground bg-background border rounded-md p-2">
-                                Source context: <span className="font-medium">{item?.name || '-'}</span>
-                            </div>
-                        </div>
-                    )}
-
-                    {selectedCategory && (
-                        <div className="space-y-3 border-t pt-4">
-                            {selectedCategory.attributes.length === 0 ? (
-                                <p className="text-sm text-muted-foreground italic">No attributes defined for this category.</p>
-                            ) : (
-                                selectedCategory.attributes.map(attr => (
-                                    <div key={attr.id}>
-                                        <label className="block text-sm font-medium mb-1">
-                                            {attr.name}
-                                            {attr.is_required && <span className="text-destructive ml-1">*</span>}
-                                        </label>
-
-                                        {attr.data_type === 'text' && (
-                                            <input
-                                                type="text"
-                                                className="w-full border rounded-md p-2 bg-background"
-                                                value={formValues[attr.id] || ''}
-                                                onChange={e => handleInputChange(attr.id, e.target.value)}
-                                            />
-                                        )}
-
-                                        {attr.data_type === 'number' && (
-                                            <input
-                                                type="number"
-                                                className="w-full border rounded-md p-2 bg-background"
-                                                value={formValues[attr.id] || ''}
-                                                onChange={e => handleInputChange(attr.id, e.target.value)}
-                                            />
-                                        )}
-
-                                        {attr.data_type === 'date' && (
-                                            <input
-                                                type="date"
-                                                className="w-full border rounded-md p-2 bg-background"
-                                                value={formValues[attr.id] || ''}
-                                                onChange={e => handleInputChange(attr.id, e.target.value)}
-                                            />
-                                        )}
-
-                                        {attr.data_type === 'boolean' && (
-                                            <div className="flex items-center gap-2">
-                                                <input
-                                                    type="checkbox"
-                                                    className="rounded border-gray-300"
-                                                    checked={!!formValues[attr.id]}
-                                                    onChange={e => handleInputChange(attr.id, e.target.checked)}
-                                                />
-                                                <span className="text-sm text-muted-foreground">Yes</span>
+                            <div className="border-t pt-4">
+                                <h4 className="text-sm font-semibold mb-2">Metadata History</h4>
+                                {history.length === 0 ? (
+                                    <p className="text-xs text-muted-foreground">No metadata changes for this item yet.</p>
+                                ) : (
+                                    <div className="max-h-48 overflow-auto border rounded-md divide-y">
+                                        {history.map((entry) => (
+                                            <div key={entry.id} className="px-3 py-2 text-xs">
+                                                <div className="font-medium">{entry.action}</div>
+                                                <div className="text-muted-foreground">
+                                                    {new Date(entry.created_at).toLocaleString('en-GB')}
+                                                </div>
+                                                {entry.batch_id && (
+                                                    <div className="text-muted-foreground">Batch: {entry.batch_id}</div>
+                                                )}
                                             </div>
-                                        )}
-
-                                        {attr.data_type === 'select' && (
-                                            <select
-                                                className="w-full border rounded-md p-2 bg-background"
-                                                value={formValues[attr.id] || ''}
-                                                onChange={e => handleInputChange(attr.id, e.target.value)}
-                                            >
-                                                <option value="">Select...</option>
-                                                {getSelectOptions(attr.options).map(opt => (
-                                                    <option key={opt} value={opt}>{opt}</option>
-                                                ))}
-                                            </select>
-                                        )}
+                                        ))}
                                     </div>
-                                ))
-                            )}
-                        </div>
-                    )}
-
-                    <div className="flex justify-end gap-2 pt-4 border-t mt-4">
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent"
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={!selectedCategoryId || saving}
-                            className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
-                        >
-                            {saving && <Loader2 className="animate-spin" size={14} />}
-                            Save
-                        </button>
-                    </div>
-
-                    <div className="border-t pt-4">
-                        <h4 className="text-sm font-semibold mb-2">Metadata History</h4>
-                        {history.length === 0 ? (
-                            <p className="text-xs text-muted-foreground">No metadata changes for this item yet.</p>
-                        ) : (
-                            <div className="max-h-48 overflow-auto border rounded-md divide-y">
-                                {history.map((entry) => (
-                                    <div key={entry.id} className="px-3 py-2 text-xs">
-                                        <div className="font-medium">{entry.action}</div>
-                                        <div className="text-muted-foreground">
-                                            {new Date(entry.created_at).toLocaleString('en-GB')}
-                                        </div>
-                                        {entry.batch_id && (
-                                            <div className="text-muted-foreground">Batch: {entry.batch_id}</div>
-                                        )}
-                                    </div>
-                                ))}
+                                )}
                             </div>
-                        )}
+                        </div>
                     </div>
                 </form>
             )}

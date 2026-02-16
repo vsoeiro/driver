@@ -5,6 +5,7 @@ import { accountsService } from '../services/accounts';
 import { aiService } from '../services/ai';
 import { driveService } from '../services/drive';
 import { getCategoryPluginView } from '../plugins/metadataCategoryViews';
+import { buildCoverCacheKey, getCachedCoverUrl, setCachedCoverUrl } from '../utils/coverCache';
 import { getSelectOptions } from '../utils/metadata';
 import {
     Plus, Trash2, ChevronRight, ChevronDown, ChevronLeft,
@@ -243,25 +244,36 @@ const CategoryItemsTable = ({ category, onBack }) => {
         let cancelled = false;
 
         const resolveCoverUrls = async () => {
-            const pairs = await Promise.all(
-                items.map(async (item) => {
-                    const coverItemId = item.metadata?.values?.[coverAttr.id];
-                    if (!coverItemId) return [item.id, null];
+            const preloaded = {};
+            const misses = [];
+            for (const item of items) {
+                const coverItemId = item.metadata?.values?.[coverAttr.id];
+                if (!coverItemId) continue;
+                const cacheKey = buildCoverCacheKey(item.account_id, String(coverItemId));
+                const cached = getCachedCoverUrl(cacheKey);
+                if (cached) {
+                    preloaded[item.id] = cached;
+                } else {
+                    misses.push({ item, coverItemId: String(coverItemId), cacheKey });
+                }
+            }
+
+            setCoverUrlsByItemId(preloaded);
+            await Promise.all(
+                misses.map(async ({ item, coverItemId, cacheKey }) => {
                     try {
                         const url = await driveService.getDownloadUrl(item.account_id, coverItemId);
-                        return [item.id, url];
+                        if (cancelled || !url) return;
+                        setCachedCoverUrl(cacheKey, url);
+                        setCoverUrlsByItemId((prev) => {
+                            if (prev[item.id] === url) return prev;
+                            return { ...prev, [item.id]: url };
+                        });
                     } catch (_) {
-                        return [item.id, null];
+                        // Keep placeholder when one cover fails.
                     }
                 })
             );
-
-            if (cancelled) return;
-            const next = {};
-            for (const [itemId, url] of pairs) {
-                if (url) next[itemId] = url;
-            }
-            setCoverUrlsByItemId(next);
         };
 
         resolveCoverUrls();

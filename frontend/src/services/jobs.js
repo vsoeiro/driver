@@ -17,8 +17,10 @@ export const createMoveJob = async (sourceAccountId, sourceItemId, destinationAc
     return response.data;
 };
 
-export const getJobs = async () => {
-    const response = await api.get('/jobs/');
+export const getJobs = async (limit = 50, offset = 0) => {
+    const response = await api.get('/jobs/', {
+        params: { limit, offset },
+    });
     return response.data;
 };
 
@@ -102,6 +104,13 @@ export const createExtractComicAssetsJob = async (accountId, itemIds) => {
     return response.data;
 };
 
+export const createReindexComicCoversJob = async (pluginKey = 'comicrack_core') => {
+    const response = await api.post('/jobs/comics/reindex-covers', {
+        plugin_key: pluginKey,
+    });
+    return response.data;
+};
+
 export const jobsService = {
     createMoveJob,
     getJobs,
@@ -114,6 +123,7 @@ export const jobsService = {
     createMetadataUndoJob,
     createApplyRuleJob,
     createExtractComicAssetsJob,
+    createReindexComicCoversJob,
 };
 
 export default jobsService;

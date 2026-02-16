@@ -1,8 +1,31 @@
 """Admin schemas."""
 
+from typing import Any
+
 from pydantic import BaseModel, field_validator
 
 from backend.services.cron_utils import validate_cron_expression
+
+
+class PluginSettingFieldResponse(BaseModel):
+    key: str
+    label: str
+    input_type: str
+    description: str | None = None
+    required: bool = False
+    minimum: int | None = None
+    maximum: int | None = None
+    placeholder: str | None = None
+    account_field_key: str | None = None
+    value: Any = None
+
+
+class PluginSettingsGroupResponse(BaseModel):
+    plugin_key: str
+    plugin_name: str
+    plugin_description: str | None = None
+    capabilities: dict[str, Any] | None = None
+    fields: list[PluginSettingFieldResponse]
 
 
 class RuntimeSettingsResponse(BaseModel):
@@ -14,6 +37,7 @@ class RuntimeSettingsResponse(BaseModel):
     ai_model: str
     ai_temperature: float
     ai_timeout_seconds: int
+    plugin_settings: list[PluginSettingsGroupResponse] = []
 
 
 class RuntimeSettingsUpdateRequest(BaseModel):
@@ -25,6 +49,7 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     ai_model: str | None = None
     ai_temperature: float | None = None
     ai_timeout_seconds: int | None = None
+    plugin_settings: dict[str, dict[str, Any]] | None = None
 
     @field_validator("daily_sync_cron")
     @classmethod

@@ -39,3 +39,28 @@ async def extract_comic_assets_handler(payload: dict, session: AsyncSession) -> 
     await progress.flush()
 
     return stats
+
+
+@register_handler("reindex_comic_covers")
+async def reindex_comic_covers_handler(payload: dict, session: AsyncSession) -> dict:
+    if payload.get("plugin_key", "comicrack_core") != "comicrack_core":
+        raise ValueError("Unsupported plugin key for cover reindex")
+
+    progress = JobProgressReporter.from_payload(session, payload)
+    await progress.set_total(1)
+
+    service = ComicMetadataService(session)
+    stats = await service.reindex_mapped_comics(job_id=progress.job_id)
+    await session.commit()
+
+    await progress.update_metrics(
+        mapped=stats.get("mapped", 0),
+        skipped=stats.get("skipped", 0),
+        failed=stats.get("failed", 0),
+        accounts=stats.get("accounts", 0),
+    )
+    await progress.set_total(max(1, stats.get("total", 0)))
+    progress.current = max(1, stats.get("total", 0))
+    await progress.flush()
+
+    return stats

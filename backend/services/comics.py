@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
+import io
 import posixpath
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 from xml.etree import ElementTree
 
+from PIL import Image, ImageOps, UnidentifiedImageError
 from pypdf import PdfReader
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.db.models import LinkedAccount
+from backend.db.models import ItemMetadata, LinkedAccount
 from backend.services.metadata_plugins import MetadataPluginService
+from backend.services.plugin_settings import ComicRuntimeSettings, PluginSettingsService
 from backend.services.metadata_versioning import apply_metadata_change
 from backend.services.providers.base import DriveProviderClient
 from backend.services.providers.factory import build_drive_client
@@ -22,7 +27,6 @@ from backend.services.token_manager import TokenManager
 
 SUPPORTED_COMIC_EXTENSIONS = {"cbz", "zip", "pdf", "epub"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
-COVER_STORAGE_FOLDER = "__driver_comic_covers__"
 
 
 @dataclass(slots=True)
@@ -167,11 +171,85 @@ def _extract_from_pdf(local_path: str) -> ComicExtractionResult:
     )
 
 
+def optimize_cover_image(
+    cover_bytes: bytes,
+    cover_extension: str | None,
+    *,
+    max_width: int,
+    max_height: int,
+    target_bytes: int,
+    quality_steps: tuple[int, ...],
+) -> tuple[bytes, str, dict[str, Any]]:
+    """Resize/compress cover image to reduce cloud storage while keeping quality."""
+    original_size = len(cover_bytes)
+    try:
+        with Image.open(io.BytesIO(cover_bytes)) as src_image:
+            image = ImageOps.exif_transpose(src_image)
+            image.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+
+            if image.mode not in ("RGB", "L"):
+                image = image.convert("RGB")
+
+            best_bytes: bytes | None = None
+            best_quality: int | None = None
+            best_size = 2**31 - 1
+
+            for quality in quality_steps:
+                out = io.BytesIO()
+                image.save(
+                    out,
+                    format="JPEG",
+                    quality=quality,
+                    optimize=True,
+                    progressive=True,
+                )
+                candidate = out.getvalue()
+                candidate_size = len(candidate)
+                if candidate_size < best_size:
+                    best_bytes = candidate
+                    best_size = candidate_size
+                    best_quality = quality
+                if candidate_size <= target_bytes:
+                    break
+
+            if best_bytes is None:
+                return cover_bytes, (cover_extension or "jpg"), {
+                    "cover_optimized": False,
+                    "reason": "encode_failed",
+                }
+
+            return best_bytes, "jpg", {
+                "cover_optimized": True,
+                "cover_original_bytes": original_size,
+                "cover_optimized_bytes": len(best_bytes),
+                "cover_width": image.width,
+                "cover_height": image.height,
+                "cover_quality": best_quality,
+            }
+    except (UnidentifiedImageError, OSError):
+        return cover_bytes, (cover_extension or "jpg"), {
+            "cover_optimized": False,
+            "reason": "unsupported_image",
+            "cover_original_bytes": original_size,
+        }
+
+
 class ComicMetadataService:
     """Extract comic data and map into ItemMetadata values."""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def _get_linked_account(self, account_id: str | UUID | None) -> LinkedAccount | None:
+        if account_id is None:
+            return None
+        pk: str | UUID = account_id
+        if isinstance(pk, str):
+            try:
+                pk = UUID(pk)
+            except ValueError:
+                return None
+        return await self.session.get(LinkedAccount, pk)
 
     async def process_item_ids(self, account_id, item_ids: list[str], *, job_id=None, batch_id=None) -> dict[str, int]:
         account = await self.session.get(LinkedAccount, account_id)
@@ -181,32 +259,143 @@ class ComicMetadataService:
         plugin_service = MetadataPluginService(self.session)
         category = await plugin_service.ensure_active_comic_category()
         attr_ids = await plugin_service.comic_attribute_id_map()
+        plugin_settings = await PluginSettingsService(self.session).get_comic_runtime_settings()
 
         token_manager = TokenManager(self.session)
         client = build_drive_client(account, token_manager)
+        target_account = account
+        if plugin_settings.storage_account_id:
+            maybe_target = await self._get_linked_account(plugin_settings.storage_account_id)
+            if maybe_target:
+                target_account = maybe_target
+        target_client = build_drive_client(target_account, token_manager)
 
         files_to_process = await self._expand_items(client, account, item_ids)
         stats = {"total": len(files_to_process), "mapped": 0, "skipped": 0, "failed": 0}
+        return await self._process_files(
+            files_to_process=files_to_process,
+            source_account=account,
+            source_client=client,
+            target_account=target_account,
+            target_client=target_client,
+            category_id=category.id,
+            attr_ids=attr_ids,
+            plugin_settings=plugin_settings,
+            stats=stats,
+            job_id=job_id,
+            batch_id=batch_id,
+            force_remap=False,
+        )
 
-        cover_folder_id = await self._ensure_cover_folder(client, account)
+    async def reindex_mapped_comics(self, *, job_id=None, batch_id=None) -> dict[str, int]:
+        plugin_service = MetadataPluginService(self.session)
+        category = await plugin_service.ensure_active_comic_category()
+        stmt = select(ItemMetadata.account_id, ItemMetadata.item_id).where(ItemMetadata.category_id == category.id)
+        result = await self.session.execute(stmt)
+        rows = result.all()
+        by_account: dict[Any, list[str]] = {}
+        for account_id, item_id in rows:
+            by_account.setdefault(account_id, []).append(item_id)
+        if not by_account:
+            return {"total": 0, "mapped": 0, "skipped": 0, "failed": 0, "accounts": 0}
+
+        plugin_settings = await PluginSettingsService(self.session).get_comic_runtime_settings()
+        overall = {"total": 0, "mapped": 0, "skipped": 0, "failed": 0, "accounts": len(by_account)}
+        for account_id, item_ids in by_account.items():
+            account = await self._get_linked_account(account_id)
+            if not account:
+                overall["failed"] += len(item_ids)
+                overall["total"] += len(item_ids)
+                continue
+
+            plugin_service = MetadataPluginService(self.session)
+            attr_ids = await plugin_service.comic_attribute_id_map()
+            token_manager = TokenManager(self.session)
+            source_client = build_drive_client(account, token_manager)
+            target_account = account
+            if plugin_settings.storage_account_id:
+                maybe_target = await self._get_linked_account(plugin_settings.storage_account_id)
+                if maybe_target:
+                    target_account = maybe_target
+            target_client = build_drive_client(target_account, token_manager)
+            files_to_process = await self._expand_items(source_client, account, item_ids)
+            stats = {"total": len(files_to_process), "mapped": 0, "skipped": 0, "failed": 0}
+            stats = await self._process_files(
+                files_to_process=files_to_process,
+                source_account=account,
+                source_client=source_client,
+                target_account=target_account,
+                target_client=target_client,
+                category_id=category.id,
+                attr_ids=attr_ids,
+                plugin_settings=plugin_settings,
+                stats=stats,
+                job_id=job_id,
+                batch_id=batch_id,
+                force_remap=True,
+            )
+            overall["total"] += stats["total"]
+            overall["mapped"] += stats["mapped"]
+            overall["skipped"] += stats["skipped"]
+            overall["failed"] += stats["failed"]
+        return overall
+
+    async def _process_files(
+        self,
+        *,
+        files_to_process: list[Any],
+        source_account: LinkedAccount,
+        source_client: DriveProviderClient,
+        target_account: LinkedAccount,
+        target_client: DriveProviderClient,
+        category_id,
+        attr_ids: dict[str, str],
+        plugin_settings: ComicRuntimeSettings,
+        stats: dict[str, int],
+        job_id,
+        batch_id,
+        force_remap: bool,
+    ) -> dict[str, int]:
+        batch_size = 20
+        processed_since_commit = 0
+
+        cover_folder_id = await self._ensure_cover_folder(
+            target_client,
+            target_account,
+            parent_folder_id=plugin_settings.storage_parent_folder_id,
+            cover_folder_name=plugin_settings.storage_folder_name,
+        )
         for file_item in files_to_process:
             try:
-                mapped = await self._process_single_file(
-                    client=client,
-                    account=account,
-                    item=file_item,
-                    cover_folder_id=cover_folder_id,
-                    category_id=category.id,
-                    attr_ids=attr_ids,
-                    job_id=job_id,
-                    batch_id=batch_id,
-                )
+                async with self.session.begin_nested():
+                    mapped = await self._process_single_file(
+                        source_client=source_client,
+                        source_account=source_account,
+                        cover_client=target_client,
+                        cover_account=target_account,
+                        item=file_item,
+                        cover_folder_id=cover_folder_id,
+                        category_id=category_id,
+                        attr_ids=attr_ids,
+                        cover_settings=plugin_settings,
+                        job_id=job_id,
+                        batch_id=batch_id,
+                        force_remap=force_remap,
+                    )
                 if mapped:
                     stats["mapped"] += 1
                 else:
                     stats["skipped"] += 1
+                processed_since_commit += 1
+                if processed_since_commit >= batch_size:
+                    await self.session.commit()
+                    processed_since_commit = 0
             except Exception:
+                await self.session.rollback()
                 stats["failed"] += 1
+
+        if processed_since_commit > 0:
+            await self.session.commit()
 
         return stats
 
@@ -244,16 +433,26 @@ class ComicMetadataService:
                 break
             listing = await client.list_items_by_next_link(account, listing.next_link)
 
-    async def _ensure_cover_folder(self, client: DriveProviderClient, account: LinkedAccount) -> str:
-        root = await client.list_root_items(account)
-        for item in root.items:
-            if item.item_type == "folder" and item.name == COVER_STORAGE_FOLDER:
+    async def _ensure_cover_folder(
+        self,
+        client: DriveProviderClient,
+        account: LinkedAccount,
+        *,
+        parent_folder_id: str,
+        cover_folder_name: str,
+    ) -> str:
+        if parent_folder_id == "root":
+            listing = await client.list_root_items(account)
+        else:
+            listing = await client.list_folder_items(account, parent_folder_id)
+        for item in listing.items:
+            if item.item_type == "folder" and item.name == cover_folder_name:
                 return item.id
 
         folder = await client.create_folder(
             account,
-            COVER_STORAGE_FOLDER,
-            parent_id="root",
+            cover_folder_name,
+            parent_id=parent_folder_id,
             conflict_behavior="rename",
         )
         return folder.id
@@ -261,33 +460,51 @@ class ComicMetadataService:
     async def _process_single_file(
         self,
         *,
-        client: DriveProviderClient,
-        account: LinkedAccount,
+        source_client: DriveProviderClient,
+        source_account: LinkedAccount,
+        cover_client: DriveProviderClient,
+        cover_account: LinkedAccount,
         item: Any,
         cover_folder_id: str,
         category_id,
         attr_ids: dict[str, str],
+        cover_settings: ComicRuntimeSettings,
         job_id,
         batch_id,
+        force_remap: bool,
     ) -> bool:
         ext = file_extension(item.name)
         if ext not in SUPPORTED_COMIC_EXTENSIONS:
+            return False
+        if not force_remap and await self._is_already_mapped(
+            account_id=source_account.id,
+            item_id=item.id,
+            category_id=category_id,
+            attr_ids=attr_ids,
+        ):
             return False
 
         temp_dir = tempfile.mkdtemp(prefix="comic_extract_")
         local_path = str(Path(temp_dir) / f"{item.id}.{ext or 'bin'}")
         try:
-            await client.download_file_to_path(account, item.id, local_path)
+            await source_client.download_file_to_path(source_account, item.id, local_path)
             extraction = extract_comic_asset(local_path, ext)
             mapped_values = self._build_metadata_values(item=item, extraction=extraction, attr_ids=attr_ids)
 
             if extraction.cover_bytes:
-                cover_ext = extraction.cover_extension or "jpg"
-                upload_name = f"{item.id}.{cover_ext}"
-                uploaded = await client.upload_small_file(
-                    account,
-                    upload_name,
+                optimized_cover, cover_ext, optimize_details = optimize_cover_image(
                     extraction.cover_bytes,
+                    extraction.cover_extension,
+                    max_width=cover_settings.max_width,
+                    max_height=cover_settings.max_height,
+                    target_bytes=cover_settings.target_bytes,
+                    quality_steps=cover_settings.quality_steps,
+                )
+                upload_name = f"{item.id}.{cover_ext}"
+                uploaded = await cover_client.upload_small_file(
+                    cover_account,
+                    upload_name,
+                    optimized_cover,
                     cover_folder_id,
                 )
                 cover_id_attr = attr_ids.get("cover_item_id")
@@ -296,10 +513,11 @@ class ComicMetadataService:
                     mapped_values[cover_id_attr] = uploaded.id
                 if cover_name_attr:
                     mapped_values[cover_name_attr] = uploaded.name
+                extraction.details.update(optimize_details)
 
             await apply_metadata_change(
                 self.session,
-                account_id=account.id,
+                account_id=source_account.id,
                 item_id=item.id,
                 category_id=category_id,
                 values=mapped_values,
@@ -330,3 +548,24 @@ class ComicMetadataService:
         set_if_exists("file_format", extraction.format)
         set_if_exists("page_count", extraction.page_count)
         return values
+
+    async def _is_already_mapped(self, *, account_id, item_id: str, category_id, attr_ids: dict[str, str]) -> bool:
+        stmt = select(ItemMetadata).where(
+            ItemMetadata.account_id == account_id,
+            ItemMetadata.item_id == item_id,
+        )
+        result = await self.session.execute(stmt)
+        existing = result.scalar_one_or_none()
+        if existing is None or existing.category_id != category_id:
+            return False
+
+        values = existing.values or {}
+        check_fields = ("cover_item_id", "page_count", "file_format", "title")
+        for field_key in check_fields:
+            attr_id = attr_ids.get(field_key)
+            if not attr_id:
+                continue
+            value = values.get(attr_id)
+            if value is not None and value != "":
+                return True
+        return False
