@@ -84,6 +84,13 @@ export const removeMetadataRecursive = async (accountId, pathPrefix) => {
     return response.data;
 };
 
+export const createSyncJob = async (accountId) => {
+    const response = await api.post('/jobs/sync', {
+        account_id: accountId,
+    });
+    return response.data;
+};
+
 export const createMetadataUndoJob = async (batchId) => {
     const response = await api.post('/jobs/metadata-undo', {
         batch_id: batchId,
@@ -119,6 +126,7 @@ export const jobsService = {
     cancelJob,
     deleteJob,
     uploadFileBackground,
+    createSyncJob,
     createMetadataUpdateJob,
     applyMetadataRecursive,
     removeMetadataRecursive,

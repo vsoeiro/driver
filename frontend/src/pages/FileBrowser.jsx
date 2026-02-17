@@ -9,7 +9,7 @@ const { getDownloadUrl } = driveService;
 const { batchDeleteMetadata } = metadataService;
 import {
     Folder, File, Download, Trash2,
-    UploadCloud, FolderPlus, Loader2, ArrowRightLeft, Database, XCircle, CheckSquare, Square, Search, X, ChevronDown, BookOpen
+    UploadCloud, FolderPlus, Loader2, ArrowRightLeft, Database, XCircle, CheckSquare, Square, Search, X, ChevronDown, BookOpen, RefreshCw
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import MoveModal from '../components/MoveModal';
@@ -56,6 +56,7 @@ export default function FileBrowser() {
     const metadataMenuRef = useRef(null);
     const [newFolderName, setNewFolderName] = useState('');
     const [actionLoading, setActionLoading] = useState(false);
+    const [syncing, setSyncing] = useState(false);
     const { showToast } = useToast();
 
     // Reset selection on folder change
@@ -201,6 +202,19 @@ export default function FileBrowser() {
         }
     };
 
+    const executeSync = async () => {
+        if (!accountId || syncing) return;
+        setSyncing(true);
+        try {
+            await jobsService.createSyncJob(accountId);
+            showToast('Sync job created for selected account.', 'success');
+        } catch (e) {
+            showToast(`Failed to create sync job: ${e.message}`, 'error');
+        } finally {
+            setSyncing(false);
+        }
+    };
+
     const handleSearchSubmit = (e) => {
         if (e.key === 'Enter') {
             setSearchQuery(searchTerm);
@@ -268,6 +282,15 @@ export default function FileBrowser() {
                 </div>
 
                 <div className="flex items-center gap-2">
+                    <button
+                        onClick={executeSync}
+                        disabled={!accountId || syncing}
+                        className="flex items-center gap-2 px-3 py-2 text-sm font-medium hover:bg-accent rounded-md disabled:opacity-50"
+                        title="Sync account"
+                    >
+                        {syncing ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
+                        {syncing ? 'Syncing...' : 'Sync'}
+                    </button>
                     <button onClick={() => setCreateFolderModal(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-medium hover:bg-accent rounded-md">
                         <FolderPlus size={16} />
                         New Folder
