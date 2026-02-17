@@ -10,10 +10,15 @@ export const updateRuntimeSettings = async (payload) => {
     return response.data;
 };
 
+export const getObservabilitySnapshot = async () => {
+    const response = await api.get('/admin/observability');
+    return response.data;
+};
+
 export const settingsService = {
     getRuntimeSettings,
     updateRuntimeSettings,
+    getObservabilitySnapshot,
 };
 
 export default settingsService;
-

@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import FileBrowser from './pages/FileBrowser'
 import AllFiles from './pages/AllFiles'
 import Jobs from './pages/Jobs'
@@ -9,6 +9,7 @@ import MetadataManager from './pages/MetadataManager'
 import RulesManager from './pages/RulesManager'
 import AdminSettings from './pages/AdminSettings'
 import PluginsManager from './pages/PluginsManager'
+import AdminDashboard from './pages/AdminDashboard'
 
 function App() {
     return (
@@ -29,6 +30,8 @@ function App() {
                         <Route path="/metadata" element={<MetadataManager />} />
                         <Route path="/plugins" element={<PluginsManager />} />
                         <Route path="/rules" element={<RulesManager />} />
+                        <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
+                        <Route path="/admin/dashboard" element={<AdminDashboard />} />
                         <Route path="/admin/settings" element={<AdminSettings />} />
                     </Route>
                 </Routes>

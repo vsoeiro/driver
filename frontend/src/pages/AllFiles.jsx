@@ -862,7 +862,7 @@ export default function AllFiles() {
                 ) : (
                     <div className="border rounded-lg overflow-hidden bg-card select-none">
                         {/* Header */}
-                        <div className="grid grid-cols-[40px_40px_2fr_120px_80px_80px_140px_minmax(150px,1fr)] gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center sticky top-0">
+                        <div className="grid grid-cols-[40px_40px_2fr_170px_80px_80px_140px_minmax(150px,1fr)] gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center sticky top-0">
                             <div className="flex justify-center">
                                 <button onClick={toggleSelectAll}>
                                     {selectedItems.size === items.length && items.length > 0 ? <CheckSquare size={16} /> : <Square size={16} />}
@@ -895,7 +895,7 @@ export default function AllFiles() {
                                 return (
                                     <div
                                         key={item.id}
-                                        className={`group grid grid-cols-[40px_40px_2fr_120px_80px_80px_140px_minmax(150px,1fr)] gap-4 p-3 items-center hover:bg-muted/30 transition-colors ${isSelected ? 'bg-muted/40' : ''}`}
+                                        className={`group grid grid-cols-[40px_40px_2fr_170px_80px_80px_140px_minmax(150px,1fr)] gap-4 p-3 items-center hover:bg-muted/30 transition-colors ${isSelected ? 'bg-muted/40' : ''}`}
                                         onClick={(e) => toggleSelection(item.id, index, !e.altKey, e.shiftKey)}
                                     >
                                         <div className="flex justify-center">

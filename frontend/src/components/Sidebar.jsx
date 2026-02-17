@@ -65,7 +65,7 @@ export default function Sidebar() {
         { to: '/plugins', label: 'Plugins', icon: Plug },
         { to: '/all-files', label: 'File Library', icon: FileText },
         { to: '/rules', label: 'Rules', icon: Wand2 },
-        { to: '/admin/settings', label: 'Admin', icon: Settings },
+        { to: '/admin', label: 'Admin', icon: Settings },
     ];
 
     useEffect(() => {

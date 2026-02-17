@@ -35,6 +35,19 @@ export const cancelJob = async (jobId) => {
     return response.data;
 };
 
+export const reprocessJob = async (jobId) => {
+    const response = await api.post(`/jobs/${jobId}/reprocess`);
+    return response.data;
+};
+
+export const getJobAttempts = async (jobId, limit = 20) => {
+    const safeLimit = Number.isFinite(Number(limit)) ? Math.max(1, Math.floor(Number(limit))) : 20;
+    const response = await api.get(`/jobs/${jobId}/attempts`, {
+        params: { limit: safeLimit },
+    });
+    return response.data;
+};
+
 export const uploadFileBackground = async (accountId, folderId, file, onProgress) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -124,6 +137,8 @@ export const jobsService = {
     createMoveJob,
     getJobs,
     cancelJob,
+    reprocessJob,
+    getJobAttempts,
     deleteJob,
     uploadFileBackground,
     createSyncJob,

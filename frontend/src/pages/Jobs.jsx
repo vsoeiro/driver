@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, CheckCircle, XCircle, Clock, PlayCircle, Eye, AlertTriangle, Undo2, Trash2, Square } from 'lucide-react';
-import { cancelJob, createMetadataUndoJob, deleteJob, getJobs } from '../services/jobs';
+import { RefreshCw, CheckCircle, XCircle, Clock, PlayCircle, Eye, AlertTriangle, Undo2, Trash2, Square, RotateCcw } from 'lucide-react';
+import { cancelJob, createMetadataUndoJob, deleteJob, getJobAttempts, getJobs, reprocessJob } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
 import Modal from '../components/Modal';
 import { formatJobStatus, formatJobType } from '../utils/jobLabels';
@@ -14,6 +14,9 @@ export default function Jobs() {
     const [undoingBatchId, setUndoingBatchId] = useState(null);
     const [deletingJobId, setDeletingJobId] = useState(null);
     const [cancellingJobId, setCancellingJobId] = useState(null);
+    const [reprocessingJobId, setReprocessingJobId] = useState(null);
+    const [attempts, setAttempts] = useState([]);
+    const [loadingAttempts, setLoadingAttempts] = useState(false);
     const { showToast } = useToast();
     const PAGE_SIZE = 20;
 
@@ -122,6 +125,20 @@ export default function Jobs() {
             showToast(message, 'error');
         } finally {
             setCancellingJobId(null);
+        }
+    };
+
+    const triggerReprocess = async (jobId) => {
+        setReprocessingJobId(jobId);
+        try {
+            const cloned = await reprocessJob(jobId);
+            showToast(`Reprocess queued (${cloned.id})`, 'success');
+            fetchJobs();
+        } catch (error) {
+            const message = error?.response?.data?.detail || 'Failed to reprocess job';
+            showToast(message, 'error');
+        } finally {
+            setReprocessingJobId(null);
         }
     };
 
@@ -243,12 +260,33 @@ export default function Jobs() {
                                                     </button>
                                                 )}
                                                 <button
-                                                    onClick={() => setSelectedJob(job)}
+                                                    onClick={async () => {
+                                                        setSelectedJob(job);
+                                                        setLoadingAttempts(true);
+                                                        try {
+                                                            const rows = await getJobAttempts(job.id, 20);
+                                                            setAttempts(rows);
+                                                        } catch {
+                                                            setAttempts([]);
+                                                        } finally {
+                                                            setLoadingAttempts(false);
+                                                        }
+                                                    }}
                                                     className="p-1 text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors"
                                                     title="View Details"
                                                 >
                                                     <Eye className="w-4 h-4" />
                                                 </button>
+                                                {canDelete && (
+                                                    <button
+                                                        onClick={() => triggerReprocess(job.id)}
+                                                        disabled={reprocessingJobId === job.id}
+                                                        className="p-1 text-muted-foreground hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors disabled:opacity-50"
+                                                        title="Reprocess job"
+                                                    >
+                                                        <RotateCcw className="w-4 h-4" />
+                                                    </button>
+                                                )}
                                                 {canDelete && (
                                                     <button
                                                         onClick={() => removeJob(job.id)}
@@ -385,6 +423,33 @@ export default function Jobs() {
                                 </div>
                             </div>
                         )}
+
+                        <div>
+                            <span className="text-sm font-medium mb-2 block">Attempt History</span>
+                            <div className="bg-muted/30 p-3 rounded-md border text-xs overflow-auto max-h-60">
+                                {loadingAttempts ? (
+                                    <div className="text-muted-foreground">Loading attempts...</div>
+                                ) : attempts.length === 0 ? (
+                                    <div className="text-muted-foreground">No attempts recorded.</div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {attempts.map((attempt) => (
+                                            <div key={attempt.id} className="border rounded p-2 bg-background">
+                                                <div className="font-medium text-foreground">
+                                                    Attempt #{attempt.attempt_number} - {formatJobStatus(attempt.status)}
+                                                </div>
+                                                <div className="text-muted-foreground">
+                                                    Started: {formatDate(attempt.started_at)} | Finished: {formatDate(attempt.completed_at)} | Duration: {attempt.duration_seconds ?? '-'}s
+                                                </div>
+                                                {attempt.error && (
+                                                    <pre className="whitespace-pre-wrap break-all text-destructive mt-1">{attempt.error}</pre>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
                     </div>
                 )}
             </Modal>
