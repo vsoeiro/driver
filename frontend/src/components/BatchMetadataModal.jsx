@@ -148,8 +148,14 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
     const coverAttr = currentCategory?.attributes?.find(
         (attr) => attr.plugin_field_key === pluginView?.gallery?.coverField
     );
+    const coverAccountAttr = currentCategory?.attributes?.find(
+        (attr) => attr.plugin_field_key === pluginView?.gallery?.coverAccountField
+    );
     const singleItem = selectedItems.length === 1 ? selectedItems[0] : null;
     const coverItemId = coverAttr ? attributeValues?.[coverAttr.id] : null;
+    const coverAccountId = coverAccountAttr
+        ? attributeValues?.[coverAccountAttr.id]
+        : singleItem?.account_id;
     const showCoverPanel = !!(
         singleItem &&
         singleItem.item_type !== 'folder' &&
@@ -159,14 +165,14 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
     );
 
     useEffect(() => {
-        if (!isOpen || !showCoverPanel || !singleItem?.account_id) {
+        if (!isOpen || !showCoverPanel || !coverAccountId) {
             setCoverUrl(null);
             setCoverLoading(false);
             return;
         }
 
         let cancelled = false;
-        const cacheKey = buildCoverCacheKey(singleItem.account_id, String(coverItemId));
+        const cacheKey = buildCoverCacheKey(String(coverAccountId), String(coverItemId));
         const cached = getCachedCoverUrl(cacheKey);
         if (cached) {
             setCoverUrl(cached);
@@ -176,7 +182,11 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
         const loadCover = async () => {
             try {
                 setCoverLoading(true);
-                const url = await driveService.getDownloadUrl(singleItem.account_id, String(coverItemId));
+                const url = driveService.getDownloadContentUrl(
+                    String(coverAccountId),
+                    String(coverItemId),
+                    { autoResolveAccount: true },
+                );
                 if (cancelled || !url) return;
                 setCachedCoverUrl(cacheKey, url);
                 setCoverUrl(url);
@@ -191,7 +201,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
         return () => {
             cancelled = true;
         };
-    }, [isOpen, showCoverPanel, singleItem, coverItemId]);
+    }, [isOpen, showCoverPanel, coverAccountId, coverItemId]);
 
     return (
         <Modal

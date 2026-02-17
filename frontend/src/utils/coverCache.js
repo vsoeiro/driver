@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'driver_cover_url_cache_v1';
+const STORAGE_KEY = 'driver_cover_url_cache_v2';
 const DEFAULT_TTL_MS = 15 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 1000;
 
@@ -70,4 +70,3 @@ export const setCachedCoverUrl = (key, url, ttlMs = DEFAULT_TTL_MS) => {
     }
     persistToStorage();
 };
-

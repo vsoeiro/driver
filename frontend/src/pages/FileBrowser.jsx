@@ -262,6 +262,9 @@ export default function FileBrowser() {
                             </React.Fragment>
                         ))}
                     </nav>
+                    <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-0.5 rounded-full shrink-0">
+                        {files.length} item{files.length === 1 ? '' : 's'}
+                    </span>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -450,7 +453,7 @@ export default function FileBrowser() {
                                         </div>
 
                                         <div className="text-right text-sm text-muted-foreground tabular-nums">
-                                            {formatSize(file.size)}
+                                            {formatSize(file.size ?? 0)}
                                         </div>
 
                                         <div className="text-right text-sm text-muted-foreground tabular-nums">

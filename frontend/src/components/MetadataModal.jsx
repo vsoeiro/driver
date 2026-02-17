@@ -225,18 +225,22 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
     const coverAttr = selectedCategory?.attributes?.find(
         (attr) => attr.plugin_field_key === pluginView?.gallery?.coverField
     );
+    const coverAccountAttr = selectedCategory?.attributes?.find(
+        (attr) => attr.plugin_field_key === pluginView?.gallery?.coverAccountField
+    );
     const coverItemId = coverAttr ? formValues?.[coverAttr.id] : null;
+    const coverAccountId = coverAccountAttr ? formValues?.[coverAccountAttr.id] : accountId;
     const showCoverPanel = !!(selectedCategory && coverAttr && item?.item_type !== 'folder');
 
     useEffect(() => {
-        if (!isOpen || !showCoverPanel || !coverItemId || !accountId) {
+        if (!isOpen || !showCoverPanel || !coverItemId || !coverAccountId) {
             setCoverUrl(null);
             setCoverLoading(false);
             return;
         }
 
         let cancelled = false;
-        const cacheKey = buildCoverCacheKey(accountId, String(coverItemId));
+        const cacheKey = buildCoverCacheKey(String(coverAccountId), String(coverItemId));
         const cached = getCachedCoverUrl(cacheKey);
         if (cached) {
             setCoverUrl(cached);
@@ -246,7 +250,11 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
         const loadCover = async () => {
             try {
                 setCoverLoading(true);
-                const url = await driveService.getDownloadUrl(accountId, String(coverItemId));
+                const url = driveService.getDownloadContentUrl(
+                    String(coverAccountId),
+                    String(coverItemId),
+                    { autoResolveAccount: true },
+                );
                 if (cancelled || !url) return;
                 setCachedCoverUrl(cacheKey, url);
                 setCoverUrl(url);
@@ -261,7 +269,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
         return () => {
             cancelled = true;
         };
-    }, [isOpen, showCoverPanel, coverItemId, accountId]);
+    }, [isOpen, showCoverPanel, coverItemId, coverAccountId]);
 
     return (
         <Modal

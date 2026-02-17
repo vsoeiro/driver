@@ -236,6 +236,9 @@ const CategoryItemsTable = ({ category, onBack }) => {
         const coverAttr = (category.attributes || []).find(
             (attr) => attr.plugin_field_key === pluginView?.gallery?.coverField
         );
+        const coverAccountAttr = (category.attributes || []).find(
+            (attr) => attr.plugin_field_key === pluginView?.gallery?.coverAccountField
+        );
         if (!coverAttr) {
             setCoverUrlsByItemId({});
             return;
@@ -249,20 +252,33 @@ const CategoryItemsTable = ({ category, onBack }) => {
             for (const item of items) {
                 const coverItemId = item.metadata?.values?.[coverAttr.id];
                 if (!coverItemId) continue;
-                const cacheKey = buildCoverCacheKey(item.account_id, String(coverItemId));
+                const coverAccountId = coverAccountAttr
+                    ? item.metadata?.values?.[coverAccountAttr.id]
+                    : item.account_id;
+                if (!coverAccountId) continue;
+                const cacheKey = buildCoverCacheKey(String(coverAccountId), String(coverItemId));
                 const cached = getCachedCoverUrl(cacheKey);
                 if (cached) {
                     preloaded[item.id] = cached;
                 } else {
-                    misses.push({ item, coverItemId: String(coverItemId), cacheKey });
+                    misses.push({
+                        item,
+                        coverItemId: String(coverItemId),
+                        coverAccountId: String(coverAccountId),
+                        cacheKey,
+                    });
                 }
             }
 
             setCoverUrlsByItemId(preloaded);
             await Promise.all(
-                misses.map(async ({ item, coverItemId, cacheKey }) => {
+                misses.map(async ({ item, coverItemId, coverAccountId, cacheKey }) => {
                     try {
-                        const url = await driveService.getDownloadUrl(item.account_id, coverItemId);
+                        const url = driveService.getDownloadContentUrl(
+                            coverAccountId,
+                            coverItemId,
+                            { autoResolveAccount: true },
+                        );
                         if (cancelled || !url) return;
                         setCachedCoverUrl(cacheKey, url);
                         setCoverUrlsByItemId((prev) => {

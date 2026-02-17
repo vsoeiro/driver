@@ -928,7 +928,7 @@ export default function AllFiles() {
                                             </span>
                                         </div>
                                         <div className="text-right text-sm text-muted-foreground tabular-nums">
-                                            {formatSize(item.size)}
+                                            {formatSize(item.size ?? 0)}
                                         </div>
                                         <div className="text-right text-sm text-muted-foreground truncate">
                                             {item.metadata ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800" title={item.metadata.category_name}>{item.metadata.category_name || 'N/A'}</span> : '-'}

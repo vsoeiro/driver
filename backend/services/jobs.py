@@ -1,10 +1,11 @@
 """Job service for managing background jobs."""
 
 import asyncio
+import json
 import logging
 import math
 from datetime import datetime, UTC, timedelta
-from typing import Sequence
+from typing import Any, Sequence
 from uuid import UUID
 
 from sqlalchemy import and_, or_, select, update
@@ -33,6 +34,34 @@ class JobService:
             Database session.
         """
         self.session = session
+
+    @staticmethod
+    def _coerce_json_dict(value: Any, *, default_empty: bool = True) -> dict | None:
+        """Coerce persisted JSON-like values to a Python dict.
+
+        Handles legacy rows where JSON columns were stored as text.
+        """
+        if value is None:
+            return {} if default_empty else None
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return {} if default_empty else None
+            try:
+                parsed = json.loads(text)
+                return parsed if isinstance(parsed, dict) else ({} if default_empty else None)
+            except json.JSONDecodeError:
+                return {} if default_empty else None
+        return {} if default_empty else None
+
+    def _normalize_job_json_fields(self, job: Job) -> Job:
+        """Normalize potentially string-encoded JSON fields in-place."""
+        job.payload = self._coerce_json_dict(job.payload, default_empty=True)
+        job.result = self._coerce_json_dict(job.result, default_empty=False)
+        job.metrics = self._coerce_json_dict(job.metrics, default_empty=False)
+        return job
 
     async def create_job(self, job_in: JobCreate) -> Job:
         """Create a new job.
@@ -129,7 +158,7 @@ class JobService:
             await self.session.commit()
             await self.session.refresh(job)
             logger.info(f"Picked up job {job.id}")
-            return job
+            return self._normalize_job_json_fields(job)
         
         return None
 
@@ -185,8 +214,9 @@ class JobService:
         now = datetime.now(UTC)
         job.status = "CANCELLED"
         job.completed_at = now
+        current_result = self._coerce_json_dict(job.result, default_empty=True) or {}
         job.result = {
-            **(job.result or {}),
+            **current_result,
             "cancelled": True,
             "message": "Cancelled by user",
         }
@@ -228,7 +258,7 @@ class JobService:
         result = await self.session.execute(stmt)
         job = result.scalar_one()
         await self.session.commit()
-        return job
+        return self._normalize_job_json_fields(job)
 
     async def fail_job(self, job_id: UUID, error: str) -> Job:
         """Mark a job as retry scheduled or dead-letter/failed.
@@ -346,7 +376,10 @@ class JobService:
         for attempt in range(1, max_attempts + 1):
             try:
                 result = await self.session.execute(stmt)
-                return result.scalars().all()
+                jobs = result.scalars().all()
+                for job in jobs:
+                    self._normalize_job_json_fields(job)
+                return jobs
             except OperationalError as exc:
                 if "database is locked" not in str(exc).lower() or attempt == max_attempts:
                     raise

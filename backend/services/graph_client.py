@@ -66,26 +66,34 @@ class GraphClient:
         GraphAPIError
             If the API request fails.
         """
-        access_token = await self._token_manager.get_valid_access_token(account)
-
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json",
-        }
-
         if endpoint.startswith("http://") or endpoint.startswith("https://"):
             url = endpoint
         else:
             url = f"{GRAPH_BASE_URL}{endpoint}"
 
-        try:
+        async def _send_request(access_token: str) -> httpx.Response:
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            }
             async with httpx.AsyncClient(timeout=GRAPH_TIMEOUT) as client:
-                response = await client.request(
+                return await client.request(
                     method=method,
                     url=url,
                     headers=headers,
                     **kwargs,
                 )
+
+        try:
+            access_token = await self._token_manager.get_valid_access_token(account)
+            response = await _send_request(access_token)
+            if response.status_code == 401:
+                logger.warning(
+                    "Graph returned 401 for account %s; forcing token refresh and retrying once.",
+                    account.id,
+                )
+                access_token = await self._token_manager.force_refresh_access_token(account)
+                response = await _send_request(access_token)
         except httpx.TimeoutException as exc:
             logger.error("Graph API timeout: %s %s", method, endpoint)
             raise GraphAPIError(

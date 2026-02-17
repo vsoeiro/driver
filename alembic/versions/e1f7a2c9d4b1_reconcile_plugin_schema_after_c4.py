@@ -34,19 +34,19 @@ def upgrade() -> None:
         if not _has_column(inspector, "metadata_categories", "is_active"):
             op.add_column(
                 "metadata_categories",
-                sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+                sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
             )
         if not _has_column(inspector, "metadata_categories", "managed_by_plugin"):
             op.add_column(
                 "metadata_categories",
-                sa.Column("managed_by_plugin", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+                sa.Column("managed_by_plugin", sa.Boolean(), nullable=False, server_default=sa.false()),
             )
         if not _has_column(inspector, "metadata_categories", "plugin_key"):
             op.add_column("metadata_categories", sa.Column("plugin_key", sa.String(length=80), nullable=True))
         if not _has_column(inspector, "metadata_categories", "is_locked"):
             op.add_column(
                 "metadata_categories",
-                sa.Column("is_locked", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+                sa.Column("is_locked", sa.Boolean(), nullable=False, server_default=sa.false()),
             )
 
     inspector = sa.inspect(bind)
@@ -54,7 +54,7 @@ def upgrade() -> None:
         if not _has_column(inspector, "metadata_attributes", "managed_by_plugin"):
             op.add_column(
                 "metadata_attributes",
-                sa.Column("managed_by_plugin", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+                sa.Column("managed_by_plugin", sa.Boolean(), nullable=False, server_default=sa.false()),
             )
         if not _has_column(inspector, "metadata_attributes", "plugin_key"):
             op.add_column("metadata_attributes", sa.Column("plugin_key", sa.String(length=80), nullable=True))
@@ -63,7 +63,7 @@ def upgrade() -> None:
         if not _has_column(inspector, "metadata_attributes", "is_locked"):
             op.add_column(
                 "metadata_attributes",
-                sa.Column("is_locked", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+                sa.Column("is_locked", sa.Boolean(), nullable=False, server_default=sa.false()),
             )
 
     inspector = sa.inspect(bind)
@@ -73,7 +73,7 @@ def upgrade() -> None:
             sa.Column("key", sa.String(length=80), nullable=False),
             sa.Column("name", sa.String(length=120), nullable=False),
             sa.Column("description", sa.String(length=500), nullable=True),
-            sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+            sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.false()),
             sa.Column("category_id", sa.UUID(), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),

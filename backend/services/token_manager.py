@@ -58,10 +58,21 @@ class TokenManager:
         """
         if self._is_token_valid(account):
             token = decrypt_token(account.access_token_encrypted)
-            if token:
+            if token and self._looks_like_valid_access_token(account.provider, token):
                 return token
+            if token:
+                logger.warning(
+                    "Detected malformed cached access token for account %s (provider=%s). Forcing refresh.",
+                    account.id,
+                    account.provider,
+                )
+                return await self._refresh_token(account, force=True)
 
         return await self._refresh_token(account)
+
+    async def force_refresh_access_token(self, account: LinkedAccount) -> str:
+        """Force refresh access token regardless of cached token validity."""
+        return await self._refresh_token(account, force=True)
 
     def _is_token_valid(self, account: LinkedAccount) -> bool:
         """Check if the account's access token is still valid.
@@ -85,7 +96,7 @@ class TokenManager:
         expiry_threshold = datetime.now(UTC) + TOKEN_REFRESH_MARGIN
         return account.token_expires_at > expiry_threshold
 
-    async def _refresh_token(self, account: LinkedAccount) -> str:
+    async def _refresh_token(self, account: LinkedAccount, force: bool = False) -> str:
         """Refresh the access token for an account.
 
         Parameters
@@ -113,10 +124,10 @@ class TokenManager:
         locked_account = result.scalar_one()
 
         # Check if validity again - maybe another process just refreshed it
-        if self._is_token_valid(locked_account):
+        if not force and self._is_token_valid(locked_account):
              logger.info("Token was already refreshed by another process")
              token = decrypt_token(locked_account.access_token_encrypted)
-             if token:
+             if token and self._looks_like_valid_access_token(locked_account.provider, token):
                  # Update the passed account object in memory to match DB
                  account.access_token_encrypted = locked_account.access_token_encrypted
                  account.refresh_token_encrypted = locked_account.refresh_token_encrypted
@@ -160,6 +171,23 @@ class TokenManager:
         logger.info("Successfully refreshed token for account %s", locked_account.id)
 
         return result.access_token
+
+    def _looks_like_valid_access_token(self, provider: str, token: str) -> bool:
+        value = (token or "").strip()
+        if not value:
+            return False
+
+        # Common sign of an encrypted Fernet payload accidentally passed through as a token.
+        if value.startswith("gAAAAA"):
+            return False
+
+        provider_key = (provider or "").lower()
+        if provider_key == "microsoft":
+            # Microsoft Graph access tokens are JWTs (header.payload.signature).
+            return value.count(".") == 2
+
+        # Google access tokens can be opaque, so only basic sanity checks apply.
+        return True
 
     def _get_auth_service(self, provider: str):
         provider_key = (provider or "").lower()

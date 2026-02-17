@@ -100,7 +100,9 @@ async def apply_metadata_change(
             history_action = action_override or "CREATE"
 
     history = ItemMetadataHistory(
-        metadata_id=new_snapshot["metadata_id"] or previous["metadata_id"],
+        # Keep a metadata FK reference only when the row exists after the change.
+        # This avoids FK violations for DELETE/UNDO-delete operations.
+        metadata_id=new_snapshot["metadata_id"],
         account_id=account_id,
         item_id=item_id,
         action=history_action,

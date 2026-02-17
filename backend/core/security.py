@@ -78,13 +78,25 @@ def decrypt_token(encrypted_token: str) -> str | None:
     str or None
         The decrypted token, or None if decryption fails.
     """
-    try:
-        fernet = _get_fernet()
-        decrypted = fernet.decrypt(encrypted_token.encode())
-        return decrypted.decode()
-    except InvalidToken:
-        logger.warning("Failed to decrypt token - invalid or corrupted")
+    candidate = (encrypted_token or "").strip().strip("'").strip('"')
+    if not candidate:
         return None
+
+    fernet = _get_fernet()
+    max_depth = 3
+    for depth in range(max_depth):
+        try:
+            decrypted = fernet.decrypt(candidate.encode()).decode()
+            candidate = decrypted.strip().strip("'").strip('"')
+            if not candidate.startswith("gAAAAA"):
+                return candidate
+        except InvalidToken:
+            if depth == 0:
+                logger.warning("Failed to decrypt token - invalid or corrupted")
+                return None
+            return candidate
+
+    return candidate
 
 
 def create_jwt_token(

@@ -23,7 +23,7 @@ GOOGLE_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 GOOGLE_FOLDER_MIME = "application/vnd.google-apps.folder"
 
 FILE_FIELDS = (
-    "id,name,mimeType,size,createdTime,modifiedTime,webViewLink,webContentLink,parents"
+    "id,name,mimeType,size,quotaBytesUsed,createdTime,modifiedTime,webViewLink,webContentLink,parents"
 )
 
 
@@ -42,16 +42,27 @@ class GoogleDriveClient:
         use_upload_api: bool = False,
         **kwargs: Any,
     ) -> httpx.Response:
-        access_token = await self._token_manager.get_valid_access_token(account)
         base = GOOGLE_UPLOAD_BASE_URL if use_upload_api else GOOGLE_DRIVE_BASE_URL
         url = endpoint if endpoint.startswith("http") else f"{base}{endpoint}"
 
-        headers = kwargs.pop("headers", {})
-        headers["Authorization"] = f"Bearer {access_token}"
+        request_headers = kwargs.pop("headers", {})
+
+        async def _send_request(access_token: str) -> httpx.Response:
+            headers = dict(request_headers)
+            headers["Authorization"] = f"Bearer {access_token}"
+            async with httpx.AsyncClient(timeout=GOOGLE_TIMEOUT) as client:
+                return await client.request(method=method, url=url, headers=headers, **kwargs)
 
         try:
-            async with httpx.AsyncClient(timeout=GOOGLE_TIMEOUT) as client:
-                response = await client.request(method=method, url=url, headers=headers, **kwargs)
+            access_token = await self._token_manager.get_valid_access_token(account)
+            response = await _send_request(access_token)
+            if response.status_code == 401:
+                logger.warning(
+                    "Google Drive returned 401 for account %s; forcing token refresh and retrying once.",
+                    account.id,
+                )
+                access_token = await self._token_manager.force_refresh_access_token(account)
+                response = await _send_request(access_token)
         except httpx.TimeoutException as exc:
             raise DriveOrganizerError(
                 "Google Drive request timed out. Please try again.",
@@ -76,7 +87,9 @@ class GoogleDriveClient:
 
     def _parse_single_item(self, item: dict) -> DriveItem:
         is_folder = item.get("mimeType") == GOOGLE_FOLDER_MIME
-        size = item.get("size", 0)
+        raw_size = item.get("size", 0)
+        quota_size = item.get("quotaBytesUsed", 0)
+        size = quota_size if is_folder and quota_size not in (None, "") else raw_size
         try:
             size = int(size)
         except Exception:

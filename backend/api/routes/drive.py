@@ -4,16 +4,23 @@ This module provides endpoints for navigating and accessing OneDrive files.
 """
 
 import logging
+import mimetypes
 import zipfile
 from datetime import UTC, datetime
 from fastapi import APIRouter, Query, UploadFile, File, HTTPException
-from fastapi.responses import RedirectResponse, FileResponse
+from fastapi.responses import RedirectResponse, FileResponse, Response
 from starlette.background import BackgroundTask
 
 from backend.api.dependencies import (
     LinkedAccountDep,
     DriveClientDep,
+    DBSession,
 )
+from sqlalchemy import select
+from backend.core.exceptions import DriveOrganizerError
+from backend.db.models import LinkedAccount
+from backend.services.providers.factory import build_drive_client
+from backend.services.token_manager import TokenManager
 from backend.schemas.drive import (
     BreadcrumbItem,
     BulkDownloadRequest,
@@ -89,11 +96,83 @@ async def get_file_metadata(
 async def get_download_url(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
+    db: DBSession,
     item_id: str,
+    auto_resolve_account: bool = Query(
+        False,
+        description="If true, on 400/404 from the current account it will try other linked accounts.",
+    ),
 ) -> dict:
     """Get a temporary download URL for a file."""
-    download_url = await graph_client.get_download_url(account, item_id)
-    return {"download_url": download_url}
+    try:
+        download_url = await graph_client.get_download_url(account, item_id)
+        return {"download_url": download_url}
+    except DriveOrganizerError as exc:
+        if not auto_resolve_account or exc.status_code not in {400, 404}:
+            raise
+
+        stmt = select(LinkedAccount).where(
+            LinkedAccount.id != account.id,
+            LinkedAccount.is_active.is_(True),
+        )
+        other_accounts = (await db.execute(stmt)).scalars().all()
+        token_manager = TokenManager(db)
+        for candidate in other_accounts:
+            try:
+                candidate_client = build_drive_client(candidate, token_manager)
+                download_url = await candidate_client.get_download_url(candidate, item_id)
+                return {"download_url": download_url}
+            except DriveOrganizerError:
+                continue
+
+        raise
+
+
+@router.get("/{account_id}/download/{item_id}/content", tags=["Downloads"])
+async def download_content(
+    account: LinkedAccountDep,
+    graph_client: DriveClientDep,
+    db: DBSession,
+    item_id: str,
+    auto_resolve_account: bool = Query(
+        False,
+        description="If true, on 400/404 from the current account it will try other linked accounts.",
+    ),
+) -> Response:
+    """Proxy file bytes through backend so browser <img> can load provider-protected files."""
+    try:
+        filename, content = await graph_client.download_file_bytes(account, item_id)
+    except DriveOrganizerError as exc:
+        if not auto_resolve_account or exc.status_code not in {400, 404}:
+            raise
+
+        stmt = select(LinkedAccount).where(
+            LinkedAccount.id != account.id,
+            LinkedAccount.is_active.is_(True),
+        )
+        other_accounts = (await db.execute(stmt)).scalars().all()
+        token_manager = TokenManager(db)
+        filename = "file"
+        content = b""
+        resolved = False
+        for candidate in other_accounts:
+            try:
+                candidate_client = build_drive_client(candidate, token_manager)
+                filename, content = await candidate_client.download_file_bytes(candidate, item_id)
+                resolved = True
+                break
+            except DriveOrganizerError:
+                continue
+
+        if not resolved:
+            raise
+
+    media_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 @router.get("/{account_id}/download/{item_id}/redirect", tags=["Downloads"])

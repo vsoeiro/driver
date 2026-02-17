@@ -20,7 +20,9 @@ export default function Jobs() {
     const fetchJobs = useCallback(async (pageNumber = page) => {
         setLoading(true);
         try {
-            const offset = (pageNumber - 1) * PAGE_SIZE;
+            const parsedPage = Number(pageNumber);
+            const safePage = Number.isFinite(parsedPage) && parsedPage > 0 ? Math.floor(parsedPage) : page;
+            const offset = (safePage - 1) * PAGE_SIZE;
             const data = await getJobs(PAGE_SIZE, offset);
             setJobs(data);
             setHasNextPage(data.length === PAGE_SIZE);
@@ -141,7 +143,7 @@ export default function Jobs() {
                     <h1 className="text-lg font-semibold text-foreground">Background Jobs</h1>
                 </div>
                 <button
-                    onClick={fetchJobs}
+                    onClick={() => fetchJobs()}
                     className="p-2 hover:bg-accent rounded-md text-muted-foreground hover:text-foreground transition-colors"
                     title="Refresh"
                 >

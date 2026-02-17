@@ -85,9 +85,26 @@ export const uploadChunkProxy = async (accountId, uploadUrl, chunk, start, end, 
 /**
  * Get download URL for a file
  */
-export const getDownloadUrl = async (accountId, itemId) => {
-    const response = await api.get(`/drive/${accountId}/download/${itemId}`);
+export const getDownloadUrl = async (accountId, itemId, options = {}) => {
+    const params = new URLSearchParams();
+    if (options.autoResolveAccount) {
+        params.set('auto_resolve_account', 'true');
+    }
+    const query = params.toString() ? `?${params.toString()}` : '';
+    const response = await api.get(`/drive/${accountId}/download/${itemId}${query}`);
     return response.data.download_url;
+};
+
+/**
+ * Build backend proxied content URL for browser-safe image/file embedding.
+ */
+export const getDownloadContentUrl = (accountId, itemId, options = {}) => {
+    const params = new URLSearchParams();
+    if (options.autoResolveAccount) {
+        params.set('auto_resolve_account', 'true');
+    }
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return `/api/v1/drive/${encodeURIComponent(accountId)}/download/${encodeURIComponent(itemId)}/content${query}`;
 };
 
 /**
@@ -124,6 +141,7 @@ export const driveService = {
     createUploadSession,
     uploadChunkProxy,
     getDownloadUrl,
+    getDownloadContentUrl,
     getQuota,
     searchFiles
 };

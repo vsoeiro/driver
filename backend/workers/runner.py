@@ -1,6 +1,7 @@
 """Background worker runner."""
 
 import asyncio
+import json
 import logging
 import traceback
 from datetime import UTC, datetime
@@ -72,7 +73,15 @@ class BackgroundWorker:
                 logger.info(f"Executing job {job_id} ({job.type})")
 
                 started = datetime.now(UTC)
-                payload = dict(job.payload or {})
+                raw_payload = job.payload
+                if isinstance(raw_payload, str):
+                    try:
+                        raw_payload = json.loads(raw_payload)
+                    except json.JSONDecodeError:
+                        raw_payload = {}
+                if not isinstance(raw_payload, dict):
+                    raw_payload = {}
+                payload = dict(raw_payload)
                 payload["_job_id"] = str(job_id)
 
                 if await job_service.is_cancel_requested(job_id):

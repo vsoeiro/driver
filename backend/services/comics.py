@@ -7,6 +7,7 @@ import posixpath
 import tarfile
 import tempfile
 import zipfile
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -21,10 +22,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.db.models import ItemMetadata, LinkedAccount
 from backend.services.metadata_plugins import MetadataPluginService
 from backend.services.plugin_settings import ComicRuntimeSettings, PluginSettingsService
+from backend.services.rar_tools import ensure_rar_backend
 from backend.services.metadata_versioning import apply_metadata_change
 from backend.services.providers.base import DriveProviderClient
 from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
+
+logger = logging.getLogger(__name__)
 
 SUPPORTED_COMIC_EXTENSIONS = {
     "cbz",
@@ -122,6 +126,11 @@ def _extract_from_rar(local_path: str, *, fmt: str) -> ComicExtractionResult:
         import rarfile  # type: ignore[import-not-found]
     except ImportError as exc:
         raise ValueError("RAR support requires optional dependency 'rarfile'") from exc
+    if not ensure_rar_backend():
+        raise ValueError(
+            "RAR backend tool not available. Configure COMIC_RAR_TOOLS_DIR and optionally "
+            "COMIC_RAR_TOOL_DOWNLOAD_URL / COMIC_RAR_TOOL_PATH."
+        )
 
     with rarfile.RarFile(local_path, "r") as archive:
         image_names = [
@@ -466,21 +475,20 @@ class ComicMetadataService:
         )
         for file_item in files_to_process:
             try:
-                async with self.session.begin_nested():
-                    mapped = await self._process_single_file(
-                        source_client=source_client,
-                        source_account=source_account,
-                        cover_client=target_client,
-                        cover_account=target_account,
-                        item=file_item,
-                        cover_folder_id=cover_folder_id,
-                        category_id=category_id,
-                        attr_ids=attr_ids,
-                        cover_settings=plugin_settings,
-                        job_id=job_id,
-                        batch_id=batch_id,
-                        force_remap=force_remap,
-                    )
+                mapped = await self._process_single_file(
+                    source_client=source_client,
+                    source_account=source_account,
+                    cover_client=target_client,
+                    cover_account=target_account,
+                    item=file_item,
+                    cover_folder_id=cover_folder_id,
+                    category_id=category_id,
+                    attr_ids=attr_ids,
+                    cover_settings=plugin_settings,
+                    job_id=job_id,
+                    batch_id=batch_id,
+                    force_remap=force_remap,
+                )
                 if mapped:
                     stats["mapped"] += 1
                 else:
@@ -492,6 +500,11 @@ class ComicMetadataService:
             except Exception:
                 await self.session.rollback()
                 stats["failed"] += 1
+                logger.exception(
+                    "Comic mapping failed for account=%s item=%s",
+                    source_account.id,
+                    getattr(file_item, "id", None),
+                )
 
         if processed_since_commit > 0:
             await self.session.commit()
@@ -607,9 +620,12 @@ class ComicMetadataService:
                     cover_folder_id,
                 )
                 cover_id_attr = attr_ids.get("cover_item_id")
+                cover_account_attr = attr_ids.get("cover_account_id")
                 cover_name_attr = attr_ids.get("cover_filename")
                 if cover_id_attr:
                     mapped_values[cover_id_attr] = uploaded.id
+                if cover_account_attr:
+                    mapped_values[cover_account_attr] = str(cover_account.id)
                 if cover_name_attr:
                     mapped_values[cover_name_attr] = uploaded.name
                 extraction.details.update(optimize_details)
@@ -624,8 +640,26 @@ class ComicMetadataService:
                 job_id=job_id,
             )
             return True
-        except Exception:
-            return False
+        except ValueError as exc:
+            # Non-comic/unsupported content inside accepted container types should be skipped.
+            non_comic_markers = (
+                "archive has no image pages",
+                "epub has no cover image",
+                "epub missing",
+                "epub container has no rootfile",
+                "epub opf manifest not found",
+            )
+            error_text = str(exc).lower()
+            if any(marker in error_text for marker in non_comic_markers):
+                logger.info(
+                    "Skipping non-comic item account=%s item=%s name=%s reason=%s",
+                    source_account.id,
+                    item.id,
+                    item.name,
+                    exc,
+                )
+                return False
+            raise
         finally:
             try:
                 Path(local_path).unlink(missing_ok=True)
@@ -659,7 +693,7 @@ class ComicMetadataService:
             return False
 
         values = existing.values or {}
-        check_fields = ("cover_item_id", "page_count", "file_format", "title")
+        check_fields = ("cover_item_id", "cover_account_id", "page_count", "file_format", "title")
         for field_key in check_fields:
             attr_id = attr_ids.get(field_key)
             if not attr_id:

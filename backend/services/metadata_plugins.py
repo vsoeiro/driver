@@ -45,6 +45,7 @@ COMIC_PLUGIN_FIELDS: list[PluginFieldSpec] = [
     PluginFieldSpec("manga", "Manga", "boolean"),
     PluginFieldSpec("black_and_white", "Black & White", "boolean"),
     PluginFieldSpec("cover_item_id", "Cover Item ID", "text"),
+    PluginFieldSpec("cover_account_id", "Cover Account ID", "text"),
     PluginFieldSpec("cover_filename", "Cover Filename", "text"),
     PluginFieldSpec("page_count", "Page Count", "number"),
     PluginFieldSpec("file_size", "File Size", "number"),

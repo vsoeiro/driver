@@ -5,6 +5,7 @@ loading values from environment variables and .env files.
 """
 
 from functools import lru_cache
+import os
 from pathlib import Path
 
 from pydantic import Field, model_validator
@@ -92,6 +93,10 @@ class Settings(BaseSettings):
         default="84,78,72,66,60",
         alias="COMIC_COVER_JPEG_QUALITY_STEPS",
     )
+    comic_rar_tools_dir: str | None = Field(default=None, alias="COMIC_RAR_TOOLS_DIR")
+    comic_rar_tool_path: str | None = Field(default=None, alias="COMIC_RAR_TOOL_PATH")
+    comic_rar_tool_auto_install: bool = Field(default=True, alias="COMIC_RAR_TOOL_AUTO_INSTALL")
+    comic_rar_tool_download_url: str | None = Field(default=None, alias="COMIC_RAR_TOOL_DOWNLOAD_URL")
 
     @model_validator(mode="after")
     def assemble_db_connection(self) -> "Settings":
@@ -126,6 +131,17 @@ class Settings(BaseSettings):
         if self.comic_cover_target_bytes <= 0:
             raise ValueError("COMIC_COVER_TARGET_BYTES must be greater than 0")
         _ = [int(part.strip()) for part in self.comic_cover_jpeg_quality_steps.split(",") if part.strip()]
+        if not self.comic_rar_tools_dir:
+            local_app_data = os.getenv("LOCALAPPDATA")
+            if local_app_data:
+                self.comic_rar_tools_dir = str(Path(local_app_data) / "OneDriveCBRManagement" / "tools")
+            else:
+                self.comic_rar_tools_dir = str(PROJECT_DIR / ".tools")
+        self.comic_rar_tools_dir = os.path.expandvars(str(Path(self.comic_rar_tools_dir).expanduser()))
+        if self.comic_rar_tool_path:
+            self.comic_rar_tool_path = os.path.expandvars(str(Path(self.comic_rar_tool_path).expanduser()))
+        if self.comic_rar_tool_download_url:
+            self.comic_rar_tool_download_url = self.comic_rar_tool_download_url.strip()
         return self
 
     @property

@@ -19,22 +19,22 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("metadata_categories", sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")))
-    op.add_column("metadata_categories", sa.Column("managed_by_plugin", sa.Boolean(), nullable=False, server_default=sa.text("0")))
+    op.add_column("metadata_categories", sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()))
+    op.add_column("metadata_categories", sa.Column("managed_by_plugin", sa.Boolean(), nullable=False, server_default=sa.false()))
     op.add_column("metadata_categories", sa.Column("plugin_key", sa.String(length=80), nullable=True))
-    op.add_column("metadata_categories", sa.Column("is_locked", sa.Boolean(), nullable=False, server_default=sa.text("0")))
+    op.add_column("metadata_categories", sa.Column("is_locked", sa.Boolean(), nullable=False, server_default=sa.false()))
 
-    op.add_column("metadata_attributes", sa.Column("managed_by_plugin", sa.Boolean(), nullable=False, server_default=sa.text("0")))
+    op.add_column("metadata_attributes", sa.Column("managed_by_plugin", sa.Boolean(), nullable=False, server_default=sa.false()))
     op.add_column("metadata_attributes", sa.Column("plugin_key", sa.String(length=80), nullable=True))
     op.add_column("metadata_attributes", sa.Column("plugin_field_key", sa.String(length=80), nullable=True))
-    op.add_column("metadata_attributes", sa.Column("is_locked", sa.Boolean(), nullable=False, server_default=sa.text("0")))
+    op.add_column("metadata_attributes", sa.Column("is_locked", sa.Boolean(), nullable=False, server_default=sa.false()))
 
     op.create_table(
         "metadata_plugins",
         sa.Column("key", sa.String(length=80), nullable=False),
         sa.Column("name", sa.String(length=120), nullable=False),
         sa.Column("description", sa.String(length=500), nullable=True),
-        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("category_id", sa.UUID(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),

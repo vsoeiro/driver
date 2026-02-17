@@ -76,3 +76,22 @@ cd frontend
 npm.cmd run lint --workspaces=false
 npm.cmd run build --workspaces=false
 ```
+
+## Migracao para Supabase (PostgreSQL)
+
+1. Configure `SUPABASE_DATABASE_URL` com a connection string Postgres do Supabase.
+2. Execute:
+
+```bash
+pwsh ./scripts/migrate_to_supabase.ps1 -SupabaseUrl "postgresql://user:pass@host:5432/postgres"
+```
+
+O script:
+- roda `alembic upgrade head` no banco destino;
+- migra os dados do `sqlite:///./database.db` para o Supabase.
+
+Opcional (dry-run do plano de tabelas):
+
+```bash
+uv run python scripts/migrate_sqlite_to_supabase.py --dry-run --postgres-url "postgresql://..."
+```
