@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.exceptions import DriveOrganizerError
 from backend.db.models import LinkedAccount
-
+from backend.services.item_index import parent_id_from_breadcrumb, path_from_breadcrumb, upsert_item_record
 from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
 from backend.workers.dispatcher import register_handler
@@ -51,6 +51,7 @@ async def upload_file_handler(payload: dict, session: AsyncSession) -> dict:
         
         # Open file in binary mode
         with open(temp_path, "rb") as f:
+            uploaded_item_id: str | None = None
             if file_size > 4 * 1024 * 1024:
                 # Large file (> 4MB) -> Upload Session
                 logger.info(f"Starting large file upload for {filename} ({file_size} bytes)")
@@ -71,13 +72,15 @@ async def upload_file_handler(payload: dict, session: AsyncSession) -> dict:
                         
                     end = min(offset + len(chunk), file_size) - 1
                     
-                    await client.upload_chunk(
+                    upload_result = await client.upload_chunk(
                         upload_url,
                         chunk,
                         offset,
                         end,
                         file_size
                     )
+                    if isinstance(upload_result, dict) and upload_result.get("id"):
+                        uploaded_item_id = upload_result["id"]
                     
                     offset += len(chunk)
                 
@@ -87,8 +90,21 @@ async def upload_file_handler(payload: dict, session: AsyncSession) -> dict:
                 logger.info(f"Starting small file upload for {filename} ({file_size} bytes)")
                 # Read content for small upload
                 content = f.read()
-                await client.upload_small_file(account, filename, content, folder_id)
+                uploaded = await client.upload_small_file(account, filename, content, folder_id)
+                uploaded_item_id = uploaded.id
                 msg = "Small file upload completed"
+
+        if uploaded_item_id:
+            uploaded_item = await client.get_item_metadata(account, uploaded_item_id)
+            breadcrumb = await client.get_item_path(account, uploaded_item_id)
+            await upsert_item_record(
+                session,
+                account_id=account.id,
+                item_data=uploaded_item,
+                parent_id=parent_id_from_breadcrumb(breadcrumb),
+                path=path_from_breadcrumb(breadcrumb),
+            )
+            await session.commit()
 
         return {"filename": filename, "size": file_size, "message": msg}
 

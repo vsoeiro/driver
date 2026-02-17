@@ -15,6 +15,9 @@ async def test_sync_items_handler():
     file_id = "file_id"
     
     mock_session = AsyncMock()
+    mock_execute_result = MagicMock()
+    mock_execute_result.scalars.return_value.all.return_value = []
+    mock_session.execute.return_value = mock_execute_result
     
     # Mock Account
     mock_account = LinkedAccount(id=account_id)
@@ -74,6 +77,7 @@ async def test_sync_items_handler():
         
         # Mock upsert_item_record
         with patch("backend.workers.handlers.sync.upsert_item_record", new_callable=AsyncMock) as mock_upsert:
+            mock_upsert.side_effect = ["created", "created", "created"]
             
             # Execute
             payload = {"account_id": str(account_id)}
@@ -87,10 +91,28 @@ async def test_sync_items_handler():
             assert mock_upsert.call_count == 3
             
             # 1. Root
-            mock_upsert.assert_any_call(mock_session, mock_account, mock_root_item, parent_id=None, path="/")
+            mock_upsert.assert_any_call(
+                mock_session,
+                account_id=mock_account.id,
+                item_data=mock_root_item,
+                parent_id=None,
+                path="/",
+            )
             
             # 2. Folder
-            mock_upsert.assert_any_call(mock_session, mock_account, mock_folder_item, parent_id=root_item_id, path="/MyFolder")
+            mock_upsert.assert_any_call(
+                mock_session,
+                account_id=mock_account.id,
+                item_data=mock_folder_item,
+                parent_id=root_item_id,
+                path="/MyFolder",
+            )
             
             # 3. File
-            mock_upsert.assert_any_call(mock_session, mock_account, mock_file_item, parent_id=folder_id, path="/MyFolder/MyFile.txt")
+            mock_upsert.assert_any_call(
+                mock_session,
+                account_id=mock_account.id,
+                item_data=mock_file_item,
+                parent_id=folder_id,
+                path="/MyFolder/MyFile.txt",
+            )

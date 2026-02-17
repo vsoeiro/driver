@@ -4,10 +4,18 @@ import logging
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.exceptions import DriveOrganizerError
-from backend.db.models import LinkedAccount
+from backend.db.models import Item, LinkedAccount
+from backend.services.item_index import (
+    delete_item_and_descendants,
+    parent_id_from_breadcrumb,
+    path_from_breadcrumb,
+    update_descendant_paths,
+    upsert_item_record,
+)
 from backend.services.providers.base import DriveProviderClient
 from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
@@ -47,11 +55,35 @@ async def move_items_handler(payload: dict, session: AsyncSession) -> dict:
     # 2. Check if accounts are the same
     if source_account_id == destination_account_id:
         logger.info(f"Moving item {source_item_id} within the same account {source_account_id}")
+        old_path = await session.scalar(
+            select(Item.path).where(
+                Item.account_id == source_account_id,
+                Item.item_id == source_item_id,
+            )
+        )
         moved_item = await source_client.update_item(
             source_account,
             source_item_id,
             parent_id=destination_folder_id,
         )
+        breadcrumb = await source_client.get_item_path(source_account, moved_item.id)
+        new_path = path_from_breadcrumb(breadcrumb)
+        new_parent_id = parent_id_from_breadcrumb(breadcrumb)
+        await upsert_item_record(
+            session,
+            account_id=source_account.id,
+            item_data=moved_item,
+            parent_id=new_parent_id,
+            path=new_path,
+        )
+        if moved_item.item_type == "folder" and old_path and old_path != new_path:
+            await update_descendant_paths(
+                session,
+                account_id=source_account.id,
+                old_prefix=old_path,
+                new_prefix=new_path,
+            )
+        await session.commit()
         return {"moved_item_id": moved_item.id, "method": "move"}
 
     # 3. different accounts -> Download and Upload
@@ -75,6 +107,12 @@ async def move_items_handler(payload: dict, session: AsyncSession) -> dict:
             item,
             destination_folder_id,
         )
+        await delete_item_and_descendants(
+            session,
+            account_id=source_account.id,
+            item_id=source_item_id,
+        )
+        await session.commit()
         return {"moved_item_id": "folder_moved_recursively", "method": "copy_delete"}
     else:
         # It's a file
@@ -86,6 +124,22 @@ async def move_items_handler(payload: dict, session: AsyncSession) -> dict:
             item,
             destination_folder_id,
         )
+        await delete_item_and_descendants(
+            session,
+            account_id=source_account.id,
+            item_id=source_item_id,
+        )
+        if new_id:
+            uploaded_item = await dest_client.get_item_metadata(dest_account, new_id)
+            breadcrumb = await dest_client.get_item_path(dest_account, new_id)
+            await upsert_item_record(
+                session,
+                account_id=dest_account.id,
+                item_data=uploaded_item,
+                parent_id=parent_id_from_breadcrumb(breadcrumb),
+                path=path_from_breadcrumb(breadcrumb),
+            )
+        await session.commit()
         return {"moved_item_id": new_id, "method": "copy_delete"}
 
 
@@ -96,7 +150,7 @@ async def _move_single_file(
     dest_account: LinkedAccount,
     item: Any,  # DriveItem
     dest_folder_id: str,
-) -> str:
+) -> str | None:
     """Download from source and upload to dest, then delete from source."""
     
     # 1. Download
@@ -120,26 +174,26 @@ async def _move_single_file(
         chunk_size = 327680 * 10  # ~3MB
         total_size = len(content) # We already have it in memory :( 
         
+        upload_result: dict[str, Any] | None = None
         for i in range(0, total_size, chunk_size):
             chunk = content[i : i + chunk_size]
-            await dest_client.upload_chunk(
+            upload_result = await dest_client.upload_chunk(
                 upload_url,
                 chunk,
                 i,
                 min(i + chunk_size, total_size) - 1,
                 total_size
             )
-        # Verify? Graph API completes automatically.
-        # We don't get the item ID back easily from the chunk upload unless it returns it on last chunk.
-        # Assuming success if no error.
+        uploaded_item_id = upload_result.get("id") if isinstance(upload_result, dict) else None
     else:
         # Small file
-        await dest_client.upload_small_file(dest_account, filename, content, dest_folder_id)
+        uploaded = await dest_client.upload_small_file(dest_account, filename, content, dest_folder_id)
+        uploaded_item_id = uploaded.id
 
     # 3. Delete from source
     await source_client.delete_item(source_account, item.id)
     
-    return "moved"
+    return uploaded_item_id
 
 
 async def _move_folder_recursive(

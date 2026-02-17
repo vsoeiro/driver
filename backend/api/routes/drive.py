@@ -18,7 +18,14 @@ from backend.api.dependencies import (
 )
 from sqlalchemy import select
 from backend.core.exceptions import DriveOrganizerError
-from backend.db.models import LinkedAccount
+from backend.db.models import Item, LinkedAccount
+from backend.services.item_index import (
+    delete_item_and_descendants,
+    parent_id_from_breadcrumb,
+    path_from_breadcrumb,
+    update_descendant_paths,
+    upsert_item_record,
+)
 from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
 from backend.schemas.drive import (
@@ -61,6 +68,28 @@ def _ensure_unique_name(name: str, used_names: set[str]) -> str:
         counter += 1
     used_names.add(candidate.lower())
     return candidate
+
+
+async def _refresh_index_from_provider(
+    *,
+    db: DBSession,
+    account: LinkedAccount,
+    graph_client: DriveClientDep,
+    item_id: str,
+) -> DriveItem:
+    """Fetch current provider metadata/path and upsert into local items index."""
+    item = await graph_client.get_item_metadata(account, item_id)
+    breadcrumb = await graph_client.get_item_path(account, item_id)
+    item_path = path_from_breadcrumb(breadcrumb)
+    parent_id = parent_id_from_breadcrumb(breadcrumb)
+    await upsert_item_record(
+        db,
+        account_id=account.id,
+        item_data=item,
+        parent_id=parent_id,
+        path=item_path,
+    )
+    return item
 
 
 @router.get("/{account_id}/files", response_model=DriveListResponse, tags=["Files"])
@@ -324,6 +353,7 @@ async def get_item_path(
 async def upload_file(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
+    db: DBSession,
     file: UploadFile = File(...),
     folder_id: str = Query("root", description="Target folder ID"),
 ) -> DriveItem:
@@ -343,12 +373,20 @@ async def upload_file(
                 detail=f"File too large. Max size is {MAX_SIMPLE_UPLOAD_SIZE // (1024*1024)}MB. Use /upload/session for larger files.",
             )
 
-        return await graph_client.upload_small_file(
+        uploaded = await graph_client.upload_small_file(
             account,
             file.filename or "unnamed_file",
             file.file, # Pass file-like object directly
             folder_id,
         )
+        await _refresh_index_from_provider(
+            db=db,
+            account=account,
+            graph_client=graph_client,
+            item_id=uploaded.id,
+        )
+        await db.commit()
+        return uploaded
     except HTTPException:
         raise
     except Exception as e:
@@ -377,7 +415,9 @@ async def create_upload_session(
 
 @router.put("/{account_id}/upload/chunk", tags=["Uploads"])
 async def upload_chunk(
+    account: LinkedAccountDep,
     graph_client: DriveClientDep,
+    db: DBSession,
     upload_url: str = Query(..., description="Upload session URL"),
     start_byte: int = Query(..., description="Start byte position"),
     end_byte: int = Query(..., description="End byte position"),
@@ -393,6 +433,15 @@ async def upload_chunk(
         end_byte,
         total_size,
     )
+    item_id = result.get("id") if isinstance(result, dict) else None
+    if item_id:
+        await _refresh_index_from_provider(
+            db=db,
+            account=account,
+            graph_client=graph_client,
+            item_id=item_id,
+        )
+        await db.commit()
     return result
 
 
@@ -400,31 +449,69 @@ async def upload_chunk(
 async def create_folder(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
+    db: DBSession,
     request: CreateFolderRequest,
 ) -> DriveItem:
     """Create a new folder."""
-    return await graph_client.create_folder(
+    created = await graph_client.create_folder(
         account,
         request.name,
         request.parent_folder_id,
         request.conflict_behavior,
     )
+    await _refresh_index_from_provider(
+        db=db,
+        account=account,
+        graph_client=graph_client,
+        item_id=created.id,
+    )
+    await db.commit()
+    return created
 
 
 @router.patch("/{account_id}/items/{item_id}", response_model=DriveItem, tags=["File Management"])
 async def update_item(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
+    db: DBSession,
     item_id: str,
     request: UpdateItemRequest,
 ) -> DriveItem:
     """Update an item (rename or move)."""
-    return await graph_client.update_item(
+    old_path = await db.scalar(
+        select(Item.path).where(
+            Item.account_id == account.id,
+            Item.item_id == item_id,
+        )
+    )
+
+    updated = await graph_client.update_item(
         account,
         item_id,
         request.name,
         request.parent_folder_id,
     )
+    refreshed = await _refresh_index_from_provider(
+        db=db,
+        account=account,
+        graph_client=graph_client,
+        item_id=updated.id,
+    )
+    new_path = await db.scalar(
+        select(Item.path).where(
+            Item.account_id == account.id,
+            Item.item_id == item_id,
+        )
+    )
+    if refreshed.item_type == "folder" and old_path and new_path and old_path != new_path:
+        await update_descendant_paths(
+            db,
+            account_id=account.id,
+            old_prefix=old_path,
+            new_prefix=new_path,
+        )
+    await db.commit()
+    return updated
 
 
 @router.post("/{account_id}/items/{item_id}/copy", status_code=202, tags=["File Management"])
@@ -448,16 +535,20 @@ async def copy_item(
 async def delete_item(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
+    db: DBSession,
     item_id: str,
 ) -> None:
     """Delete an item (move to recycle bin)."""
     await graph_client.delete_item(account, item_id)
+    await delete_item_and_descendants(db, account_id=account.id, item_id=item_id)
+    await db.commit()
 
 
 @router.post("/{account_id}/items/batch-delete", status_code=204, tags=["File Management"])
 async def batch_delete_items(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
+    db: DBSession,
     request: BatchDeleteRequest,
 ) -> None:
     """Delete multiple items (move to recycle bin)."""
@@ -465,4 +556,7 @@ async def batch_delete_items(
         return
 
     await graph_client.batch_delete_items(account, request.item_ids)
+    for item_id in request.item_ids:
+        await delete_item_and_descendants(db, account_id=account.id, item_id=item_id)
+    await db.commit()
 

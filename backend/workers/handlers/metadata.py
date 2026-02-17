@@ -2,7 +2,6 @@
 
 import logging
 import uuid
-from datetime import datetime, UTC
 from typing import Any
 from uuid import UUID
 
@@ -11,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.models import Item, ItemMetadata, LinkedAccount, MetadataAttribute, MetadataCategory
 from backend.services.metadata_versioning import apply_metadata_change
+from backend.services.item_index import upsert_item_record
 from backend.services.providers.base import DriveProviderClient
 from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
@@ -105,7 +105,13 @@ async def update_metadata_handler(payload: dict, session: AsyncSession) -> dict:
          root_path = f"/{root_item.name}"
 
     # Upsert root item
-    await upsert_item_record(session, account, root_item, parent_id=None, path=root_path)
+    await upsert_item_record(
+        session,
+        account_id=account.id,
+        item_data=root_item,
+        parent_id=None,
+        path=root_path,
+    )
 
 
     if root_item.item_type == "folder":
@@ -176,7 +182,13 @@ async def _update_metadata_recursive(
         for item in items_to_process:
             item_path = f"{current_path}/{item.name}"
             # Upsert Item record
-            await upsert_item_record(session, account, item, parent_id=folder_id, path=item_path)
+            await upsert_item_record(
+                session,
+                account_id=account.id,
+                item_data=item,
+                parent_id=folder_id,
+                path=item_path,
+            )
 
             if item.item_type == "folder":
                 await _update_metadata_recursive(
@@ -260,52 +272,6 @@ async def _update_single_item(
         batch_id=batch_id,
         job_id=job_id,
     )
-
-
-async def upsert_item_record(
-    session: AsyncSession,
-    account: LinkedAccount,
-    item_data: Any, # DriveItem
-    parent_id: str | None,
-    path: str | None,
-):
-    """Upsert Item record."""
-    stmt = select(Item).where(
-        Item.account_id == account.id,
-        Item.item_id == item_data.id
-    )
-    result = await session.execute(stmt)
-    db_item = result.scalar_one_or_none()
-
-    extension = None
-    if item_data.item_type == "file" and "." in item_data.name:
-        extension = item_data.name.rsplit(".", 1)[-1].lower()
-
-    if db_item:
-        db_item.name = item_data.name
-        db_item.parent_id = parent_id
-        db_item.path = path
-        db_item.size = item_data.size
-        db_item.modified_at = item_data.modified_at
-        db_item.last_synced_at = datetime.now(UTC)
-        db_item.mime_type = item_data.mime_type
-        db_item.extension = extension
-    else:
-        db_item = Item(
-            account_id=account.id,
-            item_id=item_data.id,
-            parent_id=parent_id,
-            name=item_data.name,
-            path=path,
-            item_type=item_data.item_type,
-            mime_type=item_data.mime_type,
-            extension=extension,
-            size=item_data.size,
-            created_at=item_data.created_at,
-            modified_at=item_data.modified_at,
-            last_synced_at=datetime.now(UTC),
-        )
-        session.add(db_item)
 
 
 @register_handler("apply_metadata_recursive")
