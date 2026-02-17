@@ -8,7 +8,7 @@ from datetime import datetime, UTC, timedelta
 from typing import Any, Sequence
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -124,72 +124,6 @@ class JobService:
         await self.session.refresh(job)
         logger.info("Picked up job %s", job.id)
         return self._normalize_job_json_fields(job)
-
-    async def get_next_job(self) -> Job | None:
-        """Get the next pending job and mark it as RUNNING.
-        
-        This mimics a queue by selecting the oldest PENDING job.
-        
-        Returns
-        -------
-        Job | None
-            The next job to process, or None if no jobs are pending.
-        """
-        # Select the oldest pending job
-        # Note: In a high-concurrency Postgres env, we'd use WITH LOCK matching
-        # But for SQLite/Simple setup, this simple transaction is okay for now
-        # as long as we commit the status change quickly.
-        stmt = (
-            select(Job)
-            .where(
-                or_(
-                    Job.status == "PENDING",
-                    and_(
-                        Job.status == "RETRY_SCHEDULED",
-                        or_(Job.next_retry_at.is_(None), Job.next_retry_at <= datetime.now(UTC)),
-                    ),
-                )
-            )
-            .order_by(Job.created_at.asc())
-            .limit(1)
-            .with_for_update(skip_locked=True)
-        )
-        
-        # SQLite doesn't support skip_locked well in all versions/drivers, falling back if needed
-        # But SQLAlchemy handles some of this. If it fails, we might just grab one.
-        try:
-            result = await self.session.execute(stmt)
-            job = result.scalar_one_or_none()
-        except Exception:
-            # Fallback for drivers not supporting FOR UPDATE with SKIP LOCKED
-            stmt = (
-                select(Job)
-                .where(
-                    or_(
-                        Job.status == "PENDING",
-                        and_(
-                            Job.status == "RETRY_SCHEDULED",
-                            or_(Job.next_retry_at.is_(None), Job.next_retry_at <= datetime.now(UTC)),
-                        ),
-                    )
-                )
-                .order_by(Job.created_at.asc())
-                .limit(1)
-            )
-            result = await self.session.execute(stmt)
-            job = result.scalar_one_or_none()
-
-        if job:
-            job.status = "RUNNING"
-            job.started_at = datetime.now(UTC)
-            job.last_error = None
-            job.next_retry_at = None
-            await self.session.commit()
-            await self.session.refresh(job)
-            logger.info(f"Picked up job {job.id}")
-            return self._normalize_job_json_fields(job)
-        
-        return None
 
     async def complete_job(self, job_id: UUID, result: dict | None = None) -> Job:
         """Mark a job as COMPLETED.
