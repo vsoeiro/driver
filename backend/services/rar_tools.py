@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
+import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -15,6 +17,11 @@ logger = logging.getLogger(__name__)
 
 _RAR_TOOL_CHECKED = False
 _RAR_TOOL_READY = False
+_SUSPICIOUS_TOOL_NAMES = {
+    "unrarw64.exe",
+    "unrarw32.exe",
+    "unrardll.exe",
+}
 
 
 def _candidate_tools(tools_dir: Path) -> list[Path]:
@@ -43,8 +50,20 @@ def _configure_rarfile_tool_paths(rarfile_module, tool_path: Path) -> None:
         rarfile_module.SEVENZIP2_TOOL = tool
 
 
+def _is_cli_safe_tool(tool_path: Path) -> bool:
+    name = tool_path.name.lower()
+    if name in _SUSPICIOUS_TOOL_NAMES:
+        return False
+    if "winrar" in name:
+        return False
+    return True
+
+
 def _try_tool_setup(rarfile_module, tool_path: Path | None = None) -> bool:
     if tool_path is not None:
+        if not _is_cli_safe_tool(tool_path):
+            logger.warning("Ignoring non-headless RAR tool candidate: %s", tool_path)
+            return False
         _configure_rarfile_tool_paths(rarfile_module, tool_path)
     try:
         rarfile_module.tool_setup(force=True)
@@ -63,10 +82,56 @@ def _download_tool(download_url: str, tools_dir: Path) -> Path | None:
         target.write_bytes(response.content)
         if os.name != "nt":
             target.chmod(0o755)
+        if not _is_cli_safe_tool(target):
+            logger.warning("Downloaded tool looks interactive and will be ignored: %s", target)
+            return None
         return target
     except Exception as exc:
         logger.warning("Failed to download RAR tool from %s: %s", download_url, exc)
         return None
+
+
+def _find_system_candidates() -> list[Path]:
+    names = ["unrar", "rar", "7z", "7za", "tar", "bsdtar"]
+    found: list[Path] = []
+    for name in names:
+        path = shutil.which(name)
+        if path:
+            found.append(Path(path))
+    windows_defaults = [
+        Path(r"C:\Program Files\7-Zip\7z.exe"),
+        Path(r"C:\Program Files (x86)\7-Zip\7z.exe"),
+    ]
+    for candidate in windows_defaults:
+        if candidate.exists():
+            found.append(candidate)
+    return found
+
+
+def _try_install_7zip_windows() -> bool:
+    if os.name != "nt":
+        return False
+    if not shutil.which("winget"):
+        return False
+    try:
+        proc = subprocess.run(
+            [
+                "winget",
+                "install",
+                "--id",
+                "7zip.7zip",
+                "--exact",
+                "--accept-package-agreements",
+                "--accept-source-agreements",
+                "--silent",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return proc.returncode == 0
+    except Exception:
+        return False
 
 
 def ensure_rar_backend() -> bool:
@@ -96,21 +161,40 @@ def ensure_rar_backend() -> bool:
             _RAR_TOOL_READY = True
             return True
 
-    # 2) try system defaults
+    # 2) try rarfile default system lookup
     if _try_tool_setup(rarfile):
+        logger.info("RAR backend ready using system defaults")
         _RAR_TOOL_READY = True
         return True
 
-    # 3) try tools dir known names
-    for candidate in _candidate_tools(tools_dir):
-        if candidate.exists() and _try_tool_setup(rarfile, candidate):
+    # 3) try PATH-discovered binaries explicitly
+    for candidate in _find_system_candidates():
+        if _try_tool_setup(rarfile, candidate):
+            logger.info("RAR backend ready using system tool: %s", candidate)
             _RAR_TOOL_READY = True
             return True
 
-    # 4) optional auto-install
-    if settings.comic_rar_tool_auto_install and settings.comic_rar_tool_download_url:
-        downloaded = _download_tool(settings.comic_rar_tool_download_url, tools_dir)
+    # 4) try tools dir known names
+    for candidate in _candidate_tools(tools_dir):
+        if candidate.exists() and _try_tool_setup(rarfile, candidate):
+            logger.info("RAR backend ready using local tool: %s", candidate)
+            _RAR_TOOL_READY = True
+            return True
+
+    # 5) optional auto-install
+    if settings.comic_rar_tool_auto_install:
+        # Windows first: prefer installing a headless 7z binary from winget.
+        if _try_install_7zip_windows():
+            for candidate in _find_system_candidates():
+                if _try_tool_setup(rarfile, candidate):
+                    logger.info("RAR backend ready after 7-Zip install: %s", candidate)
+                    _RAR_TOOL_READY = True
+                    return True
+
+        download_url = settings.comic_rar_tool_download_url or "https://www.7-zip.org/a/7zr.exe"
+        downloaded = _download_tool(download_url, tools_dir)
         if downloaded and _try_tool_setup(rarfile, downloaded):
+            logger.info("RAR backend ready using downloaded tool: %s", downloaded)
             _RAR_TOOL_READY = True
             return True
 

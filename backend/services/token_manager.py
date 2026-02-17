@@ -183,8 +183,11 @@ class TokenManager:
 
         provider_key = (provider or "").lower()
         if provider_key == "microsoft":
-            # Microsoft Graph access tokens are JWTs (header.payload.signature).
-            return value.count(".") == 2
+            # Some valid MSAL-issued Microsoft tokens may not be plain JWT strings
+            # depending on authority/tenant flow; only reject obviously broken values.
+            if " " in value or "\n" in value or "\r" in value:
+                return False
+            return len(value) >= 20
 
         # Google access tokens can be opaque, so only basic sanity checks apply.
         return True

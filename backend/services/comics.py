@@ -8,6 +8,8 @@ import tarfile
 import tempfile
 import zipfile
 import logging
+import shutil
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -19,6 +21,7 @@ from pypdf import PdfReader
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.core.config import get_settings
 from backend.db.models import ItemMetadata, LinkedAccount
 from backend.services.metadata_plugins import MetadataPluginService
 from backend.services.plugin_settings import ComicRuntimeSettings, PluginSettingsService
@@ -132,22 +135,102 @@ def _extract_from_rar(local_path: str, *, fmt: str) -> ComicExtractionResult:
             "COMIC_RAR_TOOL_DOWNLOAD_URL / COMIC_RAR_TOOL_PATH."
         )
 
-    with rarfile.RarFile(local_path, "r") as archive:
-        image_names = [
-            info.filename
-            for info in archive.infolist()
-            if not info.is_dir() and Path(info.filename).suffix.lower() in IMAGE_EXTENSIONS
-        ]
-        cover_name, page_count = _select_cover_and_count(image_names)
-        cover_bytes = archive.read(cover_name)
-        cover_extension = Path(cover_name).suffix.lower().lstrip(".") or "jpg"
-        return ComicExtractionResult(
-            format=fmt,
-            page_count=page_count,
-            cover_bytes=cover_bytes,
-            cover_extension=cover_extension,
-            details={"cover_member": cover_name},
-        )
+    try:
+        with rarfile.RarFile(local_path, "r") as archive:
+            image_names = [
+                info.filename
+                for info in archive.infolist()
+                if not info.is_dir() and Path(info.filename).suffix.lower() in IMAGE_EXTENSIONS
+            ]
+            cover_name, page_count = _select_cover_and_count(image_names)
+            cover_bytes = archive.read(cover_name)
+            if not cover_bytes:
+                raise ValueError("RAR backend returned empty bytes")
+            cover_extension = Path(cover_name).suffix.lower().lstrip(".") or "jpg"
+            return ComicExtractionResult(
+                format=fmt,
+                page_count=page_count,
+                cover_bytes=cover_bytes,
+                cover_extension=cover_extension,
+                details={"cover_member": cover_name, "backend": "rarfile"},
+            )
+    except Exception as exc:
+        logger.warning("rarfile extraction failed for %s: %s. Falling back to 7z CLI.", local_path, exc)
+        return _extract_from_rar_with_7z(local_path, fmt=fmt)
+
+
+def _find_7z_tool() -> str | None:
+    candidates = ["7z", "7za", "7zr"]
+    for name in candidates:
+        path = shutil.which(name)
+        if path:
+            return path
+
+    settings = get_settings()
+    tools_dir = Path(settings.comic_rar_tools_dir).expanduser()
+    local_candidates = [
+        Path(r"C:\Program Files\7-Zip\7z.exe"),
+        Path(r"C:\Program Files (x86)\7-Zip\7z.exe"),
+        tools_dir / "7z.exe",
+        tools_dir / "7za.exe",
+        tools_dir / "7zr.exe",
+        tools_dir / "7z",
+        tools_dir / "7za",
+        tools_dir / "7zr",
+    ]
+    for candidate in local_candidates:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def _extract_from_rar_with_7z(local_path: str, *, fmt: str) -> ComicExtractionResult:
+    tool = _find_7z_tool()
+    if not tool:
+        raise ValueError("7z CLI not found for RAR fallback extraction")
+
+    list_cmd = [tool, "l", "-slt", "-ba", local_path]
+    proc = subprocess.run(list_cmd, capture_output=True, text=True, check=False)
+    if proc.returncode not in (0, 1):
+        raise ValueError(f"7z list failed: code={proc.returncode} stderr={proc.stderr.strip()}")
+
+    image_names: list[str] = []
+    current_path: str | None = None
+    current_is_folder = False
+    for raw_line in proc.stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            if current_path and not current_is_folder and Path(current_path).suffix.lower() in IMAGE_EXTENSIONS:
+                image_names.append(current_path)
+            current_path = None
+            current_is_folder = False
+            continue
+        if line.startswith("Path = "):
+            current_path = line[7:]
+        elif line.startswith("Folder = "):
+            current_is_folder = line[9:].strip() == "+"
+    if current_path and not current_is_folder and Path(current_path).suffix.lower() in IMAGE_EXTENSIONS:
+        image_names.append(current_path)
+
+    cover_name, page_count = _select_cover_and_count(image_names)
+    extract_cmd = [tool, "x", "-so", local_path, cover_name, "-y"]
+    extract_proc = subprocess.run(extract_cmd, capture_output=True, check=False)
+    if extract_proc.returncode not in (0, 1):
+        stderr = extract_proc.stderr.decode("utf-8", errors="ignore").strip()
+        raise ValueError(f"7z extract failed: code={extract_proc.returncode} stderr={stderr}")
+    cover_bytes = extract_proc.stdout
+    if not cover_bytes:
+        stderr = extract_proc.stderr.decode("utf-8", errors="ignore").strip()
+        raise ValueError(f"7z extract returned empty bytes for {cover_name}. stderr={stderr}")
+
+    cover_extension = Path(cover_name).suffix.lower().lstrip(".") or "jpg"
+    return ComicExtractionResult(
+        format=fmt,
+        page_count=page_count,
+        cover_bytes=cover_bytes,
+        cover_extension=cover_extension,
+        details={"cover_member": cover_name, "backend": "7z_fallback"},
+    )
 
 
 def _extract_from_7z(local_path: str, *, fmt: str) -> ComicExtractionResult:
