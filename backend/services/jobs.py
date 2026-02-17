@@ -13,6 +13,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.models import Job
+from backend.services.job_queue import JobQueue, get_job_queue
 from backend.schemas.jobs import JobCreate
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ class JobCancelledError(Exception):
 class JobService:
     """Service to manage background jobs."""
 
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, queue: JobQueue | None = None):
         """Initialize the job service.
 
         Parameters
@@ -34,6 +35,7 @@ class JobService:
             Database session.
         """
         self.session = session
+        self.queue = queue
 
     @staticmethod
     def _coerce_json_dict(value: Any, *, default_empty: bool = True) -> dict | None:
@@ -93,8 +95,35 @@ class JobService:
         self.session.add(job)
         await self.session.commit()
         await self.session.refresh(job)
+        queue = self.queue or get_job_queue()
+        try:
+            await queue.enqueue_job(str(job.id))
+        except Exception as exc:
+            logger.error("Failed to enqueue job %s: %s", job.id, exc, exc_info=True)
+            await self.fail_job(job.id, f"Failed to enqueue job: {exc}")
+            raise
         logger.info(f"Created job {job.id} of type {job.type}")
         return job
+
+    async def start_job(self, job_id: UUID) -> Job | None:
+        """Claim a job for execution and mark as RUNNING."""
+        job = await self.session.get(Job, job_id)
+        if not job:
+            return None
+        if job.status in {"COMPLETED", "FAILED", "DEAD_LETTER", "CANCELLED"}:
+            return self._normalize_job_json_fields(job)
+        if job.status == "RUNNING":
+            return self._normalize_job_json_fields(job)
+
+        job.status = "RUNNING"
+        job.started_at = datetime.now(UTC)
+        job.last_error = None
+        job.next_retry_at = None
+        self.session.add(job)
+        await self.session.commit()
+        await self.session.refresh(job)
+        logger.info("Picked up job %s", job.id)
+        return self._normalize_job_json_fields(job)
 
     async def get_next_job(self) -> Job | None:
         """Get the next pending job and mark it as RUNNING.
@@ -313,6 +342,18 @@ class JobService:
 
         self.session.add(job)
         await self.session.commit()
+        if job.status == "RETRY_SCHEDULED":
+            queue = self.queue or get_job_queue()
+            delay = max(0, int((job.next_retry_at - now).total_seconds())) if job.next_retry_at else 0
+            try:
+                await queue.enqueue_job(str(job.id), defer_seconds=delay)
+            except Exception as exc:
+                logger.error(
+                    "Failed to enqueue retry for job %s: %s",
+                    job.id,
+                    exc,
+                    exc_info=True,
+                )
         return job
 
     async def update_job_progress(

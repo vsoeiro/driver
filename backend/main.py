@@ -17,14 +17,8 @@ from backend.api.routes import accounts, admin, ai, auth, drive, jobs, metadata,
 from backend.core.config import get_settings
 from backend.core.exceptions import DriveOrganizerError
 from backend.db.session import async_session_maker
+from backend.services.job_queue import close_job_queue
 from backend.services.sync_scheduler import DailySyncScheduler
-from backend.workers.handlers import comics as _comics_handler  # noqa: F401
-from backend.workers.handlers import metadata as _metadata_handler  # noqa: F401
-from backend.workers.handlers import move as _move_handler  # noqa: F401
-from backend.workers.handlers import rules as _rules_handler  # noqa: F401
-from backend.workers.handlers import sync as _sync_handler  # noqa: F401
-from backend.workers.handlers import upload as _upload_handler  # noqa: F401
-from backend.workers.runner import BackgroundWorker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,10 +46,6 @@ async def lifespan(app: FastAPI):
         # Initialize any required services or cache here
         pass
     
-    # Initialize background worker
-    worker = BackgroundWorker(async_session_maker)
-    worker_task = asyncio.create_task(worker.start())
-
     scheduler = DailySyncScheduler(async_session_maker)
     scheduler_task = asyncio.create_task(scheduler.start())
     logger.info("Daily sync scheduler started with dynamic runtime settings.")
@@ -63,7 +53,6 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Drive Organizer API on %s:%s", settings.host, settings.port)
     yield
     
-    # Shutdown background worker
     logger.info("Stopping daily sync scheduler...")
     scheduler.stop()
     try:
@@ -71,12 +60,7 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         pass
 
-    logger.info("Stopping background worker...")
-    worker.stop()
-    try:
-        await worker_task
-    except asyncio.CancelledError:
-        pass
+    await close_job_queue()
         
     logger.info("Shutting down Drive Organizer API")
 

@@ -5,7 +5,7 @@ Aplicacao full-stack para conectar contas (Microsoft e Google), navegar arquivos
 ## Stack
 
 - Backend: FastAPI + SQLAlchemy + Alembic
-- Worker: fila em banco e processador em background
+- Worker: Redis + ARQ
 - Frontend: React + Vite + Tailwind
 - Banco: PostgreSQL (producao) ou SQLite (desenvolvimento)
 
@@ -27,6 +27,7 @@ Variaveis principais:
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`
 - `SECRET_KEY`, `ENCRYPTION_KEY`
 - `DATABASE_URL`
+- `REDIS_URL`, `REDIS_QUEUE_NAME`, `WORKER_CONCURRENCY`
 - `ENABLE_DAILY_SYNC_SCHEDULER`, `DAILY_SYNC_CRON`
 - `AI_ENABLED`, `AI_PROVIDER`, `AI_BASE_URL`, `AI_MODEL`, `AI_TEMPERATURE`, `AI_TIMEOUT_SECONDS`
 
@@ -36,6 +37,18 @@ Variaveis principais:
 uv sync
 uv run alembic upgrade head
 uv run uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+## Rodando worker (ARQ)
+
+```bash
+uv run arq backend.workers.arq_worker.WorkerSettings
+```
+
+Sem Docker (Windows), para instalar Redis local:
+
+```bash
+powershell -ExecutionPolicy Bypass -File .\scripts\install_redis_windows.ps1
 ```
 
 Endpoints uteis:

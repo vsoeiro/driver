@@ -1,0 +1,80 @@
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
+
+import pytest
+
+from backend.db.models import Job
+from backend.schemas.jobs import JobCreate
+from backend.services.jobs import JobService
+
+
+@pytest.mark.asyncio
+async def test_create_job_enqueues_in_redis_queue():
+    session = AsyncMock()
+    session.add = MagicMock()
+    queue = AsyncMock()
+
+    generated_id = uuid4()
+
+    async def _refresh(job):
+        job.id = generated_id
+
+    session.refresh.side_effect = _refresh
+
+    service = JobService(session, queue=queue)
+    created = await service.create_job(JobCreate(type="sync_items", payload={"account_id": "x"}))
+
+    assert created.id == generated_id
+    queue.enqueue_job.assert_awaited_once_with(str(generated_id))
+
+
+@pytest.mark.asyncio
+async def test_fail_job_retry_reenqueues_with_backoff():
+    session = AsyncMock()
+    session.add = MagicMock()
+    queue = AsyncMock()
+    job_id = uuid4()
+    job = Job(
+        id=job_id,
+        type="sync_items",
+        status="RUNNING",
+        payload={},
+        retry_count=0,
+        max_retries=3,
+        created_at=datetime.now(UTC),
+    )
+    session.get.return_value = job
+
+    service = JobService(session, queue=queue)
+    await service.fail_job(job_id, "boom")
+
+    assert job.status == "RETRY_SCHEDULED"
+    queue.enqueue_job.assert_awaited_once()
+    args, kwargs = queue.enqueue_job.await_args
+    assert args[0] == str(job_id)
+    assert kwargs["defer_seconds"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_fail_job_dead_letter_does_not_enqueue():
+    session = AsyncMock()
+    session.add = MagicMock()
+    queue = AsyncMock()
+    job_id = uuid4()
+    job = Job(
+        id=job_id,
+        type="sync_items",
+        status="RUNNING",
+        payload={},
+        retry_count=3,
+        max_retries=3,
+        created_at=datetime.now(UTC),
+    )
+    session.get.return_value = job
+
+    service = JobService(session, queue=queue)
+    await service.fail_job(job_id, "boom")
+
+    assert job.status == "DEAD_LETTER"
+    queue.enqueue_job.assert_not_awaited()

@@ -97,6 +97,9 @@ class Settings(BaseSettings):
     comic_rar_tool_path: str | None = Field(default=None, alias="COMIC_RAR_TOOL_PATH")
     comic_rar_tool_auto_install: bool = Field(default=True, alias="COMIC_RAR_TOOL_AUTO_INSTALL")
     comic_rar_tool_download_url: str | None = Field(default=None, alias="COMIC_RAR_TOOL_DOWNLOAD_URL")
+    redis_url: str = Field(default="redis://127.0.0.1:6379/0", alias="REDIS_URL")
+    redis_queue_name: str = Field(default="driver:jobs", alias="REDIS_QUEUE_NAME")
+    worker_concurrency: int = Field(default=8, alias="WORKER_CONCURRENCY")
 
     @model_validator(mode="after")
     def assemble_db_connection(self) -> "Settings":
@@ -142,6 +145,9 @@ class Settings(BaseSettings):
             self.comic_rar_tool_path = os.path.expandvars(str(Path(self.comic_rar_tool_path).expanduser()))
         if self.comic_rar_tool_download_url:
             self.comic_rar_tool_download_url = self.comic_rar_tool_download_url.strip()
+        self.redis_queue_name = self.redis_queue_name.strip() or "driver:jobs"
+        if self.worker_concurrency <= 0:
+            raise ValueError("WORKER_CONCURRENCY must be greater than 0")
         return self
 
     @property
