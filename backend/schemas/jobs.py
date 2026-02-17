@@ -55,9 +55,26 @@ class Job(JobBase):
     last_error: str | None = None
     dead_lettered_at: datetime | None = None
     dead_letter_reason: str | None = None
+    reprocessed_from_job_id: UUID | None = None
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class JobAttempt(BaseModel):
+    """Job execution attempt details."""
+
+    id: UUID
+    job_id: UUID
+    attempt_number: int
+    status: str
+    triggered_by: str
+    error: str | None = None
+    started_at: datetime
+    completed_at: datetime | None = None
+    duration_seconds: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

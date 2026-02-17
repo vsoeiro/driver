@@ -4,15 +4,23 @@ from fastapi import APIRouter, HTTPException, status
 
 from backend.api.dependencies import DBSession
 from backend.schemas.admin import (
+    ObservabilitySnapshot,
     PluginSettingFieldResponse,
     PluginSettingsGroupResponse,
     RuntimeSettingsResponse,
     RuntimeSettingsUpdateRequest,
 )
 from backend.services.app_settings import AppSettingsService
+from backend.services.observability import ObservabilityService
 from backend.services.plugin_settings import PluginSettingsService
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
+
+
+@router.get("/observability", response_model=ObservabilitySnapshot)
+async def get_observability_snapshot(db: DBSession) -> ObservabilitySnapshot:
+    service = ObservabilityService(db)
+    return await service.snapshot()
 
 
 @router.get("/settings", response_model=RuntimeSettingsResponse)
@@ -24,6 +32,7 @@ async def get_runtime_settings(db: DBSession) -> RuntimeSettingsResponse:
     return RuntimeSettingsResponse(
         enable_daily_sync_scheduler=settings.enable_daily_sync_scheduler,
         daily_sync_cron=settings.daily_sync_cron,
+        worker_job_timeout_seconds=settings.worker_job_timeout_seconds,
         ai_enabled=settings.ai_enabled,
         ai_provider=settings.ai_provider,
         ai_base_url=settings.ai_base_url,
@@ -53,6 +62,7 @@ async def update_runtime_settings(
     settings = await service.update_runtime_settings(
         enable_daily_sync_scheduler=payload.enable_daily_sync_scheduler,
         daily_sync_cron=payload.daily_sync_cron,
+        worker_job_timeout_seconds=payload.worker_job_timeout_seconds,
         ai_enabled=payload.ai_enabled,
         ai_provider=payload.ai_provider,
         ai_base_url=payload.ai_base_url,
@@ -68,6 +78,7 @@ async def update_runtime_settings(
     return RuntimeSettingsResponse(
         enable_daily_sync_scheduler=settings.enable_daily_sync_scheduler,
         daily_sync_cron=settings.daily_sync_cron,
+        worker_job_timeout_seconds=settings.worker_job_timeout_seconds,
         ai_enabled=settings.ai_enabled,
         ai_provider=settings.ai_provider,
         ai_base_url=settings.ai_base_url,

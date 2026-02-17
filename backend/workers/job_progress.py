@@ -23,6 +23,8 @@ class JobProgressReporter:
     current: int = 0
     total: int | None = None
     metrics: dict = field(default_factory=dict)
+    flush_every_items: int = 25
+    _last_flushed_current: int = 0
 
     @classmethod
     def from_payload(cls, session: AsyncSession, payload: dict) -> "JobProgressReporter":
@@ -37,23 +39,26 @@ class JobProgressReporter:
 
     async def set_total(self, total: int | None) -> None:
         self.total = total
-        await self.flush()
+        await self.flush(force=True)
 
     async def increment(self, amount: int = 1) -> None:
         self.current += amount
-        await self.flush()
+        if self.current - self._last_flushed_current >= self.flush_every_items:
+            await self.flush()
 
     async def update_metrics(self, **metrics: int | float | str | None) -> None:
         for key, value in metrics.items():
             if value is not None:
                 self.metrics[key] = value
-        await self.flush()
+        await self.flush(force=True)
 
-    async def flush(self) -> None:
+    async def flush(self, *, force: bool = False) -> None:
         if not self.job_id:
             return
         bind = self.session.bind
         if bind is None:
+            return
+        if not force and self.current == self._last_flushed_current:
             return
         try:
             async with AsyncSession(bind=bind, expire_on_commit=False) as progress_session:
@@ -64,6 +69,7 @@ class JobProgressReporter:
                     total=self.total,
                     metrics=self.metrics,
                 )
+                self._last_flushed_current = self.current
         except OperationalError as exc:
             # SQLite can lock during long-running writer transactions.
             # Progress is best-effort; we should not fail the job on this.

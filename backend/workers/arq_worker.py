@@ -21,6 +21,13 @@ from backend.workers.handlers import rules as _rules_handler  # noqa: F401
 from backend.workers.handlers import sync as _sync_handler  # noqa: F401
 from backend.workers.handlers import upload as _upload_handler  # noqa: F401
 
+# Ensure worker has visible INFO logs even when launched standalone.
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,17 +47,23 @@ async def process_job(ctx, job_id: str) -> None:
 
         job = await job_service.start_job(job_uuid)
         if job is None:
+            logger.info("Worker received unknown job id=%s", job_id)
             return
+        job_id_value = getattr(job, "id", job_uuid)
+        job_type = getattr(job, "type", "unknown")
         if job.status in {"COMPLETED", "FAILED", "DEAD_LETTER", "CANCELLED"}:
+            logger.info("Skipping finalized job id=%s status=%s", job_id_value, job.status)
             return
 
-        handler = get_handler(job.type)
+        handler = get_handler(job_type)
         if not handler:
-            await job_service.fail_job(job.id, f"No handler registered for type: {job.type}")
+            await job_service.fail_job(job_id_value, f"No handler registered for type: {job_type}")
+            logger.error("No handler registered for job id=%s type=%s", job_id_value, job_type)
             return
 
         try:
             started = datetime.now(UTC)
+            logger.info("Starting job id=%s type=%s retry=%s", job_id_value, job_type, getattr(job, "retry_count", 0))
             raw_payload = job.payload
             if isinstance(raw_payload, str):
                 try:
@@ -60,16 +73,18 @@ async def process_job(ctx, job_id: str) -> None:
             if not isinstance(raw_payload, dict):
                 raw_payload = {}
             payload = dict(raw_payload)
-            payload["_job_id"] = str(job.id)
+            payload["_job_id"] = str(job_id_value)
 
-            if await job_service.is_cancel_requested(job.id):
-                await job_service.cancel_running_job(job.id, "Cancelled before execution started")
+            if await job_service.is_cancel_requested(job_id_value):
+                await job_service.cancel_running_job(job_id_value, "Cancelled before execution started")
+                logger.info("Cancelled job before execution id=%s", job_id_value)
                 return
 
             result = await handler(payload, session)
 
-            if await job_service.is_cancel_requested(job.id):
-                await job_service.cancel_running_job(job.id, "Cancelled during execution")
+            if await job_service.is_cancel_requested(job_id_value):
+                await job_service.cancel_running_job(job_id_value, "Cancelled during execution")
+                logger.info("Cancelled job during execution id=%s", job_id_value)
                 return
 
             elapsed = (datetime.now(UTC) - started).total_seconds()
@@ -78,22 +93,24 @@ async def process_job(ctx, job_id: str) -> None:
                 metrics["duration_seconds"] = round(elapsed, 3)
                 result["metrics"] = metrics
 
-            await job_service.complete_job(job.id, result)
+            await job_service.complete_job(job_id_value, result)
+            logger.info("Completed job id=%s type=%s elapsed=%.3fs", job_id_value, job_type, elapsed)
         except JobCancelledError:
             try:
                 await session.rollback()
             except Exception:
                 pass
-            await job_service.cancel_running_job(job.id, "Cancelled during execution")
+            await job_service.cancel_running_job(job_id_value, "Cancelled during execution")
+            logger.info("Job cancellation requested id=%s", job_id_value)
         except Exception as exc:
             error_msg = str(exc)
             stack_trace = traceback.format_exc()
-            logger.error("Job %s failed: %s", job.id, error_msg)
+            logger.error("Job %s failed: %s", job_id_value, error_msg)
             try:
                 await session.rollback()
             except Exception:
                 pass
-            await job_service.fail_job(job.id, f"{error_msg}\n{stack_trace}")
+            await job_service.fail_job(job_id_value, f"{error_msg}\n{stack_trace}")
 
 
 class WorkerSettings:
@@ -103,4 +120,5 @@ class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(_settings.redis_url)
     queue_name = _settings.redis_queue_name
     max_jobs = _settings.worker_concurrency
+    job_timeout = _settings.worker_job_timeout_seconds
     functions = [process_job]

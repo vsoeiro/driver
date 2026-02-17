@@ -100,6 +100,7 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
     """
     account_id = UUID(payload["account_id"])
     progress = JobProgressReporter.from_payload(session, payload)
+    logger.info("Sync job started account_id=%s job_id=%s", account_id, progress.job_id)
 
     account = await session.get(LinkedAccount, account_id)
     if not account:
@@ -115,6 +116,12 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
         account,
         root_item,
         worker_count=min(16, max(1, settings.worker_concurrency)),
+    )
+    logger.info(
+        "Sync snapshot collected account_id=%s entries=%s listing_errors=%s",
+        account_id,
+        len(entries),
+        list_errors,
     )
 
     stats = {
@@ -155,6 +162,14 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
         await progress.increment()
         if stats["processed"] % 50 == 0:
             await session.commit()
+            logger.info(
+                "Sync progress account_id=%s processed=%s created=%s updated=%s unchanged=%s",
+                account_id,
+                stats["processed"],
+                stats["created"],
+                stats["updated"],
+                stats["unchanged"],
+            )
 
     stale_ids = list(existing_ids - remote_ids)
     if stale_ids:
@@ -173,4 +188,5 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
         deleted=stats["deleted"],
         errors=stats["errors"],
     )
+    logger.info("Sync job completed account_id=%s stats=%s", account_id, stats)
     return stats

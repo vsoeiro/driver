@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form
 
 from backend.api.dependencies import JobServiceDep
 from backend.schemas.jobs import (
-    Job, JobCreate, JobMoveRequest, JobMetadataUpdateRequest,
+    Job, JobAttempt, JobCreate, JobMoveRequest, JobMetadataUpdateRequest,
     JobSyncRequest, JobApplyMetadataRecursiveRequest,
     JobRemoveMetadataRecursiveRequest,
     JobUndoMetadataBatchRequest,
@@ -245,6 +245,37 @@ async def cancel_job(
     """Request cancellation for a job."""
     try:
         return await job_service.request_cancel(job_id)
+    except ValueError as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post("/{job_id}/reprocess", response_model=Job, status_code=status.HTTP_201_CREATED)
+async def reprocess_job(
+    job_id: UUID,
+    job_service: JobServiceDep,
+) -> Job:
+    """Clone a finalized job and queue it again."""
+    try:
+        return await job_service.reprocess_job(job_id)
+    except ValueError as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get("/{job_id}/attempts", response_model=list[JobAttempt], status_code=status.HTTP_200_OK)
+async def list_job_attempts(
+    job_id: UUID,
+    job_service: JobServiceDep,
+    limit: int = 20,
+) -> list[JobAttempt]:
+    """Return execution attempt history for one job."""
+    try:
+        return await job_service.get_job_attempts(job_id, limit=limit)
     except ValueError as exc:
         message = str(exc)
         if "not found" in message.lower():

@@ -15,6 +15,8 @@ class JobQueue(Protocol):
     """Queue contract for background job dispatch."""
 
     async def enqueue_job(self, job_id: str, *, defer_seconds: int = 0) -> None: ...
+    async def queued_jobs(self) -> int: ...
+    async def ping(self) -> bool: ...
     async def close(self) -> None: ...
 
 
@@ -42,6 +44,15 @@ class RedisJobQueue:
         if defer_seconds > 0:
             kwargs["_defer_by"] = timedelta(seconds=defer_seconds)
         await pool.enqueue_job("process_job", str(job_id), **kwargs)
+
+    async def queued_jobs(self) -> int:
+        pool = await self._get_pool()
+        return int(await pool.zcard(self._queue_name))
+
+    async def ping(self) -> bool:
+        pool = await self._get_pool()
+        await pool.ping()
+        return True
 
     async def close(self) -> None:
         if self._pool is not None:

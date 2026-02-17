@@ -169,6 +169,11 @@ class Job(Base):
         nullable=True,
     )
     dead_letter_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reprocessed_from_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("jobs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
@@ -181,6 +186,36 @@ class Job(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+
+
+class JobAttempt(Base):
+    """Execution attempt history for each background job."""
+
+    __tablename__ = "job_attempts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="RUNNING")
+    triggered_by: Mapped[str] = mapped_column(String(30), nullable=False, default="worker")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class MetadataCategory(Base):
@@ -427,4 +462,3 @@ class Item(Base):
     __table_args__ = (
         UniqueConstraint('account_id', 'item_id', name='uq_items_account_item'),
     )
-

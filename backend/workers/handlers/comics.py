@@ -19,6 +19,7 @@ async def extract_comic_assets_handler(payload: dict, session: AsyncSession) -> 
         return {"total": 0, "mapped": 0, "skipped": 0, "failed": 0}
 
     progress = JobProgressReporter.from_payload(session, payload)
+    progress.flush_every_items = 5
     await progress.set_total(len(item_ids))
 
     service = ComicMetadataService(session)
@@ -26,6 +27,7 @@ async def extract_comic_assets_handler(payload: dict, session: AsyncSession) -> 
         account_id,
         item_ids,
         job_id=progress.job_id,
+        progress_reporter=progress,
     )
     await session.commit()
 

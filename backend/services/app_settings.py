@@ -20,6 +20,7 @@ def _to_bool(value: str) -> bool:
 class RuntimeSettings:
     enable_daily_sync_scheduler: bool
     daily_sync_cron: str
+    worker_job_timeout_seconds: int
     ai_enabled: bool
     ai_provider: str
     ai_base_url: str
@@ -33,6 +34,7 @@ class AppSettingsService:
 
     ENABLE_DAILY_SYNC_KEY = "enable_daily_sync_scheduler"
     DAILY_SYNC_CRON_KEY = "daily_sync_cron"
+    WORKER_JOB_TIMEOUT_SECONDS_KEY = "worker_job_timeout_seconds"
     AI_ENABLED_KEY = "ai_enabled"
     AI_PROVIDER_KEY = "ai_provider"
     AI_BASE_URL_KEY = "ai_base_url"
@@ -72,6 +74,10 @@ class AppSettingsService:
         return RuntimeSettings(
             enable_daily_sync_scheduler=_to_bool(rows[self.ENABLE_DAILY_SYNC_KEY].value),
             daily_sync_cron=cron_expr,
+            worker_job_timeout_seconds=max(
+                1,
+                self._parse_int(rows[self.WORKER_JOB_TIMEOUT_SECONDS_KEY].value, default=1800),
+            ),
             ai_enabled=_to_bool(rows[self.AI_ENABLED_KEY].value),
             ai_provider=ai_provider,
             ai_base_url=rows[self.AI_BASE_URL_KEY].value.strip(),
@@ -85,6 +91,7 @@ class AppSettingsService:
         *,
         enable_daily_sync_scheduler: bool | None = None,
         daily_sync_cron: str | None = None,
+        worker_job_timeout_seconds: int | None = None,
         ai_enabled: bool | None = None,
         ai_provider: str | None = None,
         ai_base_url: str | None = None,
@@ -102,6 +109,10 @@ class AppSettingsService:
             cron_expr = daily_sync_cron.strip()
             validate_cron_expression(cron_expr)
             rows[self.DAILY_SYNC_CRON_KEY].value = cron_expr
+        if worker_job_timeout_seconds is not None:
+            if worker_job_timeout_seconds <= 0:
+                raise ValueError("worker_job_timeout_seconds must be greater than 0")
+            rows[self.WORKER_JOB_TIMEOUT_SECONDS_KEY].value = str(worker_job_timeout_seconds)
 
         if ai_enabled is not None:
             rows[self.AI_ENABLED_KEY].value = "true" if ai_enabled else "false"
@@ -126,6 +137,10 @@ class AppSettingsService:
         runtime = RuntimeSettings(
             enable_daily_sync_scheduler=_to_bool(rows[self.ENABLE_DAILY_SYNC_KEY].value),
             daily_sync_cron=rows[self.DAILY_SYNC_CRON_KEY].value,
+            worker_job_timeout_seconds=self._parse_int(
+                rows[self.WORKER_JOB_TIMEOUT_SECONDS_KEY].value,
+                default=1800,
+            ),
             ai_enabled=_to_bool(rows[self.AI_ENABLED_KEY].value),
             ai_provider=rows[self.AI_PROVIDER_KEY].value.strip(),
             ai_base_url=rows[self.AI_BASE_URL_KEY].value.strip(),
@@ -143,6 +158,7 @@ class AppSettingsService:
                     (
                         self.ENABLE_DAILY_SYNC_KEY,
                         self.DAILY_SYNC_CRON_KEY,
+                        self.WORKER_JOB_TIMEOUT_SECONDS_KEY,
                         self.AI_ENABLED_KEY,
                         self.AI_PROVIDER_KEY,
                         self.AI_BASE_URL_KEY,
@@ -172,6 +188,10 @@ class AppSettingsService:
             AppSettingsService.DAILY_SYNC_CRON_KEY: (
                 settings.daily_sync_cron,
                 "Cron expression (5 fields) for scheduler frequency.",
+            ),
+            AppSettingsService.WORKER_JOB_TIMEOUT_SECONDS_KEY: (
+                str(settings.worker_job_timeout_seconds),
+                "ARQ worker timeout in seconds for one job execution.",
             ),
             AppSettingsService.AI_ENABLED_KEY: (
                 "true" if settings.ai_enabled else "false",

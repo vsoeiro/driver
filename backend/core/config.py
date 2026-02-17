@@ -100,6 +100,7 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://127.0.0.1:6379/0", alias="REDIS_URL")
     redis_queue_name: str = Field(default="driver:jobs", alias="REDIS_QUEUE_NAME")
     worker_concurrency: int = Field(default=8, alias="WORKER_CONCURRENCY")
+    worker_job_timeout_seconds: int = Field(default=1800, alias="WORKER_JOB_TIMEOUT_SECONDS")
 
     @model_validator(mode="after")
     def assemble_db_connection(self) -> "Settings":
@@ -148,6 +149,8 @@ class Settings(BaseSettings):
         self.redis_queue_name = self.redis_queue_name.strip() or "driver:jobs"
         if self.worker_concurrency <= 0:
             raise ValueError("WORKER_CONCURRENCY must be greater than 0")
+        if self.worker_job_timeout_seconds <= 0:
+            raise ValueError("WORKER_JOB_TIMEOUT_SECONDS must be greater than 0")
         return self
 
     @property

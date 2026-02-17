@@ -42,13 +42,10 @@ COMIC_PLUGIN_FIELDS: list[PluginFieldSpec] = [
     PluginFieldSpec("genre", "Genre", "text"),
     PluginFieldSpec("summary", "Summary", "text"),
     PluginFieldSpec("language", "Language", "text"),
-    PluginFieldSpec("manga", "Manga", "boolean"),
-    PluginFieldSpec("black_and_white", "Black & White", "boolean"),
     PluginFieldSpec("cover_item_id", "Cover Item ID", "text"),
     PluginFieldSpec("cover_account_id", "Cover Account ID", "text"),
     PluginFieldSpec("cover_filename", "Cover Filename", "text"),
     PluginFieldSpec("page_count", "Page Count", "number"),
-    PluginFieldSpec("file_size", "File Size", "number"),
     PluginFieldSpec("file_format", "File Format", "text"),
 ]
 
@@ -225,6 +222,17 @@ class MetadataPluginService:
                 db_attr.plugin_key = COMIC_PLUGIN_KEY
                 db_attr.plugin_field_key = field_key
                 db_attr.is_locked = True
+
+        # Remove deprecated plugin-managed attributes no longer declared by the spec.
+        valid_keys = set(specs.keys())
+        for db_attr in category_attrs:
+            if (
+                db_attr.plugin_key == COMIC_PLUGIN_KEY
+                and db_attr.managed_by_plugin
+                and db_attr.plugin_field_key
+                and db_attr.plugin_field_key not in valid_keys
+            ):
+                await self.session.delete(db_attr)
 
         await self.session.flush()
 

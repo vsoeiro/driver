@@ -1,6 +1,7 @@
 """Job service for managing background jobs."""
 
 import asyncio
+import inspect
 import json
 import logging
 import math
@@ -8,11 +9,12 @@ from datetime import datetime, UTC, timedelta
 from typing import Any, Sequence
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import desc, func, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.db.models import Job
+from backend.core.logging_utils import log_event
+from backend.db.models import Job, JobAttempt
 from backend.services.job_queue import JobQueue, get_job_queue
 from backend.schemas.jobs import JobCreate
 
@@ -36,6 +38,37 @@ class JobService:
         """
         self.session = session
         self.queue = queue
+
+    async def _create_attempt(self, job_id: UUID, *, triggered_by: str = "worker") -> None:
+        max_attempt_stmt = select(func.max(JobAttempt.attempt_number)).where(JobAttempt.job_id == job_id)
+        max_attempt = await self.session.scalar(max_attempt_stmt)
+        attempt = JobAttempt(
+            job_id=job_id,
+            attempt_number=(max_attempt or 0) + 1,
+            status="RUNNING",
+            triggered_by=triggered_by,
+        )
+        self.session.add(attempt)
+
+    async def _finalize_latest_attempt(self, job_id: UUID, *, status: str, error: str | None = None) -> None:
+        stmt = (
+            select(JobAttempt)
+            .where(JobAttempt.job_id == job_id)
+            .where(JobAttempt.completed_at.is_(None))
+            .order_by(desc(JobAttempt.attempt_number))
+            .limit(1)
+        )
+        attempt_result = (await self.session.execute(stmt)).scalar_one_or_none()
+        attempt = await attempt_result if inspect.isawaitable(attempt_result) else attempt_result
+        if attempt is None:
+            return
+        now = datetime.now(UTC)
+        started_at = attempt.started_at if isinstance(attempt.started_at, datetime) else now
+        attempt.status = status
+        attempt.error = error
+        attempt.completed_at = now
+        attempt.duration_seconds = int(max(0, (now - started_at).total_seconds()))
+        self.session.add(attempt)
 
     @staticmethod
     def _coerce_json_dict(value: Any, *, default_empty: bool = True) -> dict | None:
@@ -65,7 +98,7 @@ class JobService:
         job.metrics = self._coerce_json_dict(job.metrics, default_empty=False)
         return job
 
-    async def create_job(self, job_in: JobCreate) -> Job:
+    async def create_job(self, job_in: JobCreate, *, reprocessed_from_job_id: UUID | None = None) -> Job:
         """Create a new job.
 
         Parameters
@@ -87,6 +120,7 @@ class JobService:
             payload=payload_json,
             status="PENDING",
             max_retries=max_retries,
+            reprocessed_from_job_id=reprocessed_from_job_id,
             progress_current=0,
             progress_total=None,
             progress_percent=0,
@@ -102,7 +136,7 @@ class JobService:
             logger.error("Failed to enqueue job %s: %s", job.id, exc, exc_info=True)
             await self.fail_job(job.id, f"Failed to enqueue job: {exc}")
             raise
-        logger.info(f"Created job {job.id} of type {job.type}")
+        log_event(logger, "job_created", job_id=str(job.id), job_type=job.type, max_retries=max_retries)
         return job
 
     async def start_job(self, job_id: UUID) -> Job | None:
@@ -120,9 +154,10 @@ class JobService:
         job.last_error = None
         job.next_retry_at = None
         self.session.add(job)
+        await self._create_attempt(job.id, triggered_by="worker")
         await self.session.commit()
         await self.session.refresh(job)
-        logger.info("Picked up job %s", job.id)
+        log_event(logger, "job_started", job_id=str(job.id), job_type=job.type, retry_count=job.retry_count)
         return self._normalize_job_json_fields(job)
 
     async def complete_job(self, job_id: UUID, result: dict | None = None) -> Job:
@@ -153,8 +188,9 @@ class JobService:
         )
         result = await self.session.execute(stmt)
         job = result.scalar_one()
+        await self._finalize_latest_attempt(job_id, status="COMPLETED")
         await self.session.commit()
-        logger.info(f"Job {job_id} completed successfully")
+        log_event(logger, "job_completed", job_id=str(job_id))
         return job
 
     async def request_cancel(self, job_id: UUID) -> Job:
@@ -185,6 +221,7 @@ class JobService:
         }
 
         self.session.add(job)
+        await self._finalize_latest_attempt(job.id, status="CANCELLED", error="Cancelled by user")
         await self.session.commit()
         await self.session.refresh(job)
         return job
@@ -220,6 +257,7 @@ class JobService:
         )
         result = await self.session.execute(stmt)
         job = result.scalar_one()
+        await self._finalize_latest_attempt(job_id, status="CANCELLED", error=message)
         await self.session.commit()
         return self._normalize_job_json_fields(job)
 
@@ -262,6 +300,16 @@ class JobService:
                 job.max_retries,
                 delay_seconds,
             )
+            log_event(
+                logger,
+                "job_retry_scheduled",
+                level=logging.WARNING,
+                job_id=str(job_id),
+                retry_count=next_retry_count,
+                max_retries=job.max_retries,
+                retry_in_seconds=delay_seconds,
+            )
+            await self._finalize_latest_attempt(job.id, status="RETRY_SCHEDULED", error=error)
         else:
             dead_lettered = (job.max_retries or 0) > 0
             job.status = "DEAD_LETTER" if dead_lettered else "FAILED"
@@ -272,7 +320,15 @@ class JobService:
             if dead_lettered:
                 job.dead_lettered_at = now
                 job.dead_letter_reason = error
-            logger.error(f"Job {job_id} failed permanently: {error}")
+            log_event(
+                logger,
+                "job_failed_permanently",
+                level=logging.ERROR,
+                job_id=str(job_id),
+                dead_lettered=dead_lettered,
+                error=error,
+            )
+            await self._finalize_latest_attempt(job.id, status=job.status, error=error)
 
         self.session.add(job)
         await self.session.commit()
@@ -361,6 +417,46 @@ class JobService:
                 await asyncio.sleep(0.15 * attempt)
 
         return []
+
+    async def get_job_attempts(self, job_id: UUID, limit: int = 20) -> Sequence[JobAttempt]:
+        """Return attempt history for one job ordered by latest attempt first."""
+        job_exists = await self.session.scalar(select(func.count(Job.id)).where(Job.id == job_id))
+        if not job_exists:
+            raise ValueError(f"Job {job_id} not found")
+        stmt = (
+            select(JobAttempt)
+            .where(JobAttempt.job_id == job_id)
+            .order_by(JobAttempt.attempt_number.desc())
+            .limit(max(1, limit))
+        )
+        result = await self.session.execute(stmt)
+        return result.scalars().all()
+
+    async def reprocess_job(self, job_id: UUID) -> Job:
+        """Create a new PENDING job cloned from a finalized job."""
+        source_job = await self.session.get(Job, job_id)
+        if source_job is None:
+            raise ValueError(f"Job {job_id} not found")
+
+        finalized_statuses = {"COMPLETED", "FAILED", "DEAD_LETTER", "CANCELLED"}
+        if source_job.status not in finalized_statuses:
+            raise ValueError("Only finalized jobs can be reprocessed")
+
+        payload = self._coerce_json_dict(source_job.payload, default_empty=True) or {}
+        cloned = JobCreate(
+            type=source_job.type,
+            payload=payload,
+            max_retries=source_job.max_retries or 0,
+        )
+        new_job = await self.create_job(cloned, reprocessed_from_job_id=source_job.id)
+        log_event(
+            logger,
+            "job_reprocessed",
+            job_id=str(new_job.id),
+            source_job_id=str(source_job.id),
+            source_status=source_job.status,
+        )
+        return new_job
 
     async def delete_job(self, job_id: UUID) -> None:
         """Delete a finalized job from history."""

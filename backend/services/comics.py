@@ -32,6 +32,7 @@ from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
 
 logger = logging.getLogger(__name__)
+COMIC_MAPPING_COMMIT_BATCH_SIZE = 10
 
 SUPPORTED_COMIC_EXTENSIONS = {
     "cbz",
@@ -188,49 +189,34 @@ def _extract_from_rar_with_7z(local_path: str, *, fmt: str) -> ComicExtractionRe
     tool = _find_7z_tool()
     if not tool:
         raise ValueError("7z CLI not found for RAR fallback extraction")
+    with tempfile.TemporaryDirectory(prefix="comic_rar_7z_") as extract_dir:
+        extract_cmd = [tool, "x", "-y", f"-o{extract_dir}", local_path]
+        extract_proc = subprocess.run(extract_cmd, capture_output=True, check=False)
+        if extract_proc.returncode not in (0, 1):
+            stderr = extract_proc.stderr.decode("utf-8", errors="ignore").strip()
+            raise ValueError(f"7z extract failed: code={extract_proc.returncode} stderr={stderr}")
 
-    list_cmd = [tool, "l", "-slt", "-ba", local_path]
-    proc = subprocess.run(list_cmd, capture_output=True, text=True, check=False)
-    if proc.returncode not in (0, 1):
-        raise ValueError(f"7z list failed: code={proc.returncode} stderr={proc.stderr.strip()}")
+        root = Path(extract_dir)
+        image_paths = [path for path in root.rglob("*") if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS]
+        if not image_paths:
+            stderr = extract_proc.stderr.decode("utf-8", errors="ignore").strip()
+            raise ValueError(f"Archive has no image pages after 7z extract. stderr={stderr}")
 
-    image_names: list[str] = []
-    current_path: str | None = None
-    current_is_folder = False
-    for raw_line in proc.stdout.splitlines():
-        line = raw_line.strip()
-        if not line:
-            if current_path and not current_is_folder and Path(current_path).suffix.lower() in IMAGE_EXTENSIONS:
-                image_names.append(current_path)
-            current_path = None
-            current_is_folder = False
-            continue
-        if line.startswith("Path = "):
-            current_path = line[7:]
-        elif line.startswith("Folder = "):
-            current_is_folder = line[9:].strip() == "+"
-    if current_path and not current_is_folder and Path(current_path).suffix.lower() in IMAGE_EXTENSIONS:
-        image_names.append(current_path)
+        image_paths.sort(key=lambda path: path.relative_to(root).as_posix().lower())
+        cover_path = image_paths[0]
+        cover_bytes = cover_path.read_bytes()
+        if not cover_bytes:
+            raise ValueError(f"7z extracted empty cover file: {cover_path.name}")
 
-    cover_name, page_count = _select_cover_and_count(image_names)
-    extract_cmd = [tool, "x", "-so", local_path, cover_name, "-y"]
-    extract_proc = subprocess.run(extract_cmd, capture_output=True, check=False)
-    if extract_proc.returncode not in (0, 1):
-        stderr = extract_proc.stderr.decode("utf-8", errors="ignore").strip()
-        raise ValueError(f"7z extract failed: code={extract_proc.returncode} stderr={stderr}")
-    cover_bytes = extract_proc.stdout
-    if not cover_bytes:
-        stderr = extract_proc.stderr.decode("utf-8", errors="ignore").strip()
-        raise ValueError(f"7z extract returned empty bytes for {cover_name}. stderr={stderr}")
-
-    cover_extension = Path(cover_name).suffix.lower().lstrip(".") or "jpg"
-    return ComicExtractionResult(
-        format=fmt,
-        page_count=page_count,
-        cover_bytes=cover_bytes,
-        cover_extension=cover_extension,
-        details={"cover_member": cover_name, "backend": "7z_fallback"},
-    )
+        cover_member = cover_path.relative_to(root).as_posix()
+        cover_extension = cover_path.suffix.lower().lstrip(".") or "jpg"
+        return ComicExtractionResult(
+            format=fmt,
+            page_count=len(image_paths),
+            cover_bytes=cover_bytes,
+            cover_extension=cover_extension,
+            details={"cover_member": cover_member, "backend": "7z_fallback"},
+        )
 
 
 def _extract_from_7z(local_path: str, *, fmt: str) -> ComicExtractionResult:
@@ -353,12 +339,36 @@ def _extract_from_epub(local_path: str) -> ComicExtractionResult:
 
 def _extract_from_pdf(local_path: str) -> ComicExtractionResult:
     reader = PdfReader(local_path)
+    cover_bytes: bytes | None = None
+    cover_extension: str | None = None
+    cover_page_index: int | None = None
+
+    for page_index, page in enumerate(reader.pages):
+        images = getattr(page, "images", None)
+        if not images:
+            continue
+        for image in images:
+            data = getattr(image, "data", None)
+            if not data:
+                continue
+            cover_bytes = bytes(data)
+            image_name = getattr(image, "name", "") or ""
+            suffix = Path(image_name).suffix.lower().lstrip(".")
+            cover_extension = suffix or "jpg"
+            cover_page_index = page_index
+            break
+        if cover_bytes:
+            break
+
     return ComicExtractionResult(
         format="pdf",
         page_count=len(reader.pages),
-        cover_bytes=None,
-        cover_extension=None,
-        details={"cover": "not_extracted_in_v1"},
+        cover_bytes=cover_bytes,
+        cover_extension=cover_extension,
+        details={
+            "cover": "extracted_from_embedded_image" if cover_bytes else "embedded_image_not_found",
+            "cover_page_index": cover_page_index,
+        },
     )
 
 
@@ -442,7 +452,15 @@ class ComicMetadataService:
                 return None
         return await self.session.get(LinkedAccount, pk)
 
-    async def process_item_ids(self, account_id, item_ids: list[str], *, job_id=None, batch_id=None) -> dict[str, int]:
+    async def process_item_ids(
+        self,
+        account_id,
+        item_ids: list[str],
+        *,
+        job_id=None,
+        batch_id=None,
+        progress_reporter=None,
+    ) -> dict[str, int]:
         account = await self.session.get(LinkedAccount, account_id)
         if not account:
             raise ValueError("Account not found")
@@ -463,6 +481,15 @@ class ComicMetadataService:
 
         files_to_process = await self._expand_items(client, account, item_ids)
         stats = {"total": len(files_to_process), "mapped": 0, "skipped": 0, "failed": 0}
+        logger.info(
+            "Comic mapping started account_id=%s selected_items=%s expanded_files=%s job_id=%s",
+            account.id,
+            len(item_ids),
+            len(files_to_process),
+            job_id,
+        )
+        if progress_reporter is not None:
+            await progress_reporter.set_total(stats["total"])
         return await self._process_files(
             files_to_process=files_to_process,
             source_account=account,
@@ -476,6 +503,7 @@ class ComicMetadataService:
             job_id=job_id,
             batch_id=batch_id,
             force_remap=False,
+            progress_reporter=progress_reporter,
         )
 
     async def reindex_mapped_comics(self, *, job_id=None, batch_id=None) -> dict[str, int]:
@@ -546,9 +574,13 @@ class ComicMetadataService:
         job_id,
         batch_id,
         force_remap: bool,
+        progress_reporter=None,
     ) -> dict[str, int]:
-        batch_size = 20
+        batch_size = COMIC_MAPPING_COMMIT_BATCH_SIZE
         processed_since_commit = 0
+        source_account_pk = source_account.id
+        source_account_id = str(source_account_pk)
+        target_account_pk = target_account.id
 
         cover_folder_id = await self._ensure_cover_folder(
             target_client,
@@ -561,6 +593,8 @@ class ComicMetadataService:
                 mapped = await self._process_single_file(
                     source_client=source_client,
                     source_account=source_account,
+                    source_account_pk=source_account_pk,
+                    source_account_id=source_account_id,
                     cover_client=target_client,
                     cover_account=target_account,
                     item=file_item,
@@ -580,18 +614,56 @@ class ComicMetadataService:
                 if processed_since_commit >= batch_size:
                     await self.session.commit()
                     processed_since_commit = 0
+                    logger.info(
+                        "Comic mapping batch committed account_id=%s mapped=%s skipped=%s failed=%s total=%s",
+                        source_account_id,
+                        stats["mapped"],
+                        stats["skipped"],
+                        stats["failed"],
+                        stats["total"],
+                    )
             except Exception:
                 await self.session.rollback()
+                refreshed_source = await self.session.get(LinkedAccount, source_account_pk)
+                if refreshed_source is not None:
+                    source_account = refreshed_source
+                refreshed_target = await self.session.get(LinkedAccount, target_account_pk)
+                if refreshed_target is not None:
+                    target_account = refreshed_target
                 stats["failed"] += 1
                 logger.exception(
                     "Comic mapping failed for account=%s item=%s",
-                    source_account.id,
+                    source_account_id,
                     getattr(file_item, "id", None),
                 )
+            finally:
+                if progress_reporter is not None:
+                    await progress_reporter.increment()
+                    if progress_reporter.current % 5 == 0:
+                        await progress_reporter.update_metrics(
+                            mapped=stats["mapped"],
+                            skipped=stats["skipped"],
+                            failed=stats["failed"],
+                        )
 
         if processed_since_commit > 0:
             await self.session.commit()
 
+        if progress_reporter is not None:
+            await progress_reporter.update_metrics(
+                mapped=stats["mapped"],
+                skipped=stats["skipped"],
+                failed=stats["failed"],
+            )
+
+        logger.info(
+            "Comic mapping completed account_id=%s mapped=%s skipped=%s failed=%s total=%s",
+            source_account_id,
+            stats["mapped"],
+            stats["skipped"],
+            stats["failed"],
+            stats["total"],
+        )
         return stats
 
     async def _expand_items(
@@ -657,6 +729,8 @@ class ComicMetadataService:
         *,
         source_client: DriveProviderClient,
         source_account: LinkedAccount,
+        source_account_pk,
+        source_account_id: str,
         cover_client: DriveProviderClient,
         cover_account: LinkedAccount,
         item: Any,
@@ -672,7 +746,7 @@ class ComicMetadataService:
         if ext not in SUPPORTED_COMIC_EXTENSIONS:
             return False
         if not force_remap and await self._is_already_mapped(
-            account_id=source_account.id,
+            account_id=source_account_pk,
             item_id=item.id,
             category_id=category_id,
             attr_ids=attr_ids,
@@ -715,7 +789,7 @@ class ComicMetadataService:
 
             await apply_metadata_change(
                 self.session,
-                account_id=source_account.id,
+                account_id=source_account_pk,
                 item_id=item.id,
                 category_id=category_id,
                 values=mapped_values,
@@ -736,7 +810,7 @@ class ComicMetadataService:
             if any(marker in error_text for marker in non_comic_markers):
                 logger.info(
                     "Skipping non-comic item account=%s item=%s name=%s reason=%s",
-                    source_account.id,
+                    source_account_id,
                     item.id,
                     item.name,
                     exc,
@@ -760,7 +834,6 @@ class ComicMetadataService:
 
         stem = Path(item.name).stem
         set_if_exists("title", stem)
-        set_if_exists("file_size", item.size)
         set_if_exists("file_format", extraction.format)
         set_if_exists("page_count", extraction.page_count)
         return values

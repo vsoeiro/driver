@@ -177,10 +177,6 @@ class TokenManager:
         if not value:
             return False
 
-        # Common sign of an encrypted Fernet payload accidentally passed through as a token.
-        if value.startswith("gAAAAA"):
-            return False
-
         provider_key = (provider or "").lower()
         if provider_key == "microsoft":
             # Some valid MSAL-issued Microsoft tokens may not be plain JWT strings

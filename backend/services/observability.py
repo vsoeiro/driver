@@ -1,0 +1,274 @@
+"""Operational observability metrics for admin dashboards."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+import logging
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.core.logging_utils import log_event
+from backend.db.models import Job, LinkedAccount
+from backend.schemas.admin import (
+    DeadLetterJobSummary,
+    IntegrationHealthStatus,
+    ObservabilityAlert,
+    ObservabilitySnapshot,
+)
+from backend.services.ai import AIService
+from backend.services.app_settings import AppSettingsService
+from backend.services.job_queue import get_job_queue
+
+logger = logging.getLogger(__name__)
+
+
+class ObservabilityService:
+    """Build operational metrics and basic alerts for admin usage."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def snapshot(self) -> ObservabilitySnapshot:
+        now = datetime.now(UTC)
+        day_ago = now - timedelta(hours=24)
+        hour_ago = now - timedelta(hours=1)
+
+        queue = get_job_queue()
+        redis_ok = True
+        redis_detail = "Redis reachable"
+        queue_depth = 0
+        try:
+            if hasattr(queue, "queued_jobs"):
+                queue_depth = int(await queue.queued_jobs())
+            if hasattr(queue, "ping"):
+                await queue.ping()
+        except Exception as exc:
+            redis_ok = False
+            redis_detail = str(exc)
+
+        pending_count = await self.session.scalar(select(func.count(Job.id)).where(Job.status == "PENDING")) or 0
+        running_count = await self.session.scalar(select(func.count(Job.id)).where(Job.status == "RUNNING")) or 0
+        retry_count = await self.session.scalar(select(func.count(Job.id)).where(Job.status == "RETRY_SCHEDULED")) or 0
+
+        finalized_stmt = select(Job).where(
+            Job.completed_at.is_not(None),
+            Job.completed_at >= day_ago,
+            Job.status.in_(["COMPLETED", "FAILED", "DEAD_LETTER", "CANCELLED"]),
+        )
+        recent_finalized = (await self.session.execute(finalized_stmt)).scalars().all()
+
+        durations: list[float] = []
+        success_count = 0
+        dead_letter_24h = 0
+        throughput_last_hour = 0
+        failures_last_hour = 0
+        finalized_last_hour = 0
+
+        for job in recent_finalized:
+            if job.started_at and job.completed_at:
+                durations.append(max(0.0, (job.completed_at - job.started_at).total_seconds()))
+            if job.status == "COMPLETED":
+                success_count += 1
+            if job.status == "DEAD_LETTER":
+                dead_letter_24h += 1
+            if job.completed_at and job.completed_at >= hour_ago:
+                throughput_last_hour += 1
+                finalized_last_hour += 1
+                if job.status in {"FAILED", "DEAD_LETTER"}:
+                    failures_last_hour += 1
+
+        throughput_24h = len(recent_finalized)
+        success_rate_24h = (success_count / throughput_24h) if throughput_24h > 0 else 1.0
+        avg_duration = (sum(durations) / len(durations)) if durations else None
+        p95_duration = self._p95(durations)
+
+        accounts = (await self.session.execute(select(LinkedAccount))).scalars().all()
+        active_accounts = [acc for acc in accounts if acc.is_active]
+        provider_counts: dict[str, int] = {}
+        for account in active_accounts:
+            provider_counts[account.provider] = provider_counts.get(account.provider, 0) + 1
+
+        runtime = await AppSettingsService(self.session).get_runtime_settings()
+        ai_config, ai_available, ai_detail = await AIService(self.session).health()
+
+        integration_health = [
+            IntegrationHealthStatus(
+                key="redis",
+                label="Redis Queue",
+                status="ok" if redis_ok else "error",
+                detail=redis_detail,
+            ),
+            IntegrationHealthStatus(
+                key="ai",
+                label="Local AI",
+                status="ok" if ai_available else "warning",
+                detail=ai_detail,
+            ),
+            IntegrationHealthStatus(
+                key="scheduler",
+                label="Daily Scheduler",
+                status="ok" if runtime.enable_daily_sync_scheduler else "warning",
+                detail=f"enabled={runtime.enable_daily_sync_scheduler}, cron='{runtime.daily_sync_cron}'",
+            ),
+            IntegrationHealthStatus(
+                key="accounts",
+                label="Linked Accounts",
+                status="ok" if len(active_accounts) > 0 else "warning",
+                detail=f"active={len(active_accounts)} by_provider={provider_counts}",
+            ),
+        ]
+
+        alerts = await self._build_alerts(
+            now=now,
+            redis_ok=redis_ok,
+            retry_count=retry_count,
+            dead_letter_24h=dead_letter_24h,
+            running_count=running_count,
+            failures_last_hour=failures_last_hour,
+            finalized_last_hour=finalized_last_hour,
+        )
+
+        dead_letter_rows = await self.session.execute(
+            select(Job)
+            .where(Job.status == "DEAD_LETTER")
+            .order_by(Job.dead_lettered_at.desc().nullslast(), Job.completed_at.desc().nullslast())
+            .limit(10)
+        )
+        dead_letter_jobs = [
+            DeadLetterJobSummary(
+                id=row.id,
+                type=row.type,
+                dead_lettered_at=row.dead_lettered_at,
+                dead_letter_reason=row.dead_letter_reason,
+                retry_count=row.retry_count,
+                max_retries=row.max_retries,
+            )
+            for row in dead_letter_rows.scalars().all()
+        ]
+
+        return ObservabilitySnapshot(
+            generated_at=now,
+            queue_depth=queue_depth,
+            pending_jobs=int(pending_count),
+            running_jobs=int(running_count),
+            retry_scheduled_jobs=int(retry_count),
+            throughput_last_hour=throughput_last_hour,
+            throughput_last_24h=throughput_24h,
+            success_rate_last_24h=round(success_rate_24h, 4),
+            avg_duration_seconds_last_24h=round(avg_duration, 2) if avg_duration is not None else None,
+            p95_duration_seconds_last_24h=round(p95_duration, 2) if p95_duration is not None else None,
+            dead_letter_jobs_24h=dead_letter_24h,
+            recent_alerts=alerts,
+            integration_health=integration_health,
+            dead_letter_jobs=dead_letter_jobs,
+            ai_provider=ai_config.provider,
+            ai_model=ai_config.model,
+        )
+
+    async def _build_alerts(
+        self,
+        *,
+        now: datetime,
+        redis_ok: bool,
+        retry_count: int,
+        dead_letter_24h: int,
+        running_count: int,
+        failures_last_hour: int,
+        finalized_last_hour: int,
+    ) -> list[ObservabilityAlert]:
+        alerts: list[ObservabilityAlert] = []
+
+        if not redis_ok:
+            alerts.append(
+                ObservabilityAlert(
+                    severity="critical",
+                    code="redis_unavailable",
+                    message="Redis queue is unavailable. New/retry jobs may not be processed.",
+                    created_at=now,
+                )
+            )
+
+        if dead_letter_24h > 0:
+            alerts.append(
+                ObservabilityAlert(
+                    severity="warning",
+                    code="dead_letter_detected",
+                    message=f"{dead_letter_24h} job(s) reached dead-letter in the last 24 hours.",
+                    created_at=now,
+                )
+            )
+
+        if retry_count >= 10:
+            alerts.append(
+                ObservabilityAlert(
+                    severity="warning",
+                    code="retry_backlog",
+                    message=f"{retry_count} job(s) currently waiting for retry.",
+                    created_at=now,
+                )
+            )
+
+        if finalized_last_hour >= 5:
+            failure_rate = failures_last_hour / max(1, finalized_last_hour)
+            if failure_rate >= 0.25:
+                alerts.append(
+                    ObservabilityAlert(
+                        severity="warning",
+                        code="high_failure_rate",
+                        message=(
+                            f"High failure rate in the last hour: "
+                            f"{failures_last_hour}/{finalized_last_hour} ({failure_rate:.0%})."
+                        ),
+                        created_at=now,
+                    )
+                )
+
+        if running_count > 0:
+            oldest_running = await self.session.scalar(
+                select(func.min(Job.started_at)).where(
+                    Job.status == "RUNNING",
+                    Job.started_at.is_not(None),
+                )
+            )
+            if oldest_running and (now - oldest_running) >= timedelta(minutes=30):
+                alerts.append(
+                    ObservabilityAlert(
+                        severity="critical",
+                        code="stuck_running_jobs",
+                        message="There are RUNNING jobs older than 30 minutes.",
+                        created_at=now,
+                    )
+                )
+
+        if not alerts:
+            alerts.append(
+                ObservabilityAlert(
+                    severity="info",
+                    code="healthy",
+                    message="No operational alerts detected.",
+                    created_at=now,
+                )
+            )
+
+        for alert in alerts:
+            if alert.severity in {"warning", "critical"}:
+                level = logging.ERROR if alert.severity == "critical" else logging.WARNING
+                log_event(
+                    logger,
+                    "operational_alert",
+                    level=level,
+                    code=alert.code,
+                    severity=alert.severity,
+                    message=alert.message,
+                )
+
+        return alerts
+
+    @staticmethod
+    def _p95(values: list[float]) -> float | None:
+        if not values:
+            return None
+        ordered = sorted(values)
+        index = max(0, min(len(ordered) - 1, int(round((len(ordered) - 1) * 0.95))))
+        return ordered[index]
