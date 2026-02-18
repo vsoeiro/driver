@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 
 from backend.services.cron_utils import seconds_until_next_run
+from backend.services.app_settings import RuntimeSettings
 from backend.services.sync_scheduler import DailySyncScheduler
 
 
@@ -48,3 +49,29 @@ async def test_enqueue_sync_jobs_for_all_accounts():
 
     assert created_count == 3
     assert create_job.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_get_runtime_settings_falls_back_to_env_defaults():
+    session_factory = MagicMock(side_effect=RuntimeError("db unavailable"))
+    scheduler = DailySyncScheduler(session_factory)
+
+    fake_settings = MagicMock(
+        enable_daily_sync_scheduler=True,
+        daily_sync_cron="0 1 * * *",
+        worker_job_timeout_seconds=900,
+        ai_enabled=True,
+        ai_provider="ollama",
+        ai_base_url="http://localhost:11434",
+        ai_model="llama3.1:8b",
+        ai_temperature=0.1,
+        ai_timeout_seconds=120,
+    )
+
+    with patch("backend.services.sync_scheduler.get_settings", return_value=fake_settings):
+        runtime = await scheduler._get_runtime_settings()
+
+    assert isinstance(runtime, RuntimeSettings)
+    assert runtime.daily_sync_cron == "0 1 * * *"
+    assert runtime.worker_job_timeout_seconds == 900
+    assert runtime.ai_provider == "ollama"

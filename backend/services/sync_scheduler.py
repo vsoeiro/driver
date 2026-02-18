@@ -125,6 +125,13 @@ class DailySyncScheduler:
             return RuntimeSettings(
                 enable_daily_sync_scheduler=settings.enable_daily_sync_scheduler,
                 daily_sync_cron=settings.daily_sync_cron,
+                worker_job_timeout_seconds=settings.worker_job_timeout_seconds,
+                ai_enabled=settings.ai_enabled,
+                ai_provider=settings.ai_provider,
+                ai_base_url=settings.ai_base_url,
+                ai_model=settings.ai_model,
+                ai_temperature=settings.ai_temperature,
+                ai_timeout_seconds=settings.ai_timeout_seconds,
             )
 
     async def _wait_or_stop(self, timeout_seconds: float) -> bool:
