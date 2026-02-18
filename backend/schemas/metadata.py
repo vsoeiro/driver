@@ -86,6 +86,12 @@ class ItemMetadataUpdate(BaseModel):
     ai_suggestions: dict | None = None
 
 
+class ItemMetadataFieldUpdateRequest(BaseModel):
+    value: str | int | float | bool | None = None
+    category_id: UUID | None = None
+    expected_version: int | None = None
+
+
 class ItemMetadata(ItemMetadataBase):
     id: UUID
     account_id: UUID

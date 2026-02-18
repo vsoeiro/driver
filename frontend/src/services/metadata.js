@@ -38,6 +38,11 @@ export const saveItemMetadata = async (metadata) => {
     return response.data;
 };
 
+export const updateItemMetadataField = async (accountId, itemId, attributeId, payload) => {
+    const response = await api.patch(`/metadata/items/${accountId}/${itemId}/attributes/${attributeId}`, payload);
+    return response.data;
+};
+
 export const deleteItemMetadata = async (accountId, itemId) => {
     await api.delete(`/metadata/items/${accountId}/${itemId}`);
 };
@@ -132,6 +137,7 @@ export const metadataService = {
     deleteAttribute,
     getItemMetadata,
     saveItemMetadata,
+    updateItemMetadataField,
     updateItemAISuggestions,
     acceptItemAISuggestion,
     rejectItemAISuggestion,

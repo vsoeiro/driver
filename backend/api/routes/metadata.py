@@ -3,6 +3,7 @@
 import uuid
 from uuid import UUID
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import OperationalError
@@ -22,6 +23,7 @@ from backend.db.models import (
 )
 from backend.schemas.metadata import (
     ItemMetadataCreate,
+    ItemMetadataFieldUpdateRequest,
     ItemMetadataAIFieldActionRequest,
     ItemMetadataAISuggestionsUpdate,
     MetadataAttributeCreate,
@@ -92,6 +94,62 @@ def _normalize_ai_suggestions_payload(raw: dict | None) -> dict[str, dict]:
             "generated_at": generated_at,
         }
     return normalized
+
+
+def _coerce_attribute_value(attribute: MetadataAttribute, raw_value: Any) -> Any:
+    if raw_value is None:
+        return None
+
+    if isinstance(raw_value, str):
+        stripped = raw_value.strip()
+        if stripped == "":
+            return None
+    else:
+        stripped = raw_value
+
+    data_type = attribute.data_type
+
+    if data_type == "text":
+        return str(stripped)
+
+    if data_type == "number":
+        try:
+            number = float(stripped)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid number for '{attribute.name}'") from exc
+        if number.is_integer():
+            return int(number)
+        return number
+
+    if data_type == "boolean":
+        if isinstance(stripped, bool):
+            return stripped
+        if isinstance(stripped, (int, float)):
+            return bool(stripped)
+        normalized = str(stripped).strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+        raise HTTPException(status_code=400, detail=f"Invalid boolean for '{attribute.name}'")
+
+    if data_type == "date":
+        text = str(stripped).strip()
+        try:
+            datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid date for '{attribute.name}' (use ISO format)") from exc
+        return text
+
+    if data_type == "select":
+        options = attribute.options.get("options") if isinstance(attribute.options, dict) else []
+        normalized_options = {str(opt).strip() for opt in options if str(opt).strip()}
+        value = str(stripped).strip()
+        if normalized_options and value not in normalized_options:
+            raise HTTPException(status_code=400, detail=f"Invalid option for '{attribute.name}'")
+        return value
+
+    return stripped
 
 
 async def _validate_rule_configuration(session: AsyncSession, payload: dict) -> None:
@@ -309,6 +367,65 @@ async def get_item_metadata(
     )
     result = await session.execute(query)
     return result.scalar_one_or_none()
+
+
+@router.patch(
+    "/items/{account_id}/{item_id}/attributes/{attribute_id}",
+    response_model=ItemMetadataSchema,
+)
+async def update_item_metadata_attribute(
+    account_id: UUID,
+    item_id: str,
+    attribute_id: UUID,
+    payload: ItemMetadataFieldUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Update one metadata attribute value for one item."""
+    attribute = await session.get(MetadataAttribute, attribute_id)
+    if not attribute:
+        raise HTTPException(status_code=404, detail="Attribute not found")
+    if attribute.is_locked or attribute.managed_by_plugin:
+        raise HTTPException(status_code=400, detail="Attribute is locked and cannot be edited")
+
+    stmt = select(ItemMetadata).where(
+        ItemMetadata.account_id == account_id,
+        ItemMetadata.item_id == item_id,
+    )
+    existing_row = await session.execute(stmt)
+    existing = existing_row.scalar_one_or_none()
+
+    if payload.expected_version is not None and existing and existing.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Metadata was updated by another process. Refresh and try again.")
+
+    target_category_id = existing.category_id if existing else payload.category_id
+    if target_category_id is None:
+        target_category_id = attribute.category_id
+
+    if target_category_id != attribute.category_id:
+        raise HTTPException(status_code=400, detail="Attribute does not belong to the selected category")
+
+    coerced_value = _coerce_attribute_value(attribute, payload.value)
+    merged_values = normalize_metadata_values(existing.values if existing else {})
+    attr_key = str(attribute_id)
+    if coerced_value is None:
+        merged_values.pop(attr_key, None)
+    else:
+        merged_values[attr_key] = coerced_value
+
+    await apply_metadata_change(
+        session,
+        account_id=account_id,
+        item_id=item_id,
+        category_id=target_category_id,
+        values=merged_values,
+    )
+    await session.commit()
+
+    refreshed = await session.execute(stmt)
+    updated = refreshed.scalar_one_or_none()
+    if not updated:
+        raise HTTPException(status_code=500, detail="Failed to save metadata")
+    return updated
 
 
 @router.post("/items", response_model=ItemMetadataSchema)

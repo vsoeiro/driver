@@ -12,7 +12,7 @@ import {
     Database, Loader2, Tag, Hash, ArrowLeft,
     File, Folder, ArrowUpDown, ArrowUp, ArrowDown,
     CheckSquare, Square, Eye, Search, Filter, User, Sparkles, Pencil,
-    Download, ArrowRightLeft, XCircle
+    Download, ArrowRightLeft, XCircle, Check, X
 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import Modal from '../components/Modal';
@@ -58,6 +58,9 @@ const CategoryItemsTable = ({ category, onBack }) => {
     const [searchScope, setSearchScope] = useState('both');
     const [viewMode, setViewMode] = useState('table');
     const [coverUrlsByItemId, setCoverUrlsByItemId] = useState({});
+    const [editingCell, setEditingCell] = useState(null);
+    const [editingValue, setEditingValue] = useState('');
+    const [savingCellKey, setSavingCellKey] = useState(null);
     const [filters, setFilters] = useState({
         account_id: '',
         item_type: '',
@@ -481,6 +484,83 @@ const CategoryItemsTable = ({ category, onBack }) => {
             return new Date(val).toLocaleDateString('en-GB');
         }
         return String(val);
+    };
+
+    const isReadOnlyAttribute = (attr) => {
+        if (!attr) return true;
+        return Boolean(attr.is_locked || attr.managed_by_plugin || READ_ONLY_COMIC_FIELDS.has(attr.plugin_field_key));
+    };
+
+    const getEditValue = (item, attr) => {
+        const rawValue = item.metadata?.values?.[attr.id];
+        if (rawValue === undefined || rawValue === null) return '';
+        if (attr.data_type === 'boolean') return rawValue ? 'true' : 'false';
+        if (attr.data_type === 'date') {
+            const text = String(rawValue);
+            return text.includes('T') ? text.slice(0, 10) : text;
+        }
+        return String(rawValue);
+    };
+
+    const startInlineEdit = (item, attr, event) => {
+        event.stopPropagation();
+        if (isReadOnlyAttribute(attr)) return;
+        setEditingCell({ itemId: item.id, attrId: attr.id });
+        setEditingValue(getEditValue(item, attr));
+    };
+
+    const cancelInlineEdit = () => {
+        setEditingCell(null);
+        setEditingValue('');
+    };
+
+    const toPayloadValue = (attr, value) => {
+        if (value === '' || value === null || value === undefined) return null;
+        if (attr.data_type === 'boolean') {
+            if (value === 'true' || value === true) return true;
+            if (value === 'false' || value === false) return false;
+            return null;
+        }
+        return value;
+    };
+
+    const saveInlineEdit = async (item, attr) => {
+        const cellKey = `${item.id}:${attr.id}`;
+        setSavingCellKey(cellKey);
+        try {
+            const updatedMetadata = await metadataService.updateItemMetadataField(
+                item.account_id,
+                item.item_id,
+                attr.id,
+                {
+                    value: toPayloadValue(attr, editingValue),
+                    category_id: category.id,
+                    expected_version: item.metadata?.version ?? null,
+                }
+            );
+
+            setItems((prev) =>
+                prev.map((row) => {
+                    if (row.id !== item.id) return row;
+                    return {
+                        ...row,
+                        metadata: {
+                            ...(row.metadata || {}),
+                            ...updatedMetadata,
+                            values: updatedMetadata?.values || {},
+                            ai_suggestions: updatedMetadata?.ai_suggestions || {},
+                        },
+                    };
+                })
+            );
+            setEditingCell(null);
+            setEditingValue('');
+            showToast(`'${attr.name}' updated.`, 'success');
+        } catch (error) {
+            showToast(error?.response?.data?.detail || `Failed to update '${attr.name}'`, 'error');
+        } finally {
+            setSavingCellKey(null);
+        }
     };
 
     const attributes = category.attributes || [];
@@ -949,11 +1029,95 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                     <div className="text-right text-sm text-muted-foreground tabular-nums">
                                                         {formatSize(item.size)}
                                                     </div>
-                                                    {attributes.map(attr => (
-                                                        <div key={attr.id} className="text-sm text-foreground truncate" title={getAttributeValue(item, attr)}>
-                                                            {getAttributeValue(item, attr)}
-                                                        </div>
-                                                    ))}
+                                                    {attributes.map((attr) => {
+                                                        const isEditing = editingCell?.itemId === item.id && editingCell?.attrId === attr.id;
+                                                        const cellKey = `${item.id}:${attr.id}`;
+                                                        const isSaving = savingCellKey === cellKey;
+                                                        const readOnly = isReadOnlyAttribute(attr);
+                                                        const displayValue = getAttributeValue(item, attr);
+
+                                                        return (
+                                                            <div
+                                                                key={attr.id}
+                                                                className={`text-sm text-foreground min-w-0 ${readOnly ? '' : 'cursor-text'}`}
+                                                                onClick={(e) => startInlineEdit(item, attr, e)}
+                                                                title={readOnly ? `${displayValue} (read-only)` : String(displayValue)}
+                                                            >
+                                                                {isEditing ? (
+                                                                    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                                                        {attr.data_type === 'select' ? (
+                                                                            <select
+                                                                                className="w-full border rounded px-2 py-1 text-xs bg-background"
+                                                                                value={editingValue}
+                                                                                onChange={(e) => setEditingValue(e.target.value)}
+                                                                            >
+                                                                                <option value="">-</option>
+                                                                                {getSelectOptions(attr.options).map((option) => (
+                                                                                    <option key={option} value={option}>
+                                                                                        {option}
+                                                                                    </option>
+                                                                                ))}
+                                                                            </select>
+                                                                        ) : attr.data_type === 'boolean' ? (
+                                                                            <select
+                                                                                className="w-full border rounded px-2 py-1 text-xs bg-background"
+                                                                                value={editingValue}
+                                                                                onChange={(e) => setEditingValue(e.target.value)}
+                                                                            >
+                                                                                <option value="">-</option>
+                                                                                <option value="true">Yes</option>
+                                                                                <option value="false">No</option>
+                                                                            </select>
+                                                                        ) : (
+                                                                            <input
+                                                                                type={attr.data_type === 'number' ? 'number' : attr.data_type === 'date' ? 'date' : 'text'}
+                                                                                value={editingValue}
+                                                                                onChange={(e) => setEditingValue(e.target.value)}
+                                                                                onKeyDown={(e) => {
+                                                                                    if (e.key === 'Enter') {
+                                                                                        e.preventDefault();
+                                                                                        saveInlineEdit(item, attr);
+                                                                                    }
+                                                                                    if (e.key === 'Escape') {
+                                                                                        e.preventDefault();
+                                                                                        cancelInlineEdit();
+                                                                                    }
+                                                                                }}
+                                                                                className="w-full border rounded px-2 py-1 text-xs bg-background"
+                                                                                autoFocus
+                                                                            />
+                                                                        )}
+                                                                        <button
+                                                                            type="button"
+                                                                            className="p-1 rounded hover:bg-accent disabled:opacity-50"
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                saveInlineEdit(item, attr);
+                                                                            }}
+                                                                            disabled={isSaving}
+                                                                            title="Confirm"
+                                                                        >
+                                                                            {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            className="p-1 rounded hover:bg-accent disabled:opacity-50"
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                cancelInlineEdit();
+                                                                            }}
+                                                                            disabled={isSaving}
+                                                                            title="Cancel"
+                                                                        >
+                                                                            <X size={12} />
+                                                                        </button>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className={`truncate ${readOnly ? 'text-muted-foreground' : ''}`}>{displayValue}</div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
                                                     <div className="text-right text-sm text-muted-foreground tabular-nums">
                                                         {formatDate(item.modified_at)}
                                                     </div>
