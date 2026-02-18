@@ -133,6 +133,16 @@ export const createReindexComicCoversJob = async (pluginKey = 'comicrack_core') 
     return response.data;
 };
 
+export const createExtractLibraryComicAssetsJob = async (accountIds = null, chunkSize = 1000) => {
+    const payload = {};
+    if (Array.isArray(accountIds) && accountIds.length > 0) {
+        payload.account_ids = accountIds;
+    }
+    payload.chunk_size = chunkSize;
+    const response = await api.post('/jobs/comics/extract-library', payload);
+    return response.data;
+};
+
 export const jobsService = {
     createMoveJob,
     getJobs,
@@ -148,6 +158,7 @@ export const jobsService = {
     createMetadataUndoJob,
     createApplyRuleJob,
     createExtractComicAssetsJob,
+    createExtractLibraryComicAssetsJob,
     createReindexComicCoversJob,
 };
 

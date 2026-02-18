@@ -43,15 +43,17 @@ async def _collect_provider_snapshot(
     root_item: object,
     *,
     worker_count: int,
-) -> tuple[list[SnapshotEntry], int]:
+) -> tuple[list[SnapshotEntry], int, int]:
     """Collect remote tree with concurrent folder listing workers."""
     entries: list[SnapshotEntry] = [SnapshotEntry(item=root_item, parent_id=None, path="/")]
     errors = 0
+    pages_fetched = 0
     queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
     queue.put_nowait((getattr(root_item, "id"), "/"))
 
     async def _worker() -> None:
         nonlocal errors
+        nonlocal pages_fetched
         while True:
             folder_id, folder_path = await queue.get()
             if folder_id == "__STOP__":
@@ -60,6 +62,7 @@ async def _collect_provider_snapshot(
 
             try:
                 children = await client.list_folder_items(account, folder_id)
+                pages_fetched += 1
                 while True:
                     for child in children.items:
                         child_path = _build_child_path(folder_path, child.name)
@@ -75,6 +78,7 @@ async def _collect_provider_snapshot(
                     if not children.next_link:
                         break
                     children = await client.list_items_by_next_link(account, children.next_link)
+                    pages_fetched += 1
             except Exception as exc:  # noqa: BLE001
                 logger.error("Failed to list folder %s: %s", folder_id, exc)
                 errors += 1
@@ -86,7 +90,7 @@ async def _collect_provider_snapshot(
     for _ in workers:
         queue.put_nowait(("__STOP__", ""))
     await asyncio.gather(*workers)
-    return entries, errors
+    return entries, errors, pages_fetched
 
 
 @register_handler("sync_items")
@@ -111,17 +115,18 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
     settings = get_settings()
 
     root_item = await client.get_item_metadata(account, "root")
-    entries, list_errors = await _collect_provider_snapshot(
+    entries, list_errors, pages_fetched = await _collect_provider_snapshot(
         client,
         account,
         root_item,
         worker_count=min(16, max(1, settings.worker_concurrency)),
     )
     logger.info(
-        "Sync snapshot collected account_id=%s entries=%s listing_errors=%s",
+        "Sync snapshot collected account_id=%s entries=%s listing_errors=%s pages_fetched=%s",
         account_id,
         len(entries),
         list_errors,
+        pages_fetched,
     )
 
     stats = {
@@ -131,6 +136,7 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
         "unchanged": 0,
         "deleted": 0,
         "errors": list_errors,
+        "pages_fetched": pages_fetched,
     }
     await progress.set_total(len(entries))
 
@@ -187,6 +193,7 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
         unchanged=stats["unchanged"],
         deleted=stats["deleted"],
         errors=stats["errors"],
+        pages_fetched=stats["pages_fetched"],
     )
     logger.info("Sync job completed account_id=%s stats=%s", account_id, stats)
     return stats

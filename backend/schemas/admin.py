@@ -136,6 +136,10 @@ class ObservabilitySnapshot(BaseModel):
     avg_duration_seconds_last_24h: float | None = None
     p95_duration_seconds_last_24h: float | None = None
     dead_letter_jobs_24h: int
+    metrics_total_24h: int = 0
+    metrics_success_24h: int = 0
+    metrics_failed_24h: int = 0
+    metrics_skipped_24h: int = 0
     recent_alerts: list[ObservabilityAlert] = []
     integration_health: list[IntegrationHealthStatus] = []
     dead_letter_jobs: list[DeadLetterJobSummary] = []

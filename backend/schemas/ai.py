@@ -97,3 +97,21 @@ class AIHealthResponse(BaseModel):
     model: str
     available: bool
     detail: str | None = None
+
+
+class AIComicSuggestRequest(BaseModel):
+    category_id: UUID
+    title: str = Field(..., min_length=1)
+    account_id: UUID
+    item_id: str = Field(..., min_length=1)
+    cover_account_id: UUID | None = None
+    cover_item_id: str | None = None
+
+
+class AIComicSuggestResponse(BaseModel):
+    category_id: UUID
+    account_id: UUID
+    item_id: str
+    suggestions: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    notes: str | None = None
+    model: str

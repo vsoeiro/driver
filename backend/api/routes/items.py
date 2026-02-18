@@ -3,9 +3,10 @@
 import uuid
 from uuid import UUID
 from typing import Optional
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import select, func, cast, Float
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.dependencies import get_session
@@ -14,6 +15,79 @@ from backend.schemas.items import ItemListResponse, BatchMetadataUpdate
 from backend.services.metadata_versioning import apply_metadata_change
 
 router = APIRouter(prefix="/items", tags=["Items"])
+
+
+def _build_metadata_filter_conditions(filters: dict) -> list:
+    conditions = []
+    for attr_id, raw_filter in (filters or {}).items():
+        if not attr_id:
+            continue
+
+        field_text = ItemMetadata.values[attr_id].as_string()
+        field_number = cast(field_text, Float)
+
+        if isinstance(raw_filter, dict):
+            op = str(raw_filter.get("op", "eq")).lower()
+
+            min_value = raw_filter.get("min")
+            max_value = raw_filter.get("max")
+            if min_value not in (None, ""):
+                try:
+                    conditions.append(field_number >= float(min_value))
+                except (TypeError, ValueError):
+                    pass
+            if max_value not in (None, ""):
+                try:
+                    conditions.append(field_number <= float(max_value))
+                except (TypeError, ValueError):
+                    pass
+            if min_value not in (None, "") or max_value not in (None, ""):
+                continue
+
+            value = raw_filter.get("value")
+        else:
+            op = "eq"
+            value = raw_filter
+
+        if value in (None, ""):
+            continue
+
+        value_str = str(value)
+
+        if op == "eq":
+            conditions.append(field_text == value_str)
+        elif op == "ne":
+            conditions.append(field_text != value_str)
+        elif op == "contains":
+            conditions.append(field_text.ilike(f"%{value_str}%"))
+        elif op == "not_contains":
+            conditions.append(~field_text.ilike(f"%{value_str}%"))
+        elif op == "starts_with":
+            conditions.append(field_text.ilike(f"{value_str}%"))
+        elif op == "ends_with":
+            conditions.append(field_text.ilike(f"%{value_str}"))
+        elif op == "gt":
+            try:
+                conditions.append(field_number > float(value))
+            except (TypeError, ValueError):
+                pass
+        elif op == "gte":
+            try:
+                conditions.append(field_number >= float(value))
+            except (TypeError, ValueError):
+                pass
+        elif op == "lt":
+            try:
+                conditions.append(field_number < float(value))
+            except (TypeError, ValueError):
+                pass
+        elif op == "lte":
+            try:
+                conditions.append(field_number <= float(value))
+            except (TypeError, ValueError):
+                pass
+
+    return conditions
 
 
 @router.get("", response_model=ItemListResponse)
@@ -99,17 +173,16 @@ async def list_items(
     elif has_metadata is False:
         query = query.where(ItemMetadata.id.is_(None))
 
+    metadata_conditions = []
     if metadata_filters:
         try:
-            import json
-            filters = json.loads(metadata_filters)
-            for attr_id, value in filters.items():
-                if value:
-                    # Filter ItemMetadata.values JSON where key matches attr_id and value matches
-                    query = query.where(ItemMetadata.values[attr_id].as_string() == str(value))
+            parsed_filters = json.loads(metadata_filters)
+            metadata_conditions = _build_metadata_filter_conditions(parsed_filters)
         except Exception:
-            # Silently ignore invalid JSON filters for now or log them
-            pass
+            metadata_conditions = []
+
+    for condition in metadata_conditions:
+        query = query.where(condition)
 
     # Count total
     count_query = select(func.count(Item.id))
@@ -164,22 +237,15 @@ async def list_items(
             (Item.item_id == ItemMetadata.item_id) & (Item.account_id == ItemMetadata.account_id)
         ).where(ItemMetadata.id.is_(None)) if not category_id else count_query
 
-    if metadata_filters:
-        try:
-            import json
-            filters = json.loads(metadata_filters)
-            if not category_id and not has_metadata:
-                # Need to join ItemMetadata if not already joined
-                count_query = count_query.join(
-                    ItemMetadata,
-                    (Item.item_id == ItemMetadata.item_id) & (Item.account_id == ItemMetadata.account_id)
-                )
-            
-            for attr_id, value in filters.items():
-                if value:
-                    count_query = count_query.where(ItemMetadata.values[attr_id].as_string() == str(value))
-        except Exception:
-            pass
+    if metadata_conditions:
+        if not category_id and has_metadata is None:
+            # Need to join ItemMetadata if not already joined
+            count_query = count_query.join(
+                ItemMetadata,
+                (Item.item_id == ItemMetadata.item_id) & (Item.account_id == ItemMetadata.account_id)
+            )
+        for condition in metadata_conditions:
+            count_query = count_query.where(condition)
 
     total = (await session.execute(count_query)).scalar_one()
 
@@ -209,6 +275,7 @@ async def list_items(
                 "item_id": metadata.item_id,
                 "category_id": metadata.category_id,
                 "values": metadata.values,
+                "ai_suggestions": metadata.ai_suggestions or {},
                 "version": metadata.version,
                 "updated_at": metadata.updated_at,
                 "category_name": category_name,
@@ -273,12 +340,17 @@ async def batch_update_metadata(
     created = 0
     for item_id in batch_data.item_ids:
         existing = existing_records.get(item_id)
+        if existing and existing.category_id == batch_data.category_id:
+            merged_values = dict(existing.values or {})
+            merged_values.update(batch_data.values or {})
+        else:
+            merged_values = dict(batch_data.values or {})
         change = await apply_metadata_change(
             session,
             account_id=batch_data.account_id,
             item_id=item_id,
             category_id=batch_data.category_id,
-            values=batch_data.values,
+            values=merged_values,
             batch_id=batch_id,
         )
         if change["changed"]:

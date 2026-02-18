@@ -7,6 +7,7 @@ import json
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urlencode, urlparse, parse_qs
 
 import httpx
 
@@ -40,6 +41,7 @@ class GoogleDriveClient:
         account: LinkedAccount,
         *,
         use_upload_api: bool = False,
+        timeout: httpx.Timeout | None = None,
         **kwargs: Any,
     ) -> httpx.Response:
         base = GOOGLE_UPLOAD_BASE_URL if use_upload_api else GOOGLE_DRIVE_BASE_URL
@@ -50,7 +52,8 @@ class GoogleDriveClient:
         async def _send_request(access_token: str) -> httpx.Response:
             headers = dict(request_headers)
             headers["Authorization"] = f"Bearer {access_token}"
-            async with httpx.AsyncClient(timeout=GOOGLE_TIMEOUT) as client:
+            effective_timeout = timeout or GOOGLE_TIMEOUT
+            async with httpx.AsyncClient(timeout=effective_timeout) as client:
                 return await client.request(method=method, url=url, headers=headers, **kwargs)
 
         try:
@@ -108,12 +111,22 @@ class GoogleDriveClient:
             download_url=item.get("webContentLink"),
         )
 
-    def _parse_list(self, data: dict, folder_path: str) -> DriveListResponse:
+    @staticmethod
+    def _build_next_link(query_params: dict[str, Any], next_page_token: str | None) -> str | None:
+        if not next_page_token:
+            return None
+        params = {k: v for k, v in query_params.items() if v is not None}
+        params["pageToken"] = next_page_token
+        return f"{GOOGLE_DRIVE_BASE_URL}/files?{urlencode(params, doseq=True)}"
+
+    def _parse_list(self, data: dict, folder_path: str, query_params: dict[str, Any] | None = None) -> DriveListResponse:
         items = [self._parse_single_item(file_data) for file_data in data.get("files", [])]
+        next_page_token = data.get("nextPageToken")
+        next_link = self._build_next_link(query_params or {}, next_page_token)
         return DriveListResponse(
             items=items,
             folder_path=folder_path,
-            next_link=data.get("nextPageToken"),
+            next_link=next_link,
         )
 
     async def get_user_info(self, account: LinkedAccount) -> dict:
@@ -126,53 +139,61 @@ class GoogleDriveClient:
         return response.json().get("user", {})
 
     async def list_root_items(self, account: LinkedAccount) -> DriveListResponse:
+        params = {
+            "q": "'root' in parents and trashed=false",
+            "fields": f"nextPageToken,files({FILE_FIELDS})",
+            "pageSize": 200,
+            "supportsAllDrives": "true",
+            "includeItemsFromAllDrives": "true",
+        }
         response = await self._request(
             "GET",
             "/files",
             account,
-            params={
-                "q": "'root' in parents and trashed=false",
-                "fields": f"nextPageToken,files({FILE_FIELDS})",
-                "pageSize": 200,
-                "supportsAllDrives": "true",
-                "includeItemsFromAllDrives": "true",
-            },
+            params=params,
         )
-        return self._parse_list(response.json(), "/")
+        return self._parse_list(response.json(), "/", params)
 
     async def list_folder_items(self, account: LinkedAccount, item_id: str) -> DriveListResponse:
+        params = {
+            "q": f"'{item_id}' in parents and trashed=false",
+            "fields": f"nextPageToken,files({FILE_FIELDS})",
+            "pageSize": 200,
+            "supportsAllDrives": "true",
+            "includeItemsFromAllDrives": "true",
+        }
         response = await self._request(
             "GET",
             "/files",
             account,
-            params={
-                "q": f"'{item_id}' in parents and trashed=false",
-                "fields": f"nextPageToken,files({FILE_FIELDS})",
-                "pageSize": 200,
-                "supportsAllDrives": "true",
-                "includeItemsFromAllDrives": "true",
-            },
+            params=params,
         )
-        return self._parse_list(response.json(), item_id)
+        return self._parse_list(response.json(), item_id, params)
 
     async def list_items_by_next_link(self, account: LinkedAccount, next_link: str) -> DriveListResponse:
         if next_link.startswith("http"):
             response = await self._request("GET", next_link, account)
+            parsed = urlparse(next_link)
+            query_params_raw = parse_qs(parsed.query)
+            query_params: dict[str, Any] = {k: v if len(v) > 1 else v[0] for k, v in query_params_raw.items()}
+            query_params.pop("pageToken", None)
+            return self._parse_list(response.json(), "/", query_params)
         else:
+            params = {
+                "q": "trashed=false",
+                "fields": f"nextPageToken,files({FILE_FIELDS})",
+                "pageToken": next_link,
+                "pageSize": 200,
+                "supportsAllDrives": "true",
+                "includeItemsFromAllDrives": "true",
+            }
             response = await self._request(
                 "GET",
                 "/files",
                 account,
-                params={
-                    "q": "trashed=false",
-                    "fields": f"nextPageToken,files({FILE_FIELDS})",
-                    "pageToken": next_link,
-                    "pageSize": 200,
-                    "supportsAllDrives": "true",
-                    "includeItemsFromAllDrives": "true",
-                },
+                params=params,
             )
-        return self._parse_list(response.json(), "/")
+            return self._parse_list(response.json(), "/", params)
 
     async def get_item_metadata(self, account: LinkedAccount, item_id: str) -> DriveItem:
         response = await self._request(
@@ -205,7 +226,12 @@ class GoogleDriveClient:
             raise DriveOrganizerError("Download URL not available for this item", status_code=404)
         return download_url
 
-    async def download_file_bytes(self, account: LinkedAccount, item_id: str) -> tuple[str, bytes]:
+    async def download_file_bytes(
+        self,
+        account: LinkedAccount,
+        item_id: str,
+        timeout_seconds: float | None = None,
+    ) -> tuple[str, bytes]:
         metadata_response = await self._request(
             "GET",
             f"/files/{item_id}",
@@ -217,35 +243,44 @@ class GoogleDriveClient:
         if mime_type.startswith("application/vnd.google-apps."):
             raise DriveOrganizerError("Downloading Google Docs native files is not supported yet", status_code=400)
 
+        download_timeout = httpx.Timeout(timeout_seconds, connect=10.0) if timeout_seconds else None
         file_response = await self._request(
             "GET",
             f"/files/{item_id}",
             account,
             params={"alt": "media", "supportsAllDrives": "true"},
+            timeout=download_timeout,
         )
         return metadata.get("name", "file"), file_response.content
 
-    async def download_file_to_path(self, account: LinkedAccount, item_id: str, target_path: str) -> str:
-        filename, content = await self.download_file_bytes(account, item_id)
+    async def download_file_to_path(
+        self,
+        account: LinkedAccount,
+        item_id: str,
+        target_path: str,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        filename, content = await self.download_file_bytes(account, item_id, timeout_seconds=timeout_seconds)
         with open(target_path, "wb") as f:
             f.write(content)
         return filename
 
     async def search_items(self, account: LinkedAccount, query: str) -> DriveListResponse:
         escaped = query.replace("\\", "\\\\").replace("'", "\\'")
+        params = {
+            "q": f"name contains '{escaped}' and trashed=false",
+            "fields": f"nextPageToken,files({FILE_FIELDS})",
+            "pageSize": 100,
+            "supportsAllDrives": "true",
+            "includeItemsFromAllDrives": "true",
+        }
         response = await self._request(
             "GET",
             "/files",
             account,
-            params={
-                "q": f"name contains '{escaped}' and trashed=false",
-                "fields": f"nextPageToken,files({FILE_FIELDS})",
-                "pageSize": 100,
-                "supportsAllDrives": "true",
-                "includeItemsFromAllDrives": "true",
-            },
+            params=params,
         )
-        return self._parse_list(response.json(), f"search:{query}")
+        return self._parse_list(response.json(), f"search:{query}", params)
 
     async def get_quota(self, account: LinkedAccount) -> dict:
         response = await self._request(
@@ -297,35 +332,37 @@ class GoogleDriveClient:
         return breadcrumb
 
     async def get_recent_items(self, account: LinkedAccount) -> DriveListResponse:
+        params = {
+            "q": "trashed=false",
+            "orderBy": "viewedByMeTime desc",
+            "fields": f"nextPageToken,files({FILE_FIELDS})",
+            "pageSize": 100,
+            "supportsAllDrives": "true",
+            "includeItemsFromAllDrives": "true",
+        }
         response = await self._request(
             "GET",
             "/files",
             account,
-            params={
-                "q": "trashed=false",
-                "orderBy": "viewedByMeTime desc",
-                "fields": f"nextPageToken,files({FILE_FIELDS})",
-                "pageSize": 100,
-                "supportsAllDrives": "true",
-                "includeItemsFromAllDrives": "true",
-            },
+            params=params,
         )
-        return self._parse_list(response.json(), "recent")
+        return self._parse_list(response.json(), "recent", params)
 
     async def get_shared_with_me(self, account: LinkedAccount) -> DriveListResponse:
+        params = {
+            "q": "sharedWithMe = true and trashed=false",
+            "fields": f"nextPageToken,files({FILE_FIELDS})",
+            "pageSize": 100,
+            "supportsAllDrives": "true",
+            "includeItemsFromAllDrives": "true",
+        }
         response = await self._request(
             "GET",
             "/files",
             account,
-            params={
-                "q": "sharedWithMe = true and trashed=false",
-                "fields": f"nextPageToken,files({FILE_FIELDS})",
-                "pageSize": 100,
-                "supportsAllDrives": "true",
-                "includeItemsFromAllDrives": "true",
-            },
+            params=params,
         )
-        return self._parse_list(response.json(), "shared")
+        return self._parse_list(response.json(), "shared", params)
 
     async def upload_small_file(
         self,

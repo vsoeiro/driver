@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { metadataService } from '../services/metadata';
 import { itemsService } from '../services/items';
 import { accountsService } from '../services/accounts';
@@ -11,12 +11,23 @@ import {
     Plus, Trash2, ChevronRight, ChevronDown, ChevronLeft,
     Database, Loader2, Tag, Hash, ArrowLeft,
     File, Folder, ArrowUpDown, ArrowUp, ArrowDown,
-    CheckSquare, Square, Eye, Search, Filter, User, Sparkles, Pencil
+    CheckSquare, Square, Eye, Search, Filter, User, Sparkles, Pencil,
+    Download, ArrowRightLeft, XCircle
 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import Modal from '../components/Modal';
 import BatchMetadataModal from '../components/BatchMetadataModal';
 import RemoveMetadataModal from '../components/RemoveMetadataModal';
+import MetadataModal from '../components/MetadataModal';
+import MoveModal from '../components/MoveModal';
+
+const READ_ONLY_COMIC_FIELDS = new Set([
+    'cover_item_id',
+    'cover_filename',
+    'cover_account_id',
+    'page_count',
+    'file_format',
+]);
 
 
 // -- Category Items Table --
@@ -32,7 +43,16 @@ const CategoryItemsTable = ({ category, onBack }) => {
     const [selectedItems, setSelectedItems] = useState(new Set());
     const [lastSelectedIndex, setLastSelectedIndex] = useState(null);
     const [batchModalOpen, setBatchModalOpen] = useState(false);
+    const [metadataModalOpen, setMetadataModalOpen] = useState(false);
     const [removeModalOpen, setRemoveModalOpen] = useState(false);
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+    const [moveModalOpen, setMoveModalOpen] = useState(false);
+    const [metadataMenuOpen, setMetadataMenuOpen] = useState(false);
+    const metadataMenuRef = useRef(null);
+    const [renameModalOpen, setRenameModalOpen] = useState(false);
+    const [renameValue, setRenameValue] = useState('');
+    const [renameSaving, setRenameSaving] = useState(false);
+    const [actionLoading, setActionLoading] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [appliedSearchTerm, setAppliedSearchTerm] = useState('');
     const [searchScope, setSearchScope] = useState('both');
@@ -50,9 +70,22 @@ const CategoryItemsTable = ({ category, onBack }) => {
         accountsService.getAccounts().then(setAccounts).catch(console.error);
     }, []);
 
+    useEffect(() => {
+        function handleClickOutside(event) {
+            if (metadataMenuRef.current && !metadataMenuRef.current.contains(event.target)) {
+                setMetadataMenuOpen(false);
+            }
+        }
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
     const CategoryFilterBar = ({ onFilter, currentFilters }) => {
         const [localFilters, setLocalFilters] = useState(currentFilters);
         const [isOpen, setIsOpen] = useState(false);
+        const filterableAttributes = (category.attributes || []).filter(
+            (attr) => !attr.is_read_only && !READ_ONLY_COMIC_FIELDS.has(attr.plugin_field_key)
+        );
 
         useEffect(() => {
             setLocalFilters(currentFilters);
@@ -70,6 +103,14 @@ const CategoryItemsTable = ({ category, onBack }) => {
                     [attrId]: value
                 }
             }));
+        };
+
+        const handleAttributeConfigChange = (attrId, key, value) => {
+            const current = localFilters.attributes?.[attrId];
+            const nextConfig = (current && typeof current === 'object' && !Array.isArray(current))
+                ? { ...current, [key]: value }
+                : { [key]: value };
+            handleAttributeChange(attrId, nextConfig);
         };
 
         const applyFilters = () => {
@@ -131,21 +172,107 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                 Category Attributes
                             </h4>
                             <div className="space-y-3">
-                                {(category.attributes || []).map(attr => (
+                                {filterableAttributes.map(attr => (
                                     <div key={attr.id}>
                                         <label className="block text-sm font-medium mb-1">{attr.name}</label>
                                         {attr.data_type === 'select' ? (
-                                            <select
-                                                className="w-full border rounded-md p-2 text-sm bg-background"
-                                                value={localFilters.attributes[attr.id] ?? ''}
-                                                onChange={(e) => handleAttributeChange(attr.id, e.target.value)}
-                                            >
-                                                <option value="">Any</option>
-                                                {getSelectOptions(attr.options).map(opt => (
-                                                    <option key={opt} value={opt}>{opt}</option>
-                                                ))}
-                                            </select>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <select
+                                                    className="w-full border rounded-md p-2 text-sm bg-background"
+                                                    value={(localFilters.attributes[attr.id]?.op) || 'eq'}
+                                                    onChange={(e) => handleAttributeConfigChange(attr.id, 'op', e.target.value)}
+                                                >
+                                                    <option value="eq">=</option>
+                                                    <option value="ne">!=</option>
+                                                </select>
+                                                <select
+                                                    className="w-full border rounded-md p-2 text-sm bg-background"
+                                                    value={(localFilters.attributes[attr.id]?.value) ?? ''}
+                                                    onChange={(e) => handleAttributeConfigChange(attr.id, 'value', e.target.value)}
+                                                >
+                                                    <option value="">Any</option>
+                                                    {getSelectOptions(attr.options).map(opt => (
+                                                        <option key={opt} value={opt}>{opt}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
                                         ) : attr.data_type === 'boolean' ? (
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <select
+                                                    className="w-full border rounded-md p-2 text-sm bg-background"
+                                                    value={(localFilters.attributes[attr.id]?.op) || 'eq'}
+                                                    onChange={(e) => handleAttributeConfigChange(attr.id, 'op', e.target.value)}
+                                                >
+                                                    <option value="eq">=</option>
+                                                    <option value="ne">!=</option>
+                                                </select>
+                                                <select
+                                                    className="w-full border rounded-md p-2 text-sm bg-background"
+                                                    value={(localFilters.attributes[attr.id]?.value) ?? ''}
+                                                    onChange={(e) => handleAttributeConfigChange(attr.id, 'value', e.target.value)}
+                                                >
+                                                    <option value="">Any</option>
+                                                    <option value="true">Yes</option>
+                                                    <option value="false">No</option>
+                                                </select>
+                                            </div>
+                                        ) : attr.data_type === 'number' ? (
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <input
+                                                    type="number"
+                                                    className="w-full border rounded-md p-2 text-sm bg-background"
+                                                    value={(localFilters.attributes[attr.id]?.min) ?? ''}
+                                                    onChange={(e) => handleAttributeConfigChange(attr.id, 'min', e.target.value)}
+                                                    placeholder="Min"
+                                                />
+                                                <input
+                                                    type="number"
+                                                    className="w-full border rounded-md p-2 text-sm bg-background"
+                                                    value={(localFilters.attributes[attr.id]?.max) ?? ''}
+                                                    onChange={(e) => handleAttributeConfigChange(attr.id, 'max', e.target.value)}
+                                                    placeholder="Max"
+                                                />
+                                            </div>
+                                        ) : attr.data_type === 'text' ? (
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <select
+                                                    className="w-full border rounded-md p-2 text-sm bg-background"
+                                                    value={(localFilters.attributes[attr.id]?.op) || 'contains'}
+                                                    onChange={(e) => handleAttributeConfigChange(attr.id, 'op', e.target.value)}
+                                                >
+                                                    <option value="contains">contains</option>
+                                                    <option value="not_contains">not contains</option>
+                                                    <option value="eq">=</option>
+                                                    <option value="ne">!=</option>
+                                                </select>
+                                                <input
+                                                    type="text"
+                                                    className="w-full border rounded-md p-2 text-sm bg-background"
+                                                    value={(localFilters.attributes[attr.id]?.value) ?? ''}
+                                                    onChange={(e) => handleAttributeConfigChange(attr.id, 'value', e.target.value)}
+                                                    placeholder={`Filter by ${attr.name}`}
+                                                />
+                                            </div>
+                                        ) : attr.data_type === 'date' ? (
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <select
+                                                    className="w-full border rounded-md p-2 text-sm bg-background"
+                                                    value={(localFilters.attributes[attr.id]?.op) || 'eq'}
+                                                    onChange={(e) => handleAttributeConfigChange(attr.id, 'op', e.target.value)}
+                                                >
+                                                    <option value="eq">=</option>
+                                                    <option value="ne">!=</option>
+                                                    <option value="gte">&gt;=</option>
+                                                    <option value="lte">&lt;=</option>
+                                                </select>
+                                                <input
+                                                    type="date"
+                                                    className="w-full border rounded-md p-2 text-sm bg-background"
+                                                    value={(localFilters.attributes[attr.id]?.value) ?? ''}
+                                                    onChange={(e) => handleAttributeConfigChange(attr.id, 'value', e.target.value)}
+                                                />
+                                            </div>
+                                        ) : (
                                             <select
                                                 className="w-full border rounded-md p-2 text-sm bg-background"
                                                 value={localFilters.attributes[attr.id] ?? ''}
@@ -155,17 +282,14 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                 <option value="true">Yes</option>
                                                 <option value="false">No</option>
                                             </select>
-                                        ) : (
-                                            <input
-                                                type={attr.data_type === 'number' ? 'number' : attr.data_type === 'date' ? 'date' : 'text'}
-                                                className="w-full border rounded-md p-2 text-sm bg-background"
-                                                value={localFilters.attributes[attr.id] ?? ''}
-                                                onChange={(e) => handleAttributeChange(attr.id, e.target.value)}
-                                                placeholder={`Filter by ${attr.name}`}
-                                            />
                                         )}
                                     </div>
                                 ))}
+                                {filterableAttributes.length === 0 && (
+                                    <p className="text-xs text-muted-foreground">
+                                        No editable attributes available for filtering.
+                                    </p>
+                                )}
                             </div>
                         </div>
 
@@ -184,9 +308,28 @@ const CategoryItemsTable = ({ category, onBack }) => {
         try {
             const effectivePage = overridePage ?? page;
             const metadataFilters = {};
-            Object.entries(filters.attributes || {}).forEach(([attrId, value]) => {
-                if (value !== '' && value !== null && value !== undefined) {
-                    metadataFilters[attrId] = value;
+            Object.entries(filters.attributes || {}).forEach(([attrId, config]) => {
+                if (config === null || config === undefined) return;
+
+                if (typeof config === 'object' && !Array.isArray(config)) {
+                    const normalized = {};
+                    if (config.op !== undefined && config.op !== null && config.op !== '') {
+                        normalized.op = config.op;
+                    }
+                    if (config.value !== undefined && config.value !== null && config.value !== '') {
+                        normalized.value = config.value;
+                    }
+                    if (config.min !== undefined && config.min !== null && config.min !== '') {
+                        normalized.min = config.min;
+                    }
+                    if (config.max !== undefined && config.max !== null && config.max !== '') {
+                        normalized.max = config.max;
+                    }
+                    if (Object.keys(normalized).length > 0) {
+                        metadataFilters[attrId] = normalized;
+                    }
+                } else if (config !== '' && config !== null && config !== undefined) {
+                    metadataFilters[attrId] = config;
                 }
             });
 
@@ -341,15 +484,22 @@ const CategoryItemsTable = ({ category, onBack }) => {
     };
 
     const attributes = category.attributes || [];
-    const titleAttr = pluginView?.gallery?.titleField
-        ? attributes.find((attr) => attr.plugin_field_key === pluginView.gallery.titleField)
-        : null;
-    const subtitleAttr = pluginView?.gallery?.subtitleField
-        ? attributes.find((attr) => attr.plugin_field_key === pluginView.gallery.subtitleField)
-        : null;
-    const pageCountAttr = pluginView?.gallery?.pageCountField
-        ? attributes.find((attr) => attr.plugin_field_key === pluginView.gallery.pageCountField)
-        : null;
+    const findAttr = (pluginKey, fallbackName) => {
+        if (!pluginKey && !fallbackName) return null;
+        const byPluginKey = pluginKey
+            ? attributes.find((attr) => attr.plugin_field_key === pluginKey)
+            : null;
+        if (byPluginKey) return byPluginKey;
+        if (!fallbackName) return null;
+        const normalizedFallback = fallbackName.trim().toLowerCase();
+        return attributes.find((attr) => String(attr.name || '').trim().toLowerCase() === normalizedFallback) || null;
+    };
+
+    const titleAttr = findAttr(pluginView?.gallery?.titleField, 'Title');
+    const subtitleAttr = findAttr(pluginView?.gallery?.subtitleField, 'Series');
+    const pageCountAttr = findAttr(pluginView?.gallery?.pageCountField, 'Page Count');
+    const volumeAttr = findAttr(pluginView?.gallery?.volumeField, 'Volume');
+    const issueNumberAttr = findAttr(pluginView?.gallery?.issueNumberField, 'Issue Number');
 
     const fixedColTemplate = '40px 40px 2fr 120px 80px';
     const attrCols = attributes.map(() => 'minmax(100px, 1fr)').join(' ');
@@ -378,6 +528,90 @@ const CategoryItemsTable = ({ category, onBack }) => {
     };
 
     const getSelectedObjects = () => items.filter(i => selectedItems.has(i.id));
+    const singleSelectedItem = selectedItems.size === 1
+        ? items.find((i) => i.id === Array.from(selectedItems)[0]) || null
+        : null;
+    const moveTargetItem = singleSelectedItem
+        ? { ...singleSelectedItem, id: singleSelectedItem.item_id }
+        : null;
+    const selectedItemsForBatchEdit = getSelectedObjects().map((item) => ({
+        ...item,
+        item_id: item.item_id || item.id,
+    }));
+
+    const handleDownload = async () => {
+        const selectedFiles = getSelectedObjects().filter((item) => item.item_type === 'file');
+        for (const file of selectedFiles) {
+            try {
+                const url = await driveService.getDownloadUrl(file.account_id, file.item_id);
+                window.open(url, '_blank');
+            } catch (error) {
+                console.error(`Failed to download ${file.name}`, error);
+                showToast(`Failed to download ${file.name}`, 'error');
+            }
+        }
+    };
+
+    const executeDelete = async () => {
+        const selected = getSelectedObjects();
+        if (selected.length === 0) return;
+
+        setActionLoading(true);
+        try {
+            const byAccount = selected.reduce((acc, item) => {
+                const key = item.account_id;
+                if (!acc[key]) acc[key] = [];
+                acc[key].push(item.item_id);
+                return acc;
+            }, {});
+
+            await Promise.all(
+                Object.entries(byAccount).map(([accountId, itemIds]) =>
+                    driveService.batchDeleteItems(accountId, itemIds)
+                )
+            );
+
+            showToast('Selected items deleted successfully.', 'success');
+            setDeleteModalOpen(false);
+            setSelectedItems(new Set());
+            fetchItems();
+        } catch (error) {
+            showToast(error?.response?.data?.detail || 'Failed to delete selected items', 'error');
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const openRenameModal = () => {
+        if (!singleSelectedItem) return;
+        setRenameValue(singleSelectedItem.name || '');
+        setRenameModalOpen(true);
+    };
+
+    const confirmRenameItem = async () => {
+        if (!singleSelectedItem) return;
+        const nextName = renameValue.trim();
+        if (!nextName) {
+            showToast('Name cannot be empty.', 'error');
+            return;
+        }
+        if (nextName === singleSelectedItem.name) {
+            setRenameModalOpen(false);
+            return;
+        }
+
+        setRenameSaving(true);
+        try {
+            await driveService.updateItem(singleSelectedItem.account_id, singleSelectedItem.item_id, { name: nextName });
+            showToast('Item renamed successfully.', 'success');
+            setRenameModalOpen(false);
+            await fetchItems();
+        } catch (error) {
+            showToast(error?.response?.data?.detail || 'Failed to rename item', 'error');
+        } finally {
+            setRenameSaving(false);
+        }
+    };
 
     const getAccountName = (accountId) => {
         const acc = accounts.find(a => a.id === accountId);
@@ -465,18 +699,84 @@ const CategoryItemsTable = ({ category, onBack }) => {
                     <span className="font-medium mr-2 whitespace-nowrap w-24 text-right tabular-nums">{selectedItems.size} selected</span>
                     <div className="h-4 w-px bg-border mx-2" />
                     <button
-                        onClick={() => setBatchModalOpen(true)}
+                        onClick={handleDownload}
                         disabled={selectedItems.size === 0}
-                        className="flex items-center gap-2 px-3 py-1.5 hover:bg-background rounded-md disabled:opacity-50"
+                        className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Download"
                     >
-                        <Database size={16} /> Edit Metadata
+                        <Download size={16} /> <span className="hidden sm:inline">Download</span>
                     </button>
                     <button
-                        onClick={() => setRemoveModalOpen(true)}
-                        disabled={selectedItems.size === 0}
-                        className="flex items-center gap-2 px-3 py-1.5 hover:bg-red-50 text-red-600 rounded-md disabled:opacity-50"
+                        onClick={() => setMoveModalOpen(true)}
+                        disabled={selectedItems.size !== 1}
+                        className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Move"
                     >
-                        <Trash2 size={16} /> Remove Metadata
+                        <ArrowRightLeft size={16} /> <span className="hidden sm:inline">Move</span>
+                    </button>
+                    <div
+                        className={`relative ${selectedItems.size === 0 ? 'pointer-events-none opacity-50' : ''}`}
+                        ref={metadataMenuRef}
+                        onMouseEnter={() => selectedItems.size > 0 && setMetadataMenuOpen(true)}
+                        onMouseLeave={() => setMetadataMenuOpen(false)}
+                    >
+                        <button
+                            onClick={() => setMetadataMenuOpen(!metadataMenuOpen)}
+                            disabled={selectedItems.size === 0}
+                            className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:cursor-not-allowed"
+                            title="Metadata Actions"
+                        >
+                            <Database size={16} />
+                            <span className="hidden sm:inline">Metadata</span>
+                            <ChevronDown size={14} className={`transition-transform ${metadataMenuOpen ? 'rotate-180' : ''}`} />
+                        </button>
+                        {metadataMenuOpen && (
+                            <div className="absolute top-full left-0 w-52 pt-1 z-50">
+                                <div className="bg-popover border rounded-md shadow-md py-1">
+                                    <button
+                                        onClick={() => {
+                                            if (selectedItems.size === 1) {
+                                                setMetadataModalOpen(true);
+                                            } else {
+                                                setBatchModalOpen(true);
+                                            }
+                                            setMetadataMenuOpen(false);
+                                        }}
+                                        className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2"
+                                    >
+                                        <Database size={14} /> Edit Metadata
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            openRenameModal();
+                                            setMetadataMenuOpen(false);
+                                        }}
+                                        disabled={selectedItems.size !== 1}
+                                        className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
+                                    >
+                                        <Pencil size={14} /> Rename
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setRemoveModalOpen(true);
+                                            setMetadataMenuOpen(false);
+                                        }}
+                                        className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 text-destructive hover:text-destructive"
+                                    >
+                                        <XCircle size={14} /> Remove Metadata
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    <div className="h-4 w-px bg-border mx-1" />
+                    <button
+                        onClick={() => setDeleteModalOpen(true)}
+                        disabled={selectedItems.size === 0}
+                        className="p-2 hover:bg-destructive/10 text-destructive rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Delete"
+                    >
+                        <Trash2 size={16} /> <span className="hidden sm:inline">Delete</span>
                     </button>
                 </div>
 
@@ -517,8 +817,18 @@ const CategoryItemsTable = ({ category, onBack }) => {
                             <div className="grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-4">
                                 {items.map((item, index) => {
                                     const isSelected = selectedItems.has(item.id);
-                                    const title = titleAttr ? item.metadata?.values?.[titleAttr.id] || item.name : item.name;
-                                    const subtitle = subtitleAttr ? item.metadata?.values?.[subtitleAttr.id] : null;
+                                    const titleValue = titleAttr ? item.metadata?.values?.[titleAttr.id] : null;
+                                    const seriesValue = subtitleAttr ? item.metadata?.values?.[subtitleAttr.id] : null;
+                                    const baseLabel = (seriesValue && String(seriesValue).trim())
+                                        || (titleValue && String(titleValue).trim())
+                                        || item.name;
+                                    const volumeValue = volumeAttr ? item.metadata?.values?.[volumeAttr.id] : null;
+                                    const issueValue = issueNumberAttr ? item.metadata?.values?.[issueNumberAttr.id] : null;
+                                    const hasVolume = volumeValue !== null && volumeValue !== undefined && String(volumeValue).trim() !== '';
+                                    const hasIssue = issueValue !== null && issueValue !== undefined && String(issueValue).trim() !== '';
+                                    const titleSuffix = `${hasVolume ? ` - Vol. ${String(volumeValue).trim()}` : ''}${hasIssue ? ` #${String(issueValue).trim()}` : ''}`;
+                                    const title = `${baseLabel}${titleSuffix}`;
+                                    const subtitle = (titleValue && String(titleValue).trim()) || null;
                                     const pageCount = pageCountAttr ? item.metadata?.values?.[pageCountAttr.id] : null;
                                     return (
                                         <button
@@ -664,7 +974,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
             <BatchMetadataModal
                 isOpen={batchModalOpen}
                 onClose={() => setBatchModalOpen(false)}
-                selectedItems={getSelectedObjects()}
+                selectedItems={selectedItemsForBatchEdit}
                 showToast={showToast}
                 onSuccess={() => {
                     fetchItems();
@@ -672,16 +982,105 @@ const CategoryItemsTable = ({ category, onBack }) => {
                 }}
             />
 
+            <MetadataModal
+                isOpen={metadataModalOpen}
+                onClose={() => setMetadataModalOpen(false)}
+                item={singleSelectedItem}
+                accountId={singleSelectedItem?.account_id}
+                onSuccess={() => {
+                    fetchItems();
+                }}
+            />
+
             <RemoveMetadataModal
                 isOpen={removeModalOpen}
                 onClose={() => setRemoveModalOpen(false)}
-                selectedItems={getSelectedObjects()}
+                selectedItems={selectedItemsForBatchEdit}
                 showToast={showToast}
                 onSuccess={() => {
                     fetchItems();
                     setSelectedItems(new Set());
                 }}
             />
+
+            <MoveModal
+                isOpen={moveModalOpen}
+                onClose={() => setMoveModalOpen(false)}
+                item={moveTargetItem}
+                sourceAccountId={singleSelectedItem?.account_id}
+                onSuccess={() => {
+                    setMoveModalOpen(false);
+                    setSelectedItems(new Set());
+                    fetchItems();
+                }}
+            />
+
+            <Modal
+                isOpen={deleteModalOpen}
+                onClose={() => !actionLoading && setDeleteModalOpen(false)}
+                title={`Delete ${selectedItems.size} item(s)?`}
+            >
+                <div className="space-y-4">
+                    <p>Are you sure you want to delete the selected items? This action cannot be undone.</p>
+                    <div className="flex justify-end gap-2">
+                        <button
+                            onClick={() => setDeleteModalOpen(false)}
+                            disabled={actionLoading}
+                            className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={executeDelete}
+                            disabled={actionLoading}
+                            className="px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {actionLoading && <Loader2 className="animate-spin" size={14} />}
+                            Delete
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+
+            <Modal
+                isOpen={renameModalOpen}
+                onClose={() => !renameSaving && setRenameModalOpen(false)}
+                title="Rename Item"
+                maxWidthClass="max-w-md"
+            >
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium mb-1">New name</label>
+                        <input
+                            type="text"
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            disabled={renameSaving}
+                            className="w-full border rounded-md p-2 bg-background"
+                            autoFocus
+                        />
+                    </div>
+                    <div className="flex justify-end gap-2 pt-2">
+                        <button
+                            type="button"
+                            onClick={() => setRenameModalOpen(false)}
+                            disabled={renameSaving}
+                            className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="button"
+                            onClick={confirmRenameItem}
+                            disabled={renameSaving}
+                            className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {renameSaving && <Loader2 className="animate-spin" size={14} />}
+                            Rename
+                        </button>
+                    </div>
+                </div>
+            </Modal>
         </>
     );
 };

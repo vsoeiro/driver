@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 import logging
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -64,6 +65,10 @@ class ObservabilityService:
         throughput_last_hour = 0
         failures_last_hour = 0
         finalized_last_hour = 0
+        metrics_total_24h = 0
+        metrics_success_24h = 0
+        metrics_failed_24h = 0
+        metrics_skipped_24h = 0
 
         for job in recent_finalized:
             if job.started_at and job.completed_at:
@@ -77,6 +82,11 @@ class ObservabilityService:
                 finalized_last_hour += 1
                 if job.status in {"FAILED", "DEAD_LETTER"}:
                     failures_last_hour += 1
+            metric_summary = self._extract_job_metric_summary(job)
+            metrics_total_24h += metric_summary["total"]
+            metrics_success_24h += metric_summary["success"]
+            metrics_failed_24h += metric_summary["failed"]
+            metrics_skipped_24h += metric_summary["skipped"]
 
         throughput_24h = len(recent_finalized)
         success_rate_24h = (success_count / throughput_24h) if throughput_24h > 0 else 1.0
@@ -159,12 +169,47 @@ class ObservabilityService:
             avg_duration_seconds_last_24h=round(avg_duration, 2) if avg_duration is not None else None,
             p95_duration_seconds_last_24h=round(p95_duration, 2) if p95_duration is not None else None,
             dead_letter_jobs_24h=dead_letter_24h,
+            metrics_total_24h=metrics_total_24h,
+            metrics_success_24h=metrics_success_24h,
+            metrics_failed_24h=metrics_failed_24h,
+            metrics_skipped_24h=metrics_skipped_24h,
             recent_alerts=alerts,
             integration_health=integration_health,
             dead_letter_jobs=dead_letter_jobs,
             ai_provider=ai_config.provider,
             ai_model=ai_config.model,
         )
+
+    @staticmethod
+    def _pick_number(source: dict[str, Any] | None, keys: list[str]) -> int:
+        if not isinstance(source, dict):
+            return 0
+        for key in keys:
+            value = source.get(key)
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, (int, float)):
+                return int(value)
+        return 0
+
+    def _extract_job_metric_summary(self, job: Job) -> dict[str, int]:
+        metrics = job.metrics if isinstance(job.metrics, dict) else {}
+        result = job.result if isinstance(job.result, dict) else {}
+        return {
+            "total": self._pick_number(metrics, ["total"]) or self._pick_number(result, ["total"]),
+            "success": (
+                self._pick_number(metrics, ["success", "mapped", "updated", "changed"])
+                or self._pick_number(result, ["success", "mapped", "updated", "changed"])
+            ),
+            "failed": (
+                self._pick_number(metrics, ["failed", "errors"])
+                or self._pick_number(result, ["failed", "errors"])
+            ),
+            "skipped": (
+                self._pick_number(metrics, ["skipped", "unchanged"])
+                or self._pick_number(result, ["skipped", "unchanged"])
+            ),
+        }
 
     async def _build_alerts(
         self,

@@ -3,16 +3,19 @@ import { itemsService } from '../services/items';
 import { metadataService } from '../services/metadata';
 import { accountsService } from '../services/accounts';
 import { jobsService } from '../services/jobs';
+import { driveService } from '../services/drive';
 import { useToast } from '../contexts/ToastContext';
 import { getSelectOptions } from '../utils/metadata';
 import {
     File, Folder, FolderOpen, Search, Filter, Database, CheckSquare, Square,
-    Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, X, Trash2, ChevronDown, BookOpen
+    Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, X, Trash2, ChevronDown, BookOpen, Pencil
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import ProviderIcon from '../components/ProviderIcon';
+import MetadataModal from '../components/MetadataModal';
 
 const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'cbw', 'pdf', 'epub', 'cbr', 'rar', 'cb7', '7z', 'cbt', 'tar']);
+const READ_ONLY_COMIC_FIELDS = new Set(['cover_item_id', 'cover_filename', 'cover_account_id', 'page_count', 'file_format']);
 
 // Filter Component
 const FilterBar = ({ onFilter, filters, accounts, categories }) => {
@@ -314,11 +317,17 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                             <div className="space-y-3 border p-3 rounded-md bg-muted/20">
                                 {currentCategory.attributes.map(attr => (
                                     <div key={attr.id}>
+                                        {(() => {
+                                            const isReadOnlyComputed = currentCategory?.plugin_key === 'comicrack_core'
+                                                && READ_ONLY_COMIC_FIELDS.has(attr.plugin_field_key);
+                                            return (
+                                                <>
                                         <label className="block text-xs font-medium mb-1 uppercase text-muted-foreground">{attr.name} {attr.is_required && '*'}</label>
                                         {attr.data_type === 'select' ? (
                                             <select
                                                 className="w-full border rounded-md p-2 text-sm bg-background"
                                                 value={attributeValues[attr.id] ?? ''}
+                                                disabled={isReadOnlyComputed}
                                                 onChange={e => setAttributeValues(prev => ({ ...prev, [attr.id]: e.target.value }))}
                                             >
                                                 <option value="">Select...</option>
@@ -330,6 +339,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                                             <select
                                                 className="w-full border rounded-md p-2 text-sm bg-background"
                                                 value={attributeValues[attr.id] ?? ''}
+                                                disabled={isReadOnlyComputed}
                                                 onChange={e => setAttributeValues(prev => ({ ...prev, [attr.id]: e.target.value === 'true' }))}
                                             >
                                                 <option value="">Select...</option>
@@ -341,9 +351,18 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                                                 type={attr.data_type === 'number' ? 'number' : attr.data_type === 'date' ? 'date' : 'text'}
                                                 className="w-full border rounded-md p-2 text-sm bg-background"
                                                 value={attributeValues[attr.id] ?? ''}
+                                                disabled={isReadOnlyComputed}
                                                 onChange={e => setAttributeValues(prev => ({ ...prev, [attr.id]: e.target.value }))}
                                             />
                                         )}
+                                        {isReadOnlyComputed && (
+                                            <div className="mt-1 text-xs text-muted-foreground">
+                                                Mapped field (read-only)
+                                            </div>
+                                        )}
+                                                </>
+                                            );
+                                        })()}
                                     </div>
                                 ))}
                             </div>
@@ -517,9 +536,16 @@ export default function AllFiles() {
     const [metaCategories, setMetaCategories] = useState([]);
 
     const [batchModalOpen, setBatchModalOpen] = useState(false);
+    const [metadataModalOpen, setMetadataModalOpen] = useState(false);
     const [removeModalOpen, setRemoveModalOpen] = useState(false);
     const [metadataMenuOpen, setMetadataMenuOpen] = useState(false);
     const [actionLoading, setActionLoading] = useState(false);
+    const [mapLibraryLoading, setMapLibraryLoading] = useState(false);
+    const [mapLibraryConfirmOpen, setMapLibraryConfirmOpen] = useState(false);
+    const [mapLibraryChunkSize, setMapLibraryChunkSize] = useState(1000);
+    const [renameModalOpen, setRenameModalOpen] = useState(false);
+    const [renameValue, setRenameValue] = useState('');
+    const [renameSaving, setRenameSaving] = useState(false);
     const metadataMenuRef = useRef(null);
 
     const { showToast } = useToast();
@@ -626,6 +652,12 @@ export default function AllFiles() {
         return items.filter(i => selectedItems.has(i.id));
     };
 
+    const singleSelectedItem = useMemo(() => {
+        if (selectedItems.size !== 1) return null;
+        const selectedId = Array.from(selectedItems)[0];
+        return items.find((i) => i.id === selectedId) || null;
+    }, [selectedItems, items]);
+
     const canMapComics = useMemo(() => {
         if (selectedItems.size === 0) return false;
         const selected = items.filter((item) => selectedItems.has(item.id));
@@ -686,6 +718,71 @@ export default function AllFiles() {
             showToast(`Failed to create comic mapping job: ${error.message}`, 'error');
         } finally {
             setActionLoading(false);
+        }
+    };
+
+    const openRenameModal = () => {
+        if (!singleSelectedItem) return;
+        setRenameValue(singleSelectedItem.name || '');
+        setRenameModalOpen(true);
+    };
+
+    const confirmRenameItem = async () => {
+        if (!singleSelectedItem) return;
+        const nextName = renameValue.trim();
+        if (!nextName) {
+            showToast('Name cannot be empty.', 'error');
+            return;
+        }
+        if (nextName === singleSelectedItem.name) {
+            setRenameModalOpen(false);
+            return;
+        }
+
+        setRenameSaving(true);
+        try {
+            await driveService.updateItem(singleSelectedItem.account_id, singleSelectedItem.item_id, { name: nextName });
+            showToast('Item renamed successfully.', 'success');
+            setRenameModalOpen(false);
+            setMetadataMenuOpen(false);
+            await fetchItems();
+        } catch (error) {
+            showToast(`Failed to rename item: ${error.message}`, 'error');
+        } finally {
+            setRenameSaving(false);
+        }
+    };
+
+    const executeMapLibraryComics = async () => {
+        setMapLibraryConfirmOpen(true);
+    };
+
+    const confirmMapLibraryComics = async () => {
+        const selectedAccountId = filters.account_id ? String(filters.account_id) : null;
+        const accountScope = selectedAccountId ? [selectedAccountId] : null;
+        const parsedChunkSize = Number(mapLibraryChunkSize);
+        const safeChunkSize = Number.isFinite(parsedChunkSize)
+            ? Math.max(1, Math.min(5000, Math.floor(parsedChunkSize)))
+            : 1000;
+
+        setMapLibraryLoading(true);
+        try {
+            const summary = await jobsService.createExtractLibraryComicAssetsJob(accountScope, safeChunkSize);
+            if (!summary?.total_jobs) {
+                showToast('No .cbr/.cbz files found in current scope.', 'success');
+                return;
+            }
+            showToast(
+                selectedAccountId
+                    ? `Created ${summary.total_jobs} comic mapping jobs (${summary.total_items} files, chunk=${summary.chunk_size}) for selected account.`
+                    : `Created ${summary.total_jobs} comic mapping jobs (${summary.total_items} files, chunk=${summary.chunk_size}) for all accounts.`,
+                'success',
+            );
+        } catch (error) {
+            showToast(`Failed to create library comic mapping job: ${error.message}`, 'error');
+        } finally {
+            setMapLibraryLoading(false);
+            setMapLibraryConfirmOpen(false);
         }
     };
 
@@ -754,6 +851,15 @@ export default function AllFiles() {
                         />
                     </div>
                     <FilterBar onFilter={setFilters} filters={filters} accounts={accounts} categories={metaCategories} />
+                    <button
+                        onClick={executeMapLibraryComics}
+                        disabled={mapLibraryLoading}
+                        className="flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium hover:bg-accent disabled:opacity-50"
+                        title="Map all synced .cbr/.cbz items as comics"
+                    >
+                        {mapLibraryLoading ? <Loader2 size={16} className="animate-spin" /> : <BookOpen size={16} />}
+                        Map All Comics
+                    </button>
                 </div>
             </div>
 
@@ -782,13 +888,24 @@ export default function AllFiles() {
                                 <div className="bg-popover border rounded-md shadow-md py-1">
                                     <button
                                         onClick={() => {
-                                            setBatchModalOpen(true);
+                                            if (selectedItems.size === 1) {
+                                                setMetadataModalOpen(true);
+                                            } else {
+                                                setBatchModalOpen(true);
+                                            }
                                             setMetadataMenuOpen(false);
                                         }}
                                         disabled={selectedItems.size === 0}
                                         className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
                                     >
                                         <Database size={14} /> Edit Metadata
+                                    </button>
+                                    <button
+                                        onClick={openRenameModal}
+                                        disabled={selectedItems.size !== 1 || actionLoading}
+                                        className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
+                                    >
+                                        <Pencil size={14} /> Rename
                                     </button>
                                     <button
                                         onClick={() => {
@@ -958,6 +1075,16 @@ export default function AllFiles() {
                 }}
             />
 
+            <MetadataModal
+                isOpen={metadataModalOpen}
+                onClose={() => setMetadataModalOpen(false)}
+                item={singleSelectedItem}
+                accountId={singleSelectedItem?.account_id}
+                onSuccess={() => {
+                    fetchItems();
+                }}
+            />
+
             <RemoveMetadataModal
                 isOpen={removeModalOpen}
                 onClose={() => setRemoveModalOpen(false)}
@@ -968,6 +1095,94 @@ export default function AllFiles() {
                     setSelectedItems(new Set());
                 }}
             />
+
+            <Modal
+                isOpen={renameModalOpen}
+                onClose={() => !renameSaving && setRenameModalOpen(false)}
+                title="Rename Item"
+                maxWidthClass="max-w-md"
+            >
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium mb-1">New name</label>
+                        <input
+                            type="text"
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            disabled={renameSaving}
+                            className="w-full border rounded-md p-2 text-sm bg-background"
+                            autoFocus
+                        />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setRenameModalOpen(false)}
+                            disabled={renameSaving}
+                            className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="button"
+                            onClick={confirmRenameItem}
+                            disabled={renameSaving}
+                            className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {renameSaving && <Loader2 className="animate-spin" size={14} />}
+                            Rename
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+
+            <Modal
+                isOpen={mapLibraryConfirmOpen}
+                onClose={() => !mapLibraryLoading && setMapLibraryConfirmOpen(false)}
+                title="Map All Comics"
+                maxWidthClass="max-w-lg"
+            >
+                <p className="text-sm text-muted-foreground mb-4">
+                    {filters.account_id
+                        ? 'Create a job to map all synced .cbr/.cbz files for the selected account filter?'
+                        : 'Create a job to map all synced .cbr/.cbz files across all accounts?'}
+                </p>
+                <div className="mb-4">
+                    <label className="block text-sm font-medium mb-1">Chunk size per job</label>
+                    <input
+                        type="number"
+                        min={1}
+                        max={5000}
+                        step={1}
+                        value={mapLibraryChunkSize}
+                        onChange={(e) => setMapLibraryChunkSize(e.target.value)}
+                        disabled={mapLibraryLoading}
+                        className="w-full border rounded-md p-2 text-sm bg-background"
+                    />
+                    <p className="mt-1 text-xs text-muted-foreground">
+                        Lower values create more jobs with fewer files each.
+                    </p>
+                </div>
+                <div className="flex justify-end gap-2">
+                    <button
+                        type="button"
+                        onClick={() => setMapLibraryConfirmOpen(false)}
+                        disabled={mapLibraryLoading}
+                        className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        onClick={confirmMapLibraryComics}
+                        disabled={mapLibraryLoading}
+                        className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
+                    >
+                        {mapLibraryLoading && <Loader2 className="animate-spin" size={14} />}
+                        Confirm
+                    </button>
+                </div>
+            </Modal>
         </div>
     );
 }

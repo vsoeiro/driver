@@ -12,14 +12,26 @@ from backend.core.config import get_settings
 
 settings = get_settings()
 
+engine_kwargs = {
+    "echo": settings.debug,
+}
+
+if "sqlite" in settings.database_url:
+    engine_kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
+else:
+    engine_kwargs.update(
+        {
+            "pool_pre_ping": True,
+            "pool_size": settings.db_pool_size,
+            "max_overflow": settings.db_max_overflow,
+            "pool_timeout": settings.db_pool_timeout_seconds,
+            "pool_recycle": settings.db_pool_recycle_seconds,
+        }
+    )
+
 engine = create_async_engine(
     settings.database_url,
-    echo=settings.debug,
-    pool_pre_ping=True,
-    # Increase pool size to handle background worker + API requests
-    pool_size=20,
-    max_overflow=10,
-    connect_args={"check_same_thread": False, "timeout": 30} if "sqlite" in settings.database_url else {},
+    **engine_kwargs,
 )
 
 if "sqlite" in settings.database_url:

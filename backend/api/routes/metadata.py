@@ -2,6 +2,7 @@
 
 import uuid
 from uuid import UUID
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import OperationalError
@@ -21,6 +22,8 @@ from backend.db.models import (
 )
 from backend.schemas.metadata import (
     ItemMetadataCreate,
+    ItemMetadataAIFieldActionRequest,
+    ItemMetadataAISuggestionsUpdate,
     MetadataAttributeCreate,
     MetadataAttributeUpdate,
     MetadataCategoryCreate,
@@ -41,6 +44,73 @@ from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
 
 router = APIRouter(prefix="/metadata", tags=["Metadata"])
+
+
+def _to_json_compatible(value):
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(k): _to_json_compatible(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_to_json_compatible(v) for v in value]
+    return value
+
+
+def _normalize_ai_suggestions_payload(raw: dict | None) -> dict[str, dict]:
+    if not raw:
+        return {}
+    normalized: dict[str, dict] = {}
+    for attr_id, suggestion in raw.items():
+        if suggestion is None:
+            continue
+        if hasattr(suggestion, "model_dump"):
+            suggestion = suggestion.model_dump(mode="json")
+        if isinstance(suggestion, dict):
+            value = _to_json_compatible(suggestion.get("value"))
+            confidence = _to_json_compatible(suggestion.get("confidence"))
+            source = suggestion.get("source") or "ai"
+            model = _to_json_compatible(suggestion.get("model"))
+            notes = _to_json_compatible(suggestion.get("notes"))
+            generated_at = _to_json_compatible(suggestion.get("generated_at"))
+        else:
+            value = _to_json_compatible(suggestion)
+            confidence = None
+            source = "ai"
+            model = None
+            notes = None
+            generated_at = None
+        if generated_at is None:
+            generated_at = datetime.now(UTC).isoformat()
+        normalized[str(attr_id)] = {
+            "value": value,
+            "confidence": confidence,
+            "source": source,
+            "model": model,
+            "notes": notes,
+            "generated_at": generated_at,
+        }
+    return normalized
+
+
+async def _validate_rule_configuration(session: AsyncSession, payload: dict) -> None:
+    if payload.get("apply_rename") and not (payload.get("rename_template") or "").strip():
+        raise HTTPException(status_code=400, detail="rename_template is required when apply_rename is true")
+
+    if payload.get("apply_move"):
+        destination_folder_id = (payload.get("destination_folder_id") or "").strip()
+        if not destination_folder_id:
+            raise HTTPException(status_code=400, detail="destination_folder_id is required when apply_move is true")
+
+    if not payload.get("apply_metadata", True) and not payload.get("apply_rename") and not payload.get("apply_move"):
+        raise HTTPException(status_code=400, detail="At least one action must be enabled")
+
+    destination_account_id = payload.get("destination_account_id")
+    if destination_account_id:
+        linked = await session.get(LinkedAccount, destination_account_id)
+        if not linked:
+            raise HTTPException(status_code=404, detail="Destination account not found")
 
 
 # --- Categories ---
@@ -363,7 +433,123 @@ async def upsert_item_metadata(
     current = refreshed.scalar_one_or_none()
     if not current:
         raise HTTPException(status_code=500, detail="Failed to save metadata")
+    current.ai_suggestions = _normalize_ai_suggestions_payload(metadata.ai_suggestions)
+    await session.commit()
     return current
+
+
+@router.patch("/items/{account_id}/{item_id}/ai-suggestions", response_model=ItemMetadataSchema)
+async def update_item_ai_suggestions(
+    account_id: UUID,
+    item_id: str,
+    payload: ItemMetadataAISuggestionsUpdate,
+    session: AsyncSession = Depends(get_session),
+):
+    stmt = select(ItemMetadata).where(
+        ItemMetadata.account_id == account_id,
+        ItemMetadata.item_id == item_id,
+    )
+    result = await session.execute(stmt)
+    metadata = result.scalar_one_or_none()
+    if not metadata:
+        metadata = ItemMetadata(
+            account_id=account_id,
+            item_id=item_id,
+            category_id=payload.category_id,
+            values={},
+            ai_suggestions={},
+            version=1,
+        )
+        session.add(metadata)
+        await session.flush()
+    else:
+        metadata.category_id = payload.category_id
+
+    metadata.ai_suggestions = _normalize_ai_suggestions_payload(payload.suggestions)
+    await session.commit()
+    await session.refresh(metadata)
+    return metadata
+
+
+@router.post("/items/{account_id}/{item_id}/ai-suggestions/accept", response_model=ItemMetadataSchema)
+async def accept_item_ai_suggestion(
+    account_id: UUID,
+    item_id: str,
+    payload: ItemMetadataAIFieldActionRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    stmt = select(ItemMetadata).where(
+        ItemMetadata.account_id == account_id,
+        ItemMetadata.item_id == item_id,
+    )
+    result = await session.execute(stmt)
+    metadata = result.scalar_one_or_none()
+    if not metadata:
+        raise HTTPException(status_code=404, detail="Metadata not found")
+
+    attr_id = str(payload.attribute_id)
+    suggestions = metadata.ai_suggestions or {}
+    selected = suggestions.get(attr_id)
+    if not selected:
+        raise HTTPException(status_code=404, detail="AI suggestion not found for this attribute")
+
+    merged_values = dict(metadata.values or {})
+    merged_values[attr_id] = selected.get("value")
+
+    await apply_metadata_change(
+        session,
+        account_id=account_id,
+        item_id=item_id,
+        category_id=payload.category_id,
+        values=merged_values,
+    )
+
+    refreshed_row = await session.execute(
+        select(ItemMetadata).where(
+            ItemMetadata.account_id == account_id,
+            ItemMetadata.item_id == item_id,
+        )
+    )
+    refreshed = refreshed_row.scalar_one_or_none()
+    if refreshed is None:
+        raise HTTPException(status_code=500, detail="Failed to update metadata")
+
+    refreshed_suggestions = dict(refreshed.ai_suggestions or {})
+    refreshed_suggestions.pop(attr_id, None)
+    refreshed.ai_suggestions = refreshed_suggestions
+    await session.commit()
+    await session.refresh(refreshed)
+    return refreshed
+
+
+@router.post("/items/{account_id}/{item_id}/ai-suggestions/reject", response_model=ItemMetadataSchema)
+async def reject_item_ai_suggestion(
+    account_id: UUID,
+    item_id: str,
+    payload: ItemMetadataAIFieldActionRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    stmt = select(ItemMetadata).where(
+        ItemMetadata.account_id == account_id,
+        ItemMetadata.item_id == item_id,
+    )
+    result = await session.execute(stmt)
+    metadata = result.scalar_one_or_none()
+    if not metadata:
+        raise HTTPException(status_code=404, detail="Metadata not found")
+
+    attr_id = str(payload.attribute_id)
+    suggestions = dict(metadata.ai_suggestions or {})
+    if attr_id not in suggestions:
+        raise HTTPException(status_code=404, detail="AI suggestion not found for this attribute")
+
+    suggestions.pop(attr_id, None)
+    metadata.ai_suggestions = suggestions
+    if payload.category_id:
+        metadata.category_id = payload.category_id
+    await session.commit()
+    await session.refresh(metadata)
+    return metadata
 
 
 @router.delete("/items/{account_id}/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -474,7 +660,9 @@ async def create_metadata_rule(
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
 
-    db_rule = MetadataRule(**rule.model_dump())
+    payload = rule.model_dump()
+    await _validate_rule_configuration(session, payload)
+    db_rule = MetadataRule(**payload)
     session.add(db_rule)
     await session.commit()
     await session.refresh(db_rule)
@@ -501,6 +689,18 @@ async def update_metadata_rule(
     for key, value in updates.items():
         setattr(db_rule, key, value)
 
+    effective_payload = {
+        "apply_metadata": db_rule.apply_metadata,
+        "apply_rename": db_rule.apply_rename,
+        "rename_template": db_rule.rename_template,
+        "apply_move": db_rule.apply_move,
+        "destination_account_id": db_rule.destination_account_id,
+        "destination_folder_id": db_rule.destination_folder_id,
+        "destination_path_template": db_rule.destination_path_template,
+    }
+    effective_payload.update({k: v for k, v in updates.items() if k in effective_payload})
+    await _validate_rule_configuration(session, effective_payload)
+
     await session.commit()
     await session.refresh(db_rule)
     return db_rule
@@ -525,6 +725,7 @@ async def preview_metadata_rule(
     session: AsyncSession = Depends(get_session),
 ):
     """Preview how many items would be changed by a rule."""
+    await _validate_rule_configuration(session, request.model_dump())
     query = select(Item).where(Item.path.isnot(None))
     if request.account_id:
         query = query.where(Item.account_id == request.account_id)
@@ -543,20 +744,23 @@ async def preview_metadata_rule(
     to_change = 0
     already_compliant = 0
     sample_item_ids: list[str] = []
+    has_organize_actions = request.apply_rename or request.apply_move
 
     for item in items:
-        stmt = select(ItemMetadata).where(
-            ItemMetadata.account_id == item.account_id,
-            ItemMetadata.item_id == item.item_id,
+        current = await session.scalar(
+            select(ItemMetadata).where(
+                ItemMetadata.account_id == item.account_id,
+                ItemMetadata.item_id == item.item_id,
+            )
         )
-        metadata_result = await session.execute(stmt)
-        current = metadata_result.scalar_one_or_none()
         current_values = normalize_metadata_values(current.values) if current else {}
-        same = (
+
+        same_metadata = (
             current is not None
             and current.category_id == request.target_category_id
             and current_values == target_values
         )
+        same = same_metadata and not has_organize_actions
         if same:
             already_compliant += 1
         else:

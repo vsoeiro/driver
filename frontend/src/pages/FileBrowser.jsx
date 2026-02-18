@@ -9,7 +9,7 @@ const { getDownloadUrl } = driveService;
 const { batchDeleteMetadata } = metadataService;
 import {
     Folder, File, Download, Trash2,
-    UploadCloud, FolderPlus, Loader2, ArrowRightLeft, Database, XCircle, CheckSquare, Square, Search, X, ChevronDown, BookOpen, RefreshCw
+    UploadCloud, FolderPlus, Loader2, ArrowRightLeft, Database, XCircle, CheckSquare, Square, Search, X, ChevronDown, BookOpen, RefreshCw, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import MoveModal from '../components/MoveModal';
@@ -21,7 +21,23 @@ const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'cbw', 'pdf', 'epub', 'cbr', 
 
 export default function FileBrowser() {
     const { accountId, folderId } = useParams();
-    const { files, breadcrumbs, loading, error, refresh, handleBatchDelete, handleCreateFolder, searchQuery, setSearchQuery } = useDrive(accountId, folderId);
+    const {
+        files,
+        breadcrumbs,
+        loading,
+        error,
+        refresh,
+        handleBatchDelete,
+        handleCreateFolder,
+        searchQuery,
+        setSearchQuery,
+        page,
+        canNextPage,
+        canPrevPage,
+        goToNextPage,
+        goToPrevPage,
+        resetPagination,
+    } = useDrive(accountId, folderId);
     const { upload, uploading, progress: uploadProgress } = useUpload(accountId, folderId, refresh);
 
     // Listen for job completion to auto-refresh
@@ -217,11 +233,13 @@ export default function FileBrowser() {
 
     const handleSearchSubmit = (e) => {
         if (e.key === 'Enter') {
+            resetPagination();
             setSearchQuery(searchTerm);
         }
     }
 
     const clearSearch = () => {
+        resetPagination();
         setSearchTerm('');
         setSearchQuery('');
     };
@@ -279,6 +297,27 @@ export default function FileBrowser() {
                     <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-0.5 rounded-full shrink-0">
                         {files.length} item{files.length === 1 ? '' : 's'}
                     </span>
+                    {!searchQuery && (
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <span>Page {page}</span>
+                            <button
+                                onClick={goToPrevPage}
+                                disabled={!canPrevPage || loading}
+                                className="p-1 rounded hover:bg-accent disabled:opacity-50"
+                                title="Previous page"
+                            >
+                                <ChevronLeft size={14} />
+                            </button>
+                            <button
+                                onClick={goToNextPage}
+                                disabled={!canNextPage || loading}
+                                className="p-1 rounded hover:bg-accent disabled:opacity-50"
+                                title="Next page"
+                            >
+                                <ChevronRight size={14} />
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 <div className="flex items-center gap-2">

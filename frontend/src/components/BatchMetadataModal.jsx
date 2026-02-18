@@ -9,6 +9,14 @@ import { getSelectOptions } from '../utils/metadata';
 import { Loader2 } from 'lucide-react';
 import Modal from './Modal';
 
+const READ_ONLY_COMIC_FIELDS = new Set([
+    'cover_item_id',
+    'cover_filename',
+    'cover_account_id',
+    'page_count',
+    'file_format',
+]);
+
 const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToast }) => {
     const [categories, setCategories] = useState([]);
     const [selectedCategory, setSelectedCategory] = useState('');
@@ -258,11 +266,17 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                             <div className="space-y-3 border p-3 rounded-md bg-muted/20">
                                 {currentCategory.attributes.map(attr => (
                                     <div key={attr.id}>
+                                        {(() => {
+                                            const isReadOnlyComputed = currentCategory?.plugin_key === 'comicrack_core'
+                                                && READ_ONLY_COMIC_FIELDS.has(attr.plugin_field_key);
+                                            return (
+                                                <>
                                         <label className="block text-xs font-medium mb-1 uppercase text-muted-foreground">{attr.name} {attr.is_required && '*'}</label>
                                         {attr.data_type === 'select' ? (
                                             <select
                                                 className="w-full border rounded-md p-2 text-sm bg-background"
                                                 value={attributeValues[attr.id] ?? ''}
+                                                disabled={isReadOnlyComputed}
                                                 onChange={e => setAttributeValues(prev => ({ ...prev, [attr.id]: e.target.value }))}
                                             >
                                                 <option value="">Select...</option>
@@ -274,6 +288,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                                             <select
                                                 className="w-full border rounded-md p-2 text-sm bg-background"
                                                 value={attributeValues[attr.id] ?? ''}
+                                                disabled={isReadOnlyComputed}
                                                 onChange={e => setAttributeValues(prev => ({ ...prev, [attr.id]: e.target.value === 'true' }))}
                                             >
                                                 <option value="">Select...</option>
@@ -285,9 +300,18 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                                                 type={attr.data_type === 'number' ? 'number' : attr.data_type === 'date' ? 'date' : 'text'}
                                                 className="w-full border rounded-md p-2 text-sm bg-background"
                                                 value={attributeValues[attr.id] ?? ''}
+                                                disabled={isReadOnlyComputed}
                                                 onChange={e => setAttributeValues(prev => ({ ...prev, [attr.id]: e.target.value }))}
                                             />
                                         )}
+                                        {isReadOnlyComputed && (
+                                            <div className="mt-1 text-xs text-muted-foreground">
+                                                Mapped field (read-only)
+                                            </div>
+                                        )}
+                                                </>
+                                            );
+                                        })()}
                                     </div>
                                 ))}
                             </div>

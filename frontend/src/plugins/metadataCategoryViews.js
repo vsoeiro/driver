@@ -8,6 +8,8 @@ export const metadataCategoryViews = {
             titleField: 'title',
             pageCountField: 'page_count',
             subtitleField: 'series',
+            volumeField: 'volume',
+            issueNumberField: 'issue_number',
         },
     },
 };

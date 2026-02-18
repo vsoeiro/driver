@@ -3,13 +3,21 @@ import api from './api';
 /**
  * Get files in root or specific folder
  */
-export const getFiles = async (accountId) => {
-    const response = await api.get(`/drive/${accountId}/files`);
+export const getFiles = async (accountId, options = {}) => {
+    const params = {};
+    if (options.nextLink) {
+        params.next_link = options.nextLink;
+    }
+    const response = await api.get(`/drive/${accountId}/files`, { params });
     return response.data;
 };
 
-export const getFolderFiles = async (accountId, folderId) => {
-    const response = await api.get(`/drive/${accountId}/files/${folderId}`);
+export const getFolderFiles = async (accountId, folderId, options = {}) => {
+    const params = {};
+    if (options.nextLink) {
+        params.next_link = options.nextLink;
+    }
+    const response = await api.get(`/drive/${accountId}/files/${folderId}`, { params });
     return response.data;
 };
 
@@ -130,6 +138,14 @@ export const batchDeleteItems = async (accountId, itemIds) => {
     await api.post(`/drive/${accountId}/items/batch-delete`, { item_ids: itemIds });
 };
 
+/**
+ * Update an item (rename and/or move)
+ */
+export const updateItem = async (accountId, itemId, payload) => {
+    const response = await api.patch(`/drive/${accountId}/items/${itemId}`, payload);
+    return response.data;
+};
+
 export const driveService = {
     getFiles,
     getFolderFiles,
@@ -143,7 +159,8 @@ export const driveService = {
     getDownloadUrl,
     getDownloadContentUrl,
     getQuota,
-    searchFiles
+    searchFiles,
+    updateItem
 };
 
 export default driveService;

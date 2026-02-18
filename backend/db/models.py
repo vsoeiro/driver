@@ -297,6 +297,7 @@ class ItemMetadata(Base):
         nullable=False,
     )
     values: Mapped[dict] = mapped_column(JSON, default={})  # Key: Attribute ID, Value: User Input
+    ai_suggestions: Mapped[dict] = mapped_column(JSON, default={})
     version: Mapped[int] = mapped_column(Integer, default=1)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -408,6 +409,17 @@ class MetadataRule(Base):
         nullable=False,
     )
     target_values: Mapped[dict] = mapped_column(JSON, default={})
+    apply_metadata: Mapped[bool] = mapped_column(Boolean, default=True)
+    apply_rename: Mapped[bool] = mapped_column(Boolean, default=False)
+    rename_template: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    apply_move: Mapped[bool] = mapped_column(Boolean, default=False)
+    destination_account_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("linked_accounts.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    destination_folder_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    destination_path_template: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     include_folders: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

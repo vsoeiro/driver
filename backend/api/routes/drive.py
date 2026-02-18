@@ -96,8 +96,11 @@ async def _refresh_index_from_provider(
 async def list_root_files(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
+    next_link: str | None = Query(None, description="Provider pagination cursor/next link"),
 ) -> DriveListResponse:
     """List files in the root of OneDrive."""
+    if next_link:
+        return await graph_client.list_items_by_next_link(account, next_link)
     return await graph_client.list_root_items(account)
 
 
@@ -106,8 +109,11 @@ async def list_folder_files(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
     item_id: str,
+    next_link: str | None = Query(None, description="Provider pagination cursor/next link"),
 ) -> DriveListResponse:
     """List files in a specific folder."""
+    if next_link:
+        return await graph_client.list_items_by_next_link(account, next_link)
     return await graph_client.list_folder_items(account, item_id)
 
 

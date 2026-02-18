@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     token_encryption_key: str = Field(alias="ENCRYPTION_KEY")
 
     database_url: str = Field(alias="DATABASE_URL")
+    db_pool_size: int = Field(default=5, alias="DB_POOL_SIZE")
+    db_max_overflow: int = Field(default=0, alias="DB_MAX_OVERFLOW")
+    db_pool_timeout_seconds: int = Field(default=30, alias="DB_POOL_TIMEOUT_SECONDS")
+    db_pool_recycle_seconds: int = Field(default=1800, alias="DB_POOL_RECYCLE_SECONDS")
 
     redirect_uri: str = Field(default="http://localhost:8000/api/v1/auth/microsoft/callback", alias="MS_REDIRECT_URI")
     google_redirect_uri: str = Field(
@@ -106,6 +110,14 @@ class Settings(BaseSettings):
     def assemble_db_connection(self) -> "Settings":
         if self.database_url.startswith("sqlite:///") and "aiosqlite" not in self.database_url:
             self.database_url = self.database_url.replace("sqlite:///", "sqlite+aiosqlite:///")
+        if self.db_pool_size <= 0:
+            raise ValueError("DB_POOL_SIZE must be greater than 0")
+        if self.db_max_overflow < 0:
+            raise ValueError("DB_MAX_OVERFLOW must be greater than or equal to 0")
+        if self.db_pool_timeout_seconds <= 0:
+            raise ValueError("DB_POOL_TIMEOUT_SECONDS must be greater than 0")
+        if self.db_pool_recycle_seconds < -1:
+            raise ValueError("DB_POOL_RECYCLE_SECONDS must be greater than or equal to -1")
         if self.daily_sync_cron is None:
             if self.daily_sync_hour is not None or self.daily_sync_minute is not None:
                 hour = self.daily_sync_hour if self.daily_sync_hour is not None else 0

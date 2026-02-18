@@ -110,6 +110,16 @@ export default function AdminDashboard() {
         ];
     }, [snapshot]);
 
+    const metricsBars = useMemo(() => {
+        if (!snapshot) return [];
+        return [
+            { label: 'Total', value: snapshot.metrics_total_24h || 0 },
+            { label: 'Success', value: snapshot.metrics_success_24h || 0 },
+            { label: 'Failed', value: snapshot.metrics_failed_24h || 0 },
+            { label: 'Skipped', value: snapshot.metrics_skipped_24h || 0 },
+        ];
+    }, [snapshot]);
+
     const handleReprocess = async (jobId) => {
         setReprocessingJobId(jobId);
         try {
@@ -171,6 +181,14 @@ export default function AdminDashboard() {
                                 <div className="text-xs text-muted-foreground">Generated At</div>
                                 <div className="text-sm font-medium">{new Date(snapshot.generated_at).toLocaleString()}</div>
                             </div>
+                        </div>
+
+                        <div className="rounded-lg border p-4 bg-card">
+                            <h2 className="font-medium mb-3">Job Metrics (24h)</h2>
+                            <MiniBars
+                                items={metricsBars}
+                                max={Math.max(...metricsBars.map((item) => item.value), 1)}
+                            />
                         </div>
 
                         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">

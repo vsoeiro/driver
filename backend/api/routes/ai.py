@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.api.dependencies import get_session
 from backend.db.models import MetadataAttribute, MetadataCategory
 from backend.schemas.ai import (
+    AIComicSuggestRequest,
+    AIComicSuggestResponse,
     AIExtractMetadataRequest,
     AIExtractMetadataResponse,
     AIHealthResponse,
@@ -18,6 +22,7 @@ from backend.schemas.ai import (
 from backend.services.ai import AIService
 
 router = APIRouter(prefix="/ai", tags=["AI"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/health", response_model=AIHealthResponse)
@@ -110,3 +115,37 @@ async def extract_metadata(
         await session.commit()
 
     return AIExtractMetadataResponse(**result)
+
+
+@router.post("/suggest-comic-metadata", response_model=AIComicSuggestResponse)
+async def suggest_comic_metadata(
+    payload: AIComicSuggestRequest,
+    session: AsyncSession = Depends(get_session),
+) -> AIComicSuggestResponse:
+    service = AIService(session)
+    try:
+        result = await service.suggest_comic_metadata(
+            category_id=payload.category_id,
+            title=payload.title,
+            account_id=payload.account_id,
+            item_id=payload.item_id,
+            cover_account_id=payload.cover_account_id,
+            cover_item_id=payload.cover_item_id,
+        )
+    except ValueError as exc:
+        logger.warning(
+            "AI comic suggestion validation error account_id=%s item_id=%s model_request_failed=%s",
+            payload.account_id,
+            payload.item_id,
+            exc,
+        )
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception(
+            "AI comic suggestion provider error account_id=%s item_id=%s",
+            payload.account_id,
+            payload.item_id,
+        )
+        raise HTTPException(status_code=502, detail=f"AI provider error: {exc}") from exc
+
+    return AIComicSuggestResponse(**result)

@@ -152,3 +152,19 @@ class JobReindexComicCoversRequest(BaseModel):
 
     plugin_key: str = "comicrack_core"
 
+
+class JobExtractLibraryComicAssetsRequest(BaseModel):
+    """Schema for library-wide comic extraction (all CBR/CBZ already synced)."""
+
+    account_ids: list[UUID] | None = None
+    chunk_size: int = 1000
+
+
+class JobExtractLibraryComicAssetsResponse(BaseModel):
+    """Summary of chunked comic extraction jobs created from library index."""
+
+    total_items: int
+    total_jobs: int
+    chunk_size: int
+    job_ids: list[UUID]
+

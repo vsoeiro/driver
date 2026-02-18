@@ -75,6 +75,7 @@ class ItemMetadataBase(BaseModel):
     item_id: str
     category_id: UUID
     values: dict = Field(default_factory=dict)
+    ai_suggestions: dict = Field(default_factory=dict)
 
 
 class ItemMetadataCreate(ItemMetadataBase):
@@ -82,6 +83,7 @@ class ItemMetadataCreate(ItemMetadataBase):
 
 class ItemMetadataUpdate(BaseModel):
     values: dict
+    ai_suggestions: dict | None = None
 
 
 class ItemMetadata(ItemMetadataBase):
@@ -92,6 +94,25 @@ class ItemMetadata(ItemMetadataBase):
     category_name: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class AIPendingSuggestion(BaseModel):
+    value: str | int | float | bool | None = None
+    confidence: float | None = None
+    source: str | None = None
+    model: str | None = None
+    generated_at: datetime | None = None
+    notes: str | None = None
+
+
+class ItemMetadataAISuggestionsUpdate(BaseModel):
+    category_id: UUID
+    suggestions: dict[str, AIPendingSuggestion] = Field(default_factory=dict)
+
+
+class ItemMetadataAIFieldActionRequest(BaseModel):
+    category_id: UUID
+    attribute_id: str
 
 
 class ItemMetadataHistory(BaseModel):
@@ -122,6 +143,13 @@ class MetadataRuleBase(BaseModel):
     path_prefix: str | None = None
     target_category_id: UUID
     target_values: dict = Field(default_factory=dict)
+    apply_metadata: bool = True
+    apply_rename: bool = False
+    rename_template: str | None = None
+    apply_move: bool = False
+    destination_account_id: UUID | None = None
+    destination_folder_id: str = "root"
+    destination_path_template: str | None = None
     include_folders: bool = False
 
 
@@ -139,6 +167,13 @@ class MetadataRuleUpdate(BaseModel):
     path_prefix: str | None = None
     target_category_id: UUID | None = None
     target_values: dict | None = None
+    apply_metadata: bool | None = None
+    apply_rename: bool | None = None
+    rename_template: str | None = None
+    apply_move: bool | None = None
+    destination_account_id: UUID | None = None
+    destination_folder_id: str | None = None
+    destination_path_template: str | None = None
     include_folders: bool | None = None
 
 
@@ -157,6 +192,13 @@ class MetadataRulePreviewRequest(BaseModel):
     include_folders: bool = False
     target_category_id: UUID
     target_values: dict = Field(default_factory=dict)
+    apply_metadata: bool = True
+    apply_rename: bool = False
+    rename_template: str | None = None
+    apply_move: bool = False
+    destination_account_id: UUID | None = None
+    destination_folder_id: str = "root"
+    destination_path_template: str | None = None
     limit: int = 50
 
 

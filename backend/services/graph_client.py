@@ -242,6 +242,7 @@ class GraphClient:
         self,
         account: LinkedAccount,
         item_id: str,
+        timeout_seconds: float | None = None,
     ) -> tuple[str, bytes]:
         """Download raw bytes for a file item.
 
@@ -272,9 +273,10 @@ class GraphClient:
             raise GraphAPIError("Download URL not available for this item")
 
         filename = item_data.get("name", "file")
+        download_timeout = httpx.Timeout(timeout_seconds, connect=10.0) if timeout_seconds else GRAPH_TIMEOUT
 
         try:
-            async with httpx.AsyncClient(timeout=GRAPH_TIMEOUT) as client:
+            async with httpx.AsyncClient(timeout=download_timeout) as client:
                 response = await client.get(download_url)
         except httpx.TimeoutException as exc:
             raise GraphAPIError(
@@ -298,6 +300,7 @@ class GraphClient:
         account: LinkedAccount,
         item_id: str,
         target_path: str,
+        timeout_seconds: float | None = None,
     ) -> str:
         """Download a file directly to a local path (streaming).
 
@@ -325,9 +328,10 @@ class GraphClient:
             raise GraphAPIError("Download URL not available for this item")
 
         filename = item_data.get("name", "file")
+        download_timeout = httpx.Timeout(timeout_seconds, connect=10.0) if timeout_seconds else GRAPH_TIMEOUT
 
         try:
-            async with httpx.AsyncClient(timeout=GRAPH_TIMEOUT) as client:
+            async with httpx.AsyncClient(timeout=download_timeout) as client:
                 async with client.stream("GET", download_url) as response:
                     if response.status_code >= 400:
                          await response.read() # Read error

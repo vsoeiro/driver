@@ -42,6 +42,21 @@ export const deleteItemMetadata = async (accountId, itemId) => {
     await api.delete(`/metadata/items/${accountId}/${itemId}`);
 };
 
+export const updateItemAISuggestions = async (accountId, itemId, payload) => {
+    const response = await api.patch(`/metadata/items/${accountId}/${itemId}/ai-suggestions`, payload);
+    return response.data;
+};
+
+export const acceptItemAISuggestion = async (accountId, itemId, payload) => {
+    const response = await api.post(`/metadata/items/${accountId}/${itemId}/ai-suggestions/accept`, payload);
+    return response.data;
+};
+
+export const rejectItemAISuggestion = async (accountId, itemId, payload) => {
+    const response = await api.post(`/metadata/items/${accountId}/${itemId}/ai-suggestions/reject`, payload);
+    return response.data;
+};
+
 export const batchDeleteMetadata = async (accountId, itemIds) => {
     // Backend expects item_ids as a list in the body
     await api.post('/metadata/items/batch-delete', itemIds, {
@@ -117,6 +132,9 @@ export const metadataService = {
     deleteAttribute,
     getItemMetadata,
     saveItemMetadata,
+    updateItemAISuggestions,
+    acceptItemAISuggestion,
+    rejectItemAISuggestion,
     deleteItemMetadata,
     batchDeleteMetadata,
     getItemMetadataHistory,

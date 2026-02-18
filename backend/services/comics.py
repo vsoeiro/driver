@@ -33,6 +33,9 @@ from backend.services.token_manager import TokenManager
 
 logger = logging.getLogger(__name__)
 COMIC_MAPPING_COMMIT_BATCH_SIZE = 10
+COMIC_DOWNLOAD_BASE_TIMEOUT_SECONDS = 120.0
+COMIC_DOWNLOAD_MAX_TIMEOUT_SECONDS = 1800.0
+COMIC_DOWNLOAD_BYTES_PER_SECOND = 1.5 * 1024 * 1024  # 1.5 MB/s baseline for timeout scaling.
 
 SUPPORTED_COMIC_EXTENSIONS = {
     "cbz",
@@ -57,6 +60,15 @@ class ComicExtractionResult:
     cover_bytes: bytes | None = None
     cover_extension: str | None = None
     details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class IndexedComicItem:
+    id: str
+    name: str
+    extension: str | None = None
+    item_type: str = "file"
+    size: int | None = None
 
 
 def file_extension(filename: str | None) -> str:
@@ -460,6 +472,7 @@ class ComicMetadataService:
         job_id=None,
         batch_id=None,
         progress_reporter=None,
+        initialize_progress_total: bool = True,
     ) -> dict[str, int]:
         account = await self.session.get(LinkedAccount, account_id)
         if not account:
@@ -488,7 +501,61 @@ class ComicMetadataService:
             len(files_to_process),
             job_id,
         )
-        if progress_reporter is not None:
+        if progress_reporter is not None and initialize_progress_total:
+            await progress_reporter.set_total(stats["total"])
+        return await self._process_files(
+            files_to_process=files_to_process,
+            source_account=account,
+            source_client=client,
+            target_account=target_account,
+            target_client=target_client,
+            category_id=category.id,
+            attr_ids=attr_ids,
+            plugin_settings=plugin_settings,
+            stats=stats,
+            job_id=job_id,
+            batch_id=batch_id,
+            force_remap=False,
+            progress_reporter=progress_reporter,
+        )
+
+    async def process_indexed_items(
+        self,
+        account_id,
+        files_to_process: list[IndexedComicItem],
+        *,
+        job_id=None,
+        batch_id=None,
+        progress_reporter=None,
+        initialize_progress_total: bool = True,
+    ) -> dict[str, int]:
+        account = await self.session.get(LinkedAccount, account_id)
+        if not account:
+            raise ValueError("Account not found")
+
+        plugin_service = MetadataPluginService(self.session)
+        category = await plugin_service.ensure_active_comic_category()
+        attr_ids = await plugin_service.comic_attribute_id_map()
+        plugin_settings = await PluginSettingsService(self.session).get_comic_runtime_settings()
+
+        token_manager = TokenManager(self.session)
+        client = build_drive_client(account, token_manager)
+        target_account = account
+        if plugin_settings.storage_account_id:
+            maybe_target = await self._get_linked_account(plugin_settings.storage_account_id)
+            if maybe_target:
+                target_account = maybe_target
+        target_client = build_drive_client(target_account, token_manager)
+
+        stats = {"total": len(files_to_process), "mapped": 0, "skipped": 0, "failed": 0}
+        logger.info(
+            "Comic mapping started (indexed) account_id=%s selected_items=%s expanded_files=%s job_id=%s",
+            account.id,
+            len(files_to_process),
+            len(files_to_process),
+            job_id,
+        )
+        if progress_reporter is not None and initialize_progress_total:
             await progress_reporter.set_total(stats["total"])
         return await self._process_files(
             files_to_process=files_to_process,
@@ -742,7 +809,7 @@ class ComicMetadataService:
         batch_id,
         force_remap: bool,
     ) -> bool:
-        ext = file_extension(item.name)
+        ext = (getattr(item, "extension", None) or file_extension(item.name)).lower()
         if ext not in SUPPORTED_COMIC_EXTENSIONS:
             return False
         if not force_remap and await self._is_already_mapped(
@@ -756,7 +823,13 @@ class ComicMetadataService:
         temp_dir = tempfile.mkdtemp(prefix="comic_extract_")
         local_path = str(Path(temp_dir) / f"{item.id}.{ext or 'bin'}")
         try:
-            await source_client.download_file_to_path(source_account, item.id, local_path)
+            download_timeout = self._download_timeout_for_item(item)
+            await source_client.download_file_to_path(
+                source_account,
+                item.id,
+                local_path,
+                timeout_seconds=download_timeout,
+            )
             extraction = extract_comic_asset(local_path, ext)
             mapped_values = self._build_metadata_values(item=item, extraction=extraction, attr_ids=attr_ids)
 
@@ -824,6 +897,21 @@ class ComicMetadataService:
             except Exception:
                 pass
 
+    @staticmethod
+    def _download_timeout_for_item(item: Any) -> float:
+        raw_size = getattr(item, "size", None)
+        try:
+            size_bytes = int(raw_size) if raw_size is not None else 0
+        except (TypeError, ValueError):
+            size_bytes = 0
+
+        if size_bytes <= 0:
+            return COMIC_DOWNLOAD_BASE_TIMEOUT_SECONDS
+
+        estimated_seconds = size_bytes / COMIC_DOWNLOAD_BYTES_PER_SECOND
+        timeout = COMIC_DOWNLOAD_BASE_TIMEOUT_SECONDS + estimated_seconds
+        return min(COMIC_DOWNLOAD_MAX_TIMEOUT_SECONDS, max(COMIC_DOWNLOAD_BASE_TIMEOUT_SECONDS, timeout))
+
     def _build_metadata_values(self, *, item: Any, extraction: ComicExtractionResult, attr_ids: dict[str, str]) -> dict[str, Any]:
         values: dict[str, Any] = {}
 
@@ -832,8 +920,6 @@ class ComicMetadataService:
             if attr_id and value is not None:
                 values[attr_id] = value
 
-        stem = Path(item.name).stem
-        set_if_exists("title", stem)
         set_if_exists("file_format", extraction.format)
         set_if_exists("page_count", extraction.page_count)
         return values
@@ -849,7 +935,7 @@ class ComicMetadataService:
             return False
 
         values = existing.values or {}
-        check_fields = ("cover_item_id", "cover_account_id", "page_count", "file_format", "title")
+        check_fields = ("cover_item_id", "cover_account_id", "page_count", "file_format")
         for field_key in check_fields:
             attr_id = attr_ids.get(field_key)
             if not attr_id:

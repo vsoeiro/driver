@@ -15,6 +15,11 @@ export const aiService = {
         const response = await api.post('/ai/extract-metadata', payload);
         return response.data;
     },
+
+    async suggestComicMetadata(payload) {
+        const response = await api.post('/ai/suggest-comic-metadata', payload);
+        return response.data;
+    },
 };
 
 export default aiService;

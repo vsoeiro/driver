@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import traceback
@@ -30,11 +31,17 @@ if not logging.getLogger().handlers:
 
 logger = logging.getLogger(__name__)
 
+async def _fail_job_with_fresh_session(job_id: UUID, error: str) -> None:
+    """Best-effort failure status update using a fresh DB session."""
+    async with async_session_maker() as recovery_session:
+        recovery_service = JobService(recovery_session)
+        await recovery_service.fail_job(job_id, error)
+
 
 async def process_job(ctx, job_id: str) -> None:
     """Execute a single job id from Redis queue."""
     settings = get_settings()
-    del settings  # settings already validated on import; keeps startup parity.
+    timeout_seconds = settings.worker_job_timeout_seconds
 
     async with async_session_maker() as session:
         job_service = JobService(session)
@@ -102,6 +109,20 @@ async def process_job(ctx, job_id: str) -> None:
                 pass
             await job_service.cancel_running_job(job_id_value, "Cancelled during execution")
             logger.info("Job cancellation requested id=%s", job_id_value)
+        except asyncio.CancelledError:
+            # ARQ cancels the running coroutine when job timeout is reached.
+            error_msg = f"Job timed out or was externally cancelled (worker timeout={timeout_seconds}s)"
+            logger.error("Job %s cancelled by runtime: %s", job_id_value, error_msg)
+            try:
+                await session.rollback()
+            except Exception:
+                pass
+            try:
+                # Shield so we can persist status despite cancellation context.
+                await asyncio.shield(_fail_job_with_fresh_session(job_id_value, error_msg))
+            except Exception:
+                logger.exception("Failed to persist cancelled/timeout status for job %s", job_id_value)
+            raise
         except Exception as exc:
             error_msg = str(exc)
             stack_trace = traceback.format_exc()
@@ -110,7 +131,15 @@ async def process_job(ctx, job_id: str) -> None:
                 await session.rollback()
             except Exception:
                 pass
-            await job_service.fail_job(job_id_value, f"{error_msg}\n{stack_trace}")
+            full_error = f"{error_msg}\n{stack_trace}"
+            try:
+                await job_service.fail_job(job_id_value, full_error)
+            except Exception:
+                logger.exception("Primary fail_job update failed for job %s. Retrying with fresh session.", job_id_value)
+                try:
+                    await _fail_job_with_fresh_session(job_id_value, full_error)
+                except Exception:
+                    logger.exception("Fallback fail_job update also failed for job %s", job_id_value)
 
 
 class WorkerSettings:

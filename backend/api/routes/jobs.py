@@ -6,8 +6,10 @@ This module provides endpoints for creating and managing background jobs.
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form
+from sqlalchemy import func, select
 
-from backend.api.dependencies import JobServiceDep
+from backend.api.dependencies import DBSession, JobServiceDep
+from backend.db.models import Item
 from backend.schemas.jobs import (
     Job, JobAttempt, JobCreate, JobMoveRequest, JobMetadataUpdateRequest,
     JobSyncRequest, JobApplyMetadataRecursiveRequest,
@@ -15,8 +17,11 @@ from backend.schemas.jobs import (
     JobUndoMetadataBatchRequest,
     JobApplyRuleRequest,
     JobExtractComicAssetsRequest,
+    JobExtractLibraryComicAssetsResponse,
+    JobExtractLibraryComicAssetsRequest,
     JobReindexComicCoversRequest,
 )
+from backend.services.jobs import JobService
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 
@@ -220,6 +225,59 @@ async def create_reindex_comic_covers_job(
         payload=request.model_dump(mode="json"),
     )
     return await job_service.create_job(job_in)
+
+
+@router.post("/comics/extract-library", response_model=JobExtractLibraryComicAssetsResponse, status_code=status.HTTP_201_CREATED)
+async def create_extract_library_comic_assets_job(
+    request: JobExtractLibraryComicAssetsRequest,
+    db: DBSession,
+) -> JobExtractLibraryComicAssetsResponse:
+    """Create chunked jobs that map all synced .cbr/.cbz files in File Library."""
+    chunk_size = max(1, min(5000, int(request.chunk_size or 1000)))
+
+    stmt = select(Item.account_id, Item.item_id).where(
+        Item.item_type == "file",
+        func.lower(func.coalesce(Item.extension, "")).in_(("cbr", "cbz")),
+    )
+    if request.account_ids:
+        stmt = stmt.where(Item.account_id.in_(request.account_ids))
+
+    rows = (await db.execute(stmt)).all()
+    if not rows:
+        return JobExtractLibraryComicAssetsResponse(
+            total_items=0,
+            total_jobs=0,
+            chunk_size=chunk_size,
+            job_ids=[],
+        )
+
+    by_account: dict[UUID, list[str]] = {}
+    for account_id, item_id in rows:
+        by_account.setdefault(account_id, []).append(item_id)
+
+    job_service = JobService(db)
+    created_job_ids: list[UUID] = []
+    for account_id, item_ids in by_account.items():
+        for i in range(0, len(item_ids), chunk_size):
+            chunk_ids = item_ids[i : i + chunk_size]
+            job = await job_service.create_job(
+                JobCreate(
+                    type="extract_comic_assets",
+                    payload={
+                        "account_id": str(account_id),
+                        "item_ids": chunk_ids,
+                        "use_indexed_items": True,
+                    },
+                )
+            )
+            created_job_ids.append(job.id)
+
+    return JobExtractLibraryComicAssetsResponse(
+        total_items=len(rows),
+        total_jobs=len(created_job_ids),
+        chunk_size=chunk_size,
+        job_ids=created_job_ids,
+    )
 
 
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)

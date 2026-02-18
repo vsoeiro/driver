@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, CheckCircle, XCircle, Clock, PlayCircle, Eye, AlertTriangle, Undo2, Trash2, Square, RotateCcw } from 'lucide-react';
+import { RefreshCw, CheckCircle, XCircle, Clock, PlayCircle, Eye, AlertTriangle, Undo2, Trash2, Square, RotateCcw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cancelJob, createMetadataUndoJob, deleteJob, getJobAttempts, getJobs, reprocessJob } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
 import Modal from '../components/Modal';
@@ -153,6 +153,28 @@ export default function Jobs() {
         });
     };
 
+    const pickMetricNumber = (source, keys) => {
+        if (!source || typeof source !== 'object') return 0;
+        for (const key of keys) {
+            const value = source[key];
+            if (typeof value === 'number' && Number.isFinite(value)) {
+                return Math.trunc(value);
+            }
+        }
+        return 0;
+    };
+
+    const getMetricSummary = (job) => {
+        const metrics = job?.metrics && typeof job.metrics === 'object' ? job.metrics : {};
+        const result = job?.result && typeof job.result === 'object' ? job.result : {};
+        return {
+            total: pickMetricNumber(metrics, ['total']) || pickMetricNumber(result, ['total']),
+            success: pickMetricNumber(metrics, ['success', 'mapped', 'updated', 'changed']) || pickMetricNumber(result, ['success', 'mapped', 'updated', 'changed']),
+            failed: pickMetricNumber(metrics, ['failed', 'errors']) || pickMetricNumber(result, ['failed', 'errors']),
+            skipped: pickMetricNumber(metrics, ['skipped', 'unchanged']) || pickMetricNumber(result, ['skipped', 'unchanged']),
+        };
+    };
+
     return (
         <div className="flex flex-col h-screen">
             <div className="p-4 border-b flex items-center justify-between bg-background z-10 sticky top-0 h-16">
@@ -175,13 +197,15 @@ export default function Jobs() {
                     </div>
                 ) : (
                     <div className="border rounded-lg overflow-hidden bg-card">
-                        <div className="grid grid-cols-[130px_1fr_150px_150px_110px_140px_78px] gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
+                        <div className="grid grid-cols-[130px_1fr_140px_140px_140px_110px_140px_170px_78px] gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
                             <div>Status</div>
                             <div>Type</div>
                             <div className="text-right">Created</div>
+                            <div className="text-right">Started</div>
                             <div className="text-right">Finished</div>
                             <div className="text-right">Duration</div>
                             <div>Progress</div>
+                            <div>Metrics</div>
                             <div className="text-center"></div>
                         </div>
 
@@ -194,6 +218,7 @@ export default function Jobs() {
                                     : '-';
                                 const finishedAt = job.completed_at || job.dead_lettered_at || null;
                                 const progressPercent = job.progress_percent ?? 0;
+                                const metricSummary = getMetricSummary(job);
                                 const canUndo = job.status === 'COMPLETED' && job.result?.batch_id;
                                 const canDelete = ['COMPLETED', 'FAILED', 'DEAD_LETTER', 'CANCELLED'].includes(job.status);
                                 const canCancel = ['PENDING', 'RUNNING', 'RETRY_SCHEDULED', 'CANCEL_REQUESTED'].includes(job.status);
@@ -201,7 +226,7 @@ export default function Jobs() {
                                 return (
                                     <div
                                         key={job.id}
-                                        className="grid grid-cols-[130px_1fr_150px_150px_110px_140px_78px] gap-4 p-3 items-center hover:bg-muted/30 transition-colors pointer-events-none"
+                                        className="grid grid-cols-[130px_1fr_140px_140px_140px_110px_140px_170px_78px] gap-4 p-3 items-center hover:bg-muted/30 transition-colors pointer-events-none"
                                     >
                                         <div className="pointer-events-auto">
                                             <div className={`inline-flex items-center gap-2 font-medium ${job.status === 'COMPLETED' ? 'text-green-600' :
@@ -221,6 +246,9 @@ export default function Jobs() {
                                             {formatDate(job.created_at)}
                                         </div>
                                         <div className="text-right text-muted-foreground tabular-nums pointer-events-auto">
+                                            {formatDate(job.started_at)}
+                                        </div>
+                                        <div className="text-right text-muted-foreground tabular-nums pointer-events-auto">
                                             {formatDate(finishedAt)}
                                         </div>
                                         <div className="text-right text-muted-foreground tabular-nums font-mono pointer-events-auto">
@@ -236,6 +264,10 @@ export default function Jobs() {
                                             <div className="text-xs text-muted-foreground mt-1">
                                                 {progressPercent}%
                                             </div>
+                                        </div>
+                                        <div className="text-xs text-muted-foreground pointer-events-auto tabular-nums leading-5">
+                                            <div>T: {metricSummary.total}</div>
+                                            <div>S: {metricSummary.success} F: {metricSummary.failed} K: {metricSummary.skipped}</div>
                                         </div>
                                         <div className="text-right pointer-events-auto">
                                             <div className="flex items-center justify-end gap-1">
@@ -307,21 +339,25 @@ export default function Jobs() {
                 )}
 
                 <div className="flex items-center justify-end gap-2 mt-3">
-                    <button
-                        onClick={goToPreviousPage}
-                        disabled={page <= 1 || loading}
-                        className="px-3 py-1.5 border rounded-md text-sm hover:bg-accent disabled:opacity-50"
-                    >
-                        Previous
-                    </button>
                     <span className="text-sm text-muted-foreground">Page {page}</span>
-                    <button
-                        onClick={goToNextPage}
-                        disabled={!hasNextPage || loading}
-                        className="px-3 py-1.5 border rounded-md text-sm hover:bg-accent disabled:opacity-50"
-                    >
-                        Next
-                    </button>
+                    <div className="flex gap-1">
+                        <button
+                            onClick={goToPreviousPage}
+                            disabled={page <= 1 || loading}
+                            className="p-1 hover:bg-accent rounded disabled:opacity-50"
+                            title="Previous page"
+                        >
+                            <ChevronLeft size={16} />
+                        </button>
+                        <button
+                            onClick={goToNextPage}
+                            disabled={!hasNextPage || loading}
+                            className="p-1 hover:bg-accent rounded disabled:opacity-50"
+                            title="Next page"
+                        >
+                            <ChevronRight size={16} />
+                        </button>
+                    </div>
                 </div>
             </div>
 

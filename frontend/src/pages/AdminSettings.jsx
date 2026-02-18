@@ -140,6 +140,12 @@ export default function AdminSettings() {
                 type: 'scheduler',
             },
             {
+                id: 'workers',
+                title: 'Workers',
+                description: 'Background worker execution limits and timeouts.',
+                type: 'workers',
+            },
+            {
                 id: 'ai',
                 title: 'Local AI',
                 description: 'Provider and inference runtime controls.',
@@ -296,6 +302,20 @@ export default function AdminSettings() {
                         />
                     </div>
 
+                </div>
+            );
+        }
+
+        if (selectedGroup.type === 'workers') {
+            return (
+                <div className="space-y-4">
+                    <div>
+                        <h2 className="font-medium">Worker Runtime</h2>
+                        <p className="text-sm text-muted-foreground">
+                            Configure execution timeout for a single background job.
+                        </p>
+                    </div>
+
                     <div>
                         <label className="block text-sm font-medium mb-1">Worker Job Timeout (seconds)</label>
                         <input
@@ -311,7 +331,7 @@ export default function AdminSettings() {
                             }
                         />
                         <p className="text-xs text-muted-foreground mt-1">
-                            Timeout applied by worker process for a single background job.
+                            This value is read by worker processes. Restart workers after saving.
                         </p>
                     </div>
                 </div>

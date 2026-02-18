@@ -14,6 +14,13 @@ const DEFAULT_FORM = {
     path_contains: '',
     include_folders: false,
     target_category_id: '',
+    apply_metadata: true,
+    apply_rename: false,
+    rename_template: '',
+    apply_move: false,
+    destination_account_id: '',
+    destination_folder_id: 'root',
+    destination_path_template: '',
 };
 
 export default function RulesManager() {
@@ -87,6 +94,13 @@ export default function RulesManager() {
                 include_folders: form.include_folders,
                 target_category_id: form.target_category_id,
                 target_values: normalizedTargetValues,
+                apply_metadata: form.apply_metadata,
+                apply_rename: form.apply_rename,
+                rename_template: form.rename_template || null,
+                apply_move: form.apply_move,
+                destination_account_id: form.destination_account_id || null,
+                destination_folder_id: form.destination_folder_id || 'root',
+                destination_path_template: form.destination_path_template || null,
                 is_active: true,
                 priority: 100,
             });
@@ -112,6 +126,13 @@ export default function RulesManager() {
                 include_folders: form.include_folders,
                 target_category_id: form.target_category_id,
                 target_values: normalizedTargetValues,
+                apply_metadata: form.apply_metadata,
+                apply_rename: form.apply_rename,
+                rename_template: form.rename_template || null,
+                apply_move: form.apply_move,
+                destination_account_id: form.destination_account_id || null,
+                destination_folder_id: form.destination_folder_id || 'root',
+                destination_path_template: form.destination_path_template || null,
                 limit: 10,
             });
             setPreview(data);
@@ -252,6 +273,78 @@ export default function RulesManager() {
                         onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
                     />
 
+                    <div className="md:col-span-2 lg:col-span-3 border rounded-md p-3 bg-background">
+                        <div className="text-sm font-medium mb-3">Actions</div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            <label className="flex items-center gap-2 text-sm">
+                                <input
+                                    type="checkbox"
+                                    checked={form.apply_metadata}
+                                    onChange={(e) => setForm((prev) => ({ ...prev, apply_metadata: e.target.checked }))}
+                                />
+                                Apply Metadata Values
+                            </label>
+                            <label className="flex items-center gap-2 text-sm">
+                                <input
+                                    type="checkbox"
+                                    checked={form.apply_rename}
+                                    onChange={(e) => setForm((prev) => ({ ...prev, apply_rename: e.target.checked }))}
+                                />
+                                Rename Item
+                            </label>
+                            <label className="flex items-center gap-2 text-sm">
+                                <input
+                                    type="checkbox"
+                                    checked={form.apply_move}
+                                    onChange={(e) => setForm((prev) => ({ ...prev, apply_move: e.target.checked }))}
+                                />
+                                Move Item
+                            </label>
+                        </div>
+                        {(form.apply_rename || form.apply_move) && (
+                            <div className="mt-3 text-xs text-muted-foreground">
+                                Placeholders: use attribute names like <code>[SERIES]</code>, <code>[TITLE]</code> plus <code>[EXTENSAO]</code>, <code>[NOME_ATUAL]</code>.
+                            </div>
+                        )}
+                    </div>
+
+                    {form.apply_rename && (
+                        <input
+                            className="border rounded-md p-2 bg-background text-sm md:col-span-2 lg:col-span-3"
+                            placeholder="Rename template (e.g. [SERIES] - [TITLE].[EXTENSAO])"
+                            value={form.rename_template}
+                            onChange={(e) => setForm((prev) => ({ ...prev, rename_template: e.target.value }))}
+                            required={form.apply_rename}
+                        />
+                    )}
+
+                    {form.apply_move && (
+                        <>
+                            <select
+                                className="border rounded-md p-2 bg-background text-sm"
+                                value={form.destination_account_id}
+                                onChange={(e) => setForm((prev) => ({ ...prev, destination_account_id: e.target.value }))}
+                            >
+                                <option value="">Destination account (same as source)</option>
+                                {accounts.map((account) => (
+                                    <option key={account.id} value={account.id}>{account.email || account.display_name}</option>
+                                ))}
+                            </select>
+                            <input
+                                className="border rounded-md p-2 bg-background text-sm"
+                                placeholder="Destination folder id (default: root)"
+                                value={form.destination_folder_id}
+                                onChange={(e) => setForm((prev) => ({ ...prev, destination_folder_id: e.target.value }))}
+                            />
+                            <input
+                                className="border rounded-md p-2 bg-background text-sm"
+                                placeholder="Destination path template (e.g. Quadrinhos/[SERIES])"
+                                value={form.destination_path_template}
+                                onChange={(e) => setForm((prev) => ({ ...prev, destination_path_template: e.target.value }))}
+                            />
+                        </>
+                    )}
+
                     {selectedCategory && (
                         <div className="md:col-span-2 lg:col-span-3 border rounded-md p-3 bg-background">
                             <div className="text-sm font-medium mb-3">Metadata Values</div>
@@ -319,21 +412,27 @@ export default function RulesManager() {
                     <div className="text-center text-muted-foreground p-8">No rules created yet.</div>
                 ) : (
                     <div className="border rounded-lg overflow-hidden bg-card">
-                        <div className="grid grid-cols-[1fr_160px_180px_160px] gap-3 p-3 border-b bg-muted/50 text-xs font-medium uppercase text-muted-foreground">
+                        <div className="grid grid-cols-[1fr_150px_240px_200px_160px] gap-3 p-3 border-b bg-muted/50 text-xs font-medium uppercase text-muted-foreground">
                             <div>Rule</div>
-                            <div>Target</div>
+                            <div>Category</div>
+                            <div>Actions</div>
                             <div>Scope</div>
                             <div className="text-right">Actions</div>
                         </div>
                         <div className="divide-y">
                             {rules.map((rule) => (
-                                <div key={rule.id} className="grid grid-cols-[1fr_160px_180px_160px] gap-3 p-3 items-center text-sm">
+                                <div key={rule.id} className="grid grid-cols-[1fr_150px_240px_200px_160px] gap-3 p-3 items-center text-sm">
                                     <div>
                                         <div className="font-medium">{rule.name}</div>
                                         <div className="text-xs text-muted-foreground">{rule.description || '-'}</div>
                                     </div>
                                     <div className="text-xs text-muted-foreground truncate">
                                         {categories.find((category) => category.id === rule.target_category_id)?.name || rule.target_category_id}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground space-y-0.5">
+                                        <div>Metadata: {rule.apply_metadata ? 'on' : 'off'}</div>
+                                        <div>Rename: {rule.apply_rename ? (rule.rename_template || '-') : 'off'}</div>
+                                        <div>Move: {rule.apply_move ? `${rule.destination_folder_id || 'root'} / ${rule.destination_path_template || '-'}` : 'off'}</div>
                                     </div>
                                     <div className="text-xs text-muted-foreground truncate">
                                         {rule.path_prefix || '-'} {rule.path_contains ? `| contains: ${rule.path_contains}` : ''}
