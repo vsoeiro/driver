@@ -1,0 +1,27 @@
+# Ignore VCS and local env artifacts
+.git
+.gitignore
+.venv
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Local runtime / data
+.env
+database.db
+.tools
+
+# Frontend artifacts
+frontend/node_modules
+frontend/dist
+
+# Python build/cache artifacts
+build
+dist
+*.egg-info
+
+# Misc
+.vscode
+.idea

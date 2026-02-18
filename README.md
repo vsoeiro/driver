@@ -32,6 +32,39 @@ Variaveis principais:
 - `ENABLE_DAILY_SYNC_SCHEDULER`, `DAILY_SYNC_CRON`
 - `AI_ENABLED`, `AI_PROVIDER`, `AI_BASE_URL`, `AI_MODEL`, `AI_TEMPERATURE`, `AI_TIMEOUT_SECONDS`
 
+## Rodando com Docker (backend + frontend + worker + redis)
+
+Pre-requisito:
+
+- Docker Desktop (ou Docker Engine + Compose v2)
+
+Passos:
+
+```bash
+docker compose up --build
+```
+
+Servicos:
+
+- Frontend: `http://localhost:5173`
+- Backend API: `http://localhost:8000`
+- OpenAPI: `http://localhost:8000/docs`
+- Redis: `localhost:6379`
+
+Comandos uteis:
+
+```bash
+docker compose down
+docker compose logs -f backend
+docker compose logs -f worker
+```
+
+Notas:
+
+- O `backend` aplica `alembic upgrade head` ao iniciar o container.
+- O `docker-compose.yml` sobrescreve `REDIS_URL` para `redis://redis:6379/0`.
+- `DATABASE_URL` continua vindo do seu `.env` (ex.: Supabase/Postgres).
+
 ## Rodando o backend
 
 ```bash
@@ -44,12 +77,6 @@ uv run uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 
 ```bash
 uv run arq backend.workers.arq_worker.WorkerSettings
-```
-
-Sem Docker (Windows), para instalar Redis local:
-
-```bash
-powershell -ExecutionPolicy Bypass -File .\scripts\install_redis_windows.ps1
 ```
 
 Endpoints uteis:
@@ -89,23 +116,4 @@ Frontend:
 cd frontend
 npm.cmd run lint --workspaces=false
 npm.cmd run build --workspaces=false
-```
-
-## Migracao para Supabase (PostgreSQL)
-
-1. Configure `SUPABASE_DATABASE_URL` com a connection string Postgres do Supabase.
-2. Execute:
-
-```bash
-pwsh ./scripts/migrate_to_supabase.ps1 -SupabaseUrl "postgresql://user:pass@host:5432/postgres"
-```
-
-O script:
-- roda `alembic upgrade head` no banco destino;
-- migra os dados do `sqlite:///./database.db` para o Supabase.
-
-Opcional (dry-run do plano de tabelas):
-
-```bash
-uv run python scripts/migrate_sqlite_to_supabase.py --dry-run --postgres-url "postgresql://..."
 ```

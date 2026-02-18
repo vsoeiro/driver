@@ -8,6 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+.pytest_cache/
 
 # Environment variables
 .env
@@ -22,3 +23,7 @@ node_modules/
 frontend/node_modules/
 frontend/dist/
 frontend/.env
+
+# Local tools/runtime
+.tools/
+*.log
