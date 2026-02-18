@@ -97,47 +97,51 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
         if (!selectedCategory) return;
         setSaving(true);
         try {
-            const accountSet = new Set(selectedItems.map(i => i.account_id));
-            if (accountSet.size > 1) {
-                showToast('Cannot batch update items from different accounts simultaneously.', 'error');
-                setSaving(false);
-                return;
-            }
-
-            const accountId = Array.from(accountSet)[0];
-            const folders = selectedItems.filter(i => i.item_type === 'folder');
-            const files = selectedItems.filter(i => i.item_type !== 'folder');
-
             const promises = [];
+            const groupedByAccount = {};
 
-            if (files.length > 0) {
-                promises.push(
-                    itemsService.batchUpdateMetadata(
-                        accountId,
-                        files.map(i => i.item_id),
-                        selectedCategory,
-                        attributeValues
-                    )
-                );
+            for (const item of selectedItems) {
+                if (!groupedByAccount[item.account_id]) {
+                    groupedByAccount[item.account_id] = [];
+                }
+                groupedByAccount[item.account_id].push(item);
             }
 
-            if (applyRecursive && folders.length > 0) {
-                for (const folder of folders) {
+            let recursiveJobs = 0;
+            for (const [accountId, accountItems] of Object.entries(groupedByAccount)) {
+                const folders = accountItems.filter(i => i.item_type === 'folder');
+                const files = accountItems.filter(i => i.item_type !== 'folder');
+
+                if (files.length > 0) {
                     promises.push(
-                        jobsService.applyMetadataRecursive(
+                        itemsService.batchUpdateMetadata(
                             accountId,
-                            folder.path,
+                            files.map(i => i.item_id),
                             selectedCategory,
                             attributeValues
                         )
                     );
                 }
+
+                if (applyRecursive && folders.length > 0) {
+                    recursiveJobs += folders.length;
+                    for (const folder of folders) {
+                        promises.push(
+                            jobsService.applyMetadataRecursive(
+                                accountId,
+                                folder.path,
+                                selectedCategory,
+                                attributeValues
+                            )
+                        );
+                    }
+                }
             }
 
             await Promise.all(promises);
 
-            if (applyRecursive && folders.length > 0) {
-                showToast(`${folders.length} recursive job(s) created for folder contents.`, 'success');
+            if (applyRecursive && recursiveJobs > 0) {
+                showToast(`${recursiveJobs} recursive job(s) created for folder contents.`, 'success');
             } else {
                 showToast('Metadata updated successfully.', 'success');
             }

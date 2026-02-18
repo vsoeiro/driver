@@ -14,6 +14,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.logging_utils import log_event
+from backend.core.config import get_settings
 from backend.db.models import Job, JobAttempt
 from backend.services.job_queue import JobQueue, get_job_queue
 from backend.schemas.jobs import JobCreate
@@ -38,6 +39,71 @@ class JobService:
         """
         self.session = session
         self.queue = queue
+
+    async def recover_stale_running_jobs(self) -> int:
+        """Mark stale RUNNING jobs as CANCELLED.
+
+        A job is considered stale when it remains RUNNING longer than
+        worker timeout + grace period, which typically indicates worker crash
+        or lost cancellation callback.
+        """
+        settings = get_settings()
+        grace_seconds = 120
+        stale_after_seconds = max(60, int(settings.worker_job_timeout_seconds) + grace_seconds)
+        now = datetime.now(UTC)
+        cutoff = now - timedelta(seconds=stale_after_seconds)
+        stale_reason = (
+            f"Auto-cancelled by backend stale-job recovery after {stale_after_seconds}s "
+            f"without completion."
+        )
+
+        stmt = select(Job).where(
+            Job.status == "RUNNING",
+            Job.started_at.is_not(None),
+            Job.started_at < cutoff,
+        )
+        result = await self.session.execute(stmt)
+        stale_jobs = result.scalars().all()
+        if not stale_jobs:
+            return 0
+
+        stale_job_ids = [job.id for job in stale_jobs]
+        for job in stale_jobs:
+            current_result = self._coerce_json_dict(job.result, default_empty=True) or {}
+            job.status = "CANCELLED"
+            job.completed_at = now
+            job.last_error = stale_reason
+            job.result = {
+                **current_result,
+                "cancelled": True,
+                "message": stale_reason,
+                "stale_recovery": True,
+            }
+            self.session.add(job)
+
+        attempts_stmt = select(JobAttempt).where(
+            JobAttempt.job_id.in_(stale_job_ids),
+            JobAttempt.completed_at.is_(None),
+        )
+        attempts_result = await self.session.execute(attempts_stmt)
+        open_attempts = attempts_result.scalars().all()
+        for attempt in open_attempts:
+            started_at = attempt.started_at if isinstance(attempt.started_at, datetime) else now
+            attempt.status = "CANCELLED"
+            attempt.error = stale_reason
+            attempt.completed_at = now
+            attempt.duration_seconds = int(max(0, (now - started_at).total_seconds()))
+            self.session.add(attempt)
+
+        await self.session.commit()
+        log_event(
+            logger,
+            "jobs_stale_recovered",
+            level=logging.WARNING,
+            recovered_count=len(stale_job_ids),
+            stale_after_seconds=stale_after_seconds,
+        )
+        return len(stale_job_ids)
 
     async def _create_attempt(self, job_id: UUID, *, triggered_by: str = "worker") -> None:
         max_attempt_stmt = select(func.max(JobAttempt.attempt_number)).where(JobAttempt.job_id == job_id)
@@ -141,6 +207,7 @@ class JobService:
 
     async def start_job(self, job_id: UUID) -> Job | None:
         """Claim a job for execution and mark as RUNNING."""
+        await self.recover_stale_running_jobs()
         job = await self.session.get(Job, job_id)
         if not job:
             return None
@@ -397,6 +464,7 @@ class JobService:
         Sequence[Job]
             List of jobs.
         """
+        await self.recover_stale_running_jobs()
         stmt = (
             select(Job)
             .order_by(Job.created_at.desc())

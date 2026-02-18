@@ -181,13 +181,34 @@ export default function Jobs() {
                 <div>
                     <h1 className="text-lg font-semibold text-foreground">Background Jobs</h1>
                 </div>
-                <button
-                    onClick={() => fetchJobs()}
-                    className="p-2 hover:bg-accent rounded-md text-muted-foreground hover:text-foreground transition-colors"
-                    title="Refresh"
-                >
-                    <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                </button>
+                <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">Page {page}</span>
+                    <div className="flex gap-1">
+                        <button
+                            onClick={goToPreviousPage}
+                            disabled={page <= 1 || loading}
+                            className="p-1 hover:bg-accent rounded disabled:opacity-50"
+                            title="Previous page"
+                        >
+                            <ChevronLeft size={16} />
+                        </button>
+                        <button
+                            onClick={goToNextPage}
+                            disabled={!hasNextPage || loading}
+                            className="p-1 hover:bg-accent rounded disabled:opacity-50"
+                            title="Next page"
+                        >
+                            <ChevronRight size={16} />
+                        </button>
+                    </div>
+                    <button
+                        onClick={() => fetchJobs()}
+                        className="p-2 hover:bg-accent rounded-md text-muted-foreground hover:text-foreground transition-colors"
+                        title="Refresh"
+                    >
+                        <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                    </button>
+                </div>
             </div>
 
             <div className="flex-1 overflow-auto p-4">
@@ -338,27 +359,6 @@ export default function Jobs() {
                     </div>
                 )}
 
-                <div className="flex items-center justify-end gap-2 mt-3">
-                    <span className="text-sm text-muted-foreground">Page {page}</span>
-                    <div className="flex gap-1">
-                        <button
-                            onClick={goToPreviousPage}
-                            disabled={page <= 1 || loading}
-                            className="p-1 hover:bg-accent rounded disabled:opacity-50"
-                            title="Previous page"
-                        >
-                            <ChevronLeft size={16} />
-                        </button>
-                        <button
-                            onClick={goToNextPage}
-                            disabled={!hasNextPage || loading}
-                            className="p-1 hover:bg-accent rounded disabled:opacity-50"
-                            title="Next page"
-                        >
-                            <ChevronRight size={16} />
-                        </button>
-                    </div>
-                </div>
             </div>
 
             {/* Details Modal */}

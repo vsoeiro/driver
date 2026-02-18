@@ -85,15 +85,17 @@ async def test_delete_job_allows_cancelled_status():
 @pytest.mark.asyncio
 async def test_get_jobs_reads_without_reconciliation_write():
     session = AsyncMock()
-    result = MagicMock()
-    result.scalars.return_value.all.return_value = []
-    session.execute.return_value = result
+    stale_result = MagicMock()
+    stale_result.scalars.return_value.all.return_value = []
+    jobs_result = MagicMock()
+    jobs_result.scalars.return_value.all.return_value = []
+    session.execute.side_effect = [stale_result, jobs_result]
 
     service = JobService(session)
     jobs = await service.get_jobs()
 
     assert jobs == []
-    session.execute.assert_awaited_once()
+    assert session.execute.await_count == 2
     session.commit.assert_not_awaited()
 
 
