@@ -1,4 +1,6 @@
 from unittest.mock import AsyncMock, MagicMock
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -89,14 +91,71 @@ async def test_get_jobs_reads_without_reconciliation_write():
     stale_result.scalars.return_value.all.return_value = []
     jobs_result = MagicMock()
     jobs_result.scalars.return_value.all.return_value = []
-    session.execute.side_effect = [stale_result, jobs_result]
+    avg_result = MagicMock()
+    avg_result.scalars.return_value.all.return_value = []
+    running_result = MagicMock()
+    running_result.scalars.return_value.all.return_value = []
+    pending_result = MagicMock()
+    pending_result.scalars.return_value.all.return_value = []
+    session.execute.side_effect = [stale_result, jobs_result, avg_result, running_result, pending_result]
 
     service = JobService(session)
     jobs = await service.get_jobs()
 
     assert jobs == []
-    assert session.execute.await_count == 2
+    assert session.execute.await_count >= 2
     session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_jobs_filters_by_status():
+    session = AsyncMock()
+    stale_result = MagicMock()
+    stale_result.scalars.return_value.all.return_value = []
+    jobs_result = MagicMock()
+    jobs_result.scalars.return_value.all.return_value = []
+    avg_result = MagicMock()
+    avg_result.scalars.return_value.all.return_value = []
+    running_result = MagicMock()
+    running_result.scalars.return_value.all.return_value = []
+    pending_result = MagicMock()
+    pending_result.scalars.return_value.all.return_value = []
+    session.execute.side_effect = [stale_result, jobs_result, avg_result, running_result, pending_result]
+
+    service = JobService(session)
+    await service.get_jobs(statuses=["pending"])
+
+    assert session.execute.await_count >= 2
+    jobs_stmt = session.execute.await_args_list[1].args[0]
+    assert "jobs.status" in str(jobs_stmt).lower()
+
+
+@pytest.mark.asyncio
+async def test_avg_duration_uses_last_10_jobs_per_type():
+    session = AsyncMock()
+    now = datetime.now(UTC)
+    rows = []
+    for i in range(12):
+        duration_seconds = 10 if i < 10 else 1000
+        completed_at = now - timedelta(minutes=i)
+        started_at = completed_at - timedelta(seconds=duration_seconds)
+        rows.append(
+            SimpleNamespace(
+                type="sync_items",
+                started_at=started_at,
+                completed_at=completed_at,
+                status="COMPLETED",
+            )
+        )
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = rows
+    session.execute.return_value = result
+
+    service = JobService(session)
+    avg_by_type, global_avg = await service._build_avg_duration_by_type()
+
+    assert round(avg_by_type["sync_items"], 2) == 10.0
+    assert round(global_avg, 2) == 10.0
 
 
 @pytest.mark.asyncio

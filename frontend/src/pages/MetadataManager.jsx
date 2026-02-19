@@ -488,7 +488,10 @@ const CategoryItemsTable = ({ category, onBack }) => {
 
     const isReadOnlyAttribute = (attr) => {
         if (!attr) return true;
-        return Boolean(attr.is_locked || attr.managed_by_plugin || READ_ONLY_COMIC_FIELDS.has(attr.plugin_field_key));
+        if (attr.plugin_key === 'comicrack_core') {
+            return READ_ONLY_COMIC_FIELDS.has(attr.plugin_field_key);
+        }
+        return Boolean(attr.is_locked || attr.managed_by_plugin);
     };
 
     const getEditValue = (item, attr) => {

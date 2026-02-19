@@ -17,12 +17,19 @@ export const createMoveJob = async (sourceAccountId, sourceItemId, destinationAc
     return response.data;
 };
 
-export const getJobs = async (limit = 50, offset = 0) => {
+export const getJobs = async (limit = 50, offset = 0, statuses = []) => {
     const safeLimit = Number.isFinite(Number(limit)) ? Math.max(1, Math.floor(Number(limit))) : 50;
     const safeOffset = Number.isFinite(Number(offset)) ? Math.max(0, Math.floor(Number(offset))) : 0;
-    const response = await api.get('/jobs/', {
-        params: { limit: safeLimit, offset: safeOffset },
-    });
+    const normalizedStatuses = Array.isArray(statuses)
+        ? statuses.map((status) => String(status || '').trim().toUpperCase()).filter(Boolean)
+        : [];
+    const params = { limit: safeLimit, offset: safeOffset };
+    if (normalizedStatuses.length === 1) {
+        params.status = normalizedStatuses[0];
+    } else if (normalizedStatuses.length > 1) {
+        params.status = normalizedStatuses.join(',');
+    }
+    const response = await api.get('/jobs/', { params });
     return response.data;
 };
 

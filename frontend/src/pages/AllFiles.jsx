@@ -8,11 +8,13 @@ import { useToast } from '../contexts/ToastContext';
 import { getSelectOptions } from '../utils/metadata';
 import {
     File, Folder, FolderOpen, Search, Filter, Database, CheckSquare, Square,
-    Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, X, Trash2, ChevronDown, BookOpen, Pencil
+    Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, X, Trash2, ChevronDown, BookOpen, Pencil,
+    Download, ArrowRightLeft, XCircle
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import ProviderIcon from '../components/ProviderIcon';
 import MetadataModal from '../components/MetadataModal';
+import MoveModal from '../components/MoveModal';
 
 const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'cbw', 'pdf', 'epub', 'cbr', 'rar', 'cb7', '7z', 'cbt', 'tar']);
 const READ_ONLY_COMIC_FIELDS = new Set(['cover_item_id', 'cover_filename', 'cover_account_id', 'page_count', 'file_format']);
@@ -21,6 +23,12 @@ const READ_ONLY_COMIC_FIELDS = new Set(['cover_item_id', 'cover_filename', 'cove
 const FilterBar = ({ onFilter, filters, accounts, categories }) => {
     const [localFilters, setLocalFilters] = useState(filters);
     const [isOpen, setIsOpen] = useState(false);
+    const [extensionsInput, setExtensionsInput] = useState((filters.extensions || []).join(', '));
+
+    useEffect(() => {
+        setLocalFilters(filters);
+        setExtensionsInput((filters.extensions || []).join(', '));
+    }, [filters]);
 
     const handleChange = (key, value) => {
         setLocalFilters(prev => ({ ...prev, [key]: value }));
@@ -42,6 +50,7 @@ const FilterBar = ({ onFilter, filters, accounts, categories }) => {
             has_metadata: ''
         };
         setLocalFilters(cleared);
+        setExtensionsInput('');
         onFilter(cleared);
     };
 
@@ -116,9 +125,11 @@ const FilterBar = ({ onFilter, filters, accounts, categories }) => {
                             type="text"
                             className="w-full border rounded-md p-2 text-sm bg-background"
                             placeholder="pdf, jpg, docx"
-                            value={localFilters.extensions ? localFilters.extensions.join(', ') : ''}
+                            value={extensionsInput}
                             onChange={(e) => {
-                                const exts = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+                                const raw = e.target.value;
+                                setExtensionsInput(raw);
+                                const exts = raw.split(',').map((s) => s.trim()).filter(Boolean);
                                 handleChange('extensions', exts);
                             }}
                         />
@@ -542,6 +553,8 @@ export default function AllFiles() {
     const [batchModalOpen, setBatchModalOpen] = useState(false);
     const [metadataModalOpen, setMetadataModalOpen] = useState(false);
     const [removeModalOpen, setRemoveModalOpen] = useState(false);
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+    const [moveModalOpen, setMoveModalOpen] = useState(false);
     const [metadataMenuOpen, setMetadataMenuOpen] = useState(false);
     const [actionLoading, setActionLoading] = useState(false);
     const [mapLibraryLoading, setMapLibraryLoading] = useState(false);
@@ -661,6 +674,9 @@ export default function AllFiles() {
         const selectedId = Array.from(selectedItems)[0];
         return items.find((i) => i.id === selectedId) || null;
     }, [selectedItems, items]);
+    const moveTargetItem = singleSelectedItem
+        ? { ...singleSelectedItem, id: singleSelectedItem.item_id }
+        : null;
 
     const canMapComics = useMemo(() => {
         if (selectedItems.size === 0) return false;
@@ -725,6 +741,48 @@ export default function AllFiles() {
         }
     };
 
+    const handleDownload = async () => {
+        const selectedFiles = getSelectedObjects().filter((item) => item.item_type === 'file');
+        for (const file of selectedFiles) {
+            try {
+                const url = await driveService.getDownloadUrl(file.account_id, file.item_id);
+                window.open(url, '_blank');
+            } catch (error) {
+                showToast(`Failed to download ${file.name}`, 'error');
+            }
+        }
+    };
+
+    const executeDelete = async () => {
+        const selected = getSelectedObjects();
+        if (selected.length === 0) return;
+
+        setActionLoading(true);
+        try {
+            const byAccount = selected.reduce((acc, item) => {
+                const key = item.account_id;
+                if (!acc[key]) acc[key] = [];
+                acc[key].push(item.item_id);
+                return acc;
+            }, {});
+
+            await Promise.all(
+                Object.entries(byAccount).map(([accountId, itemIds]) =>
+                    driveService.batchDeleteItems(accountId, itemIds)
+                )
+            );
+
+            showToast('Selected items deleted successfully.', 'success');
+            setDeleteModalOpen(false);
+            setSelectedItems(new Set());
+            fetchItems();
+        } catch (error) {
+            showToast(error?.response?.data?.detail || 'Failed to delete selected items', 'error');
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
     const openRenameModal = () => {
         if (!singleSelectedItem) return;
         setRenameValue(singleSelectedItem.name || '');
@@ -773,7 +831,7 @@ export default function AllFiles() {
         try {
             const summary = await jobsService.createExtractLibraryComicAssetsJob(accountScope, safeChunkSize);
             if (!summary?.total_jobs) {
-                showToast('No .cbr/.cbz files found in current scope.', 'success');
+                showToast('No unmapped .cbr/.cbz files found in current scope.', 'success');
                 return;
             }
             showToast(
@@ -872,6 +930,22 @@ export default function AllFiles() {
                 <div className="flex items-center gap-2">
                     <span className="font-medium mr-2 whitespace-nowrap w-24 text-right tabular-nums">{selectedItems.size} selected</span>
                     <div className="h-4 w-px bg-border mx-2" />
+                    <button
+                        onClick={handleDownload}
+                        disabled={selectedItems.size === 0}
+                        className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Download"
+                    >
+                        <Download size={16} /> <span className="hidden sm:inline">Download</span>
+                    </button>
+                    <button
+                        onClick={() => setMoveModalOpen(true)}
+                        disabled={selectedItems.size !== 1}
+                        className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Move"
+                    >
+                        <ArrowRightLeft size={16} /> <span className="hidden sm:inline">Move</span>
+                    </button>
                     <div
                         className={`relative ${selectedItems.size === 0 ? 'pointer-events-none opacity-50' : ''}`}
                         ref={metadataMenuRef}
@@ -919,7 +993,7 @@ export default function AllFiles() {
                                         disabled={selectedItems.size === 0}
                                         className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 text-destructive hover:text-destructive disabled:opacity-50"
                                     >
-                                        <Trash2 size={14} /> Remove Metadata
+                                        <XCircle size={14} /> Remove Metadata
                                     </button>
                                     <button
                                         onClick={executeMapComics}
@@ -933,6 +1007,15 @@ export default function AllFiles() {
                             </div>
                         )}
                     </div>
+                    <div className="h-4 w-px bg-border mx-1" />
+                    <button
+                        onClick={() => setDeleteModalOpen(true)}
+                        disabled={selectedItems.size === 0}
+                        className="p-2 hover:bg-destructive/10 text-destructive rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Delete"
+                    >
+                        <Trash2 size={16} /> <span className="hidden sm:inline">Delete</span>
+                    </button>
 
                 </div>
 
@@ -1097,6 +1180,50 @@ export default function AllFiles() {
                 onSuccess={() => {
                     fetchItems();
                     setSelectedItems(new Set());
+                }}
+            />
+
+            <Modal
+                isOpen={deleteModalOpen}
+                onClose={() => !actionLoading && setDeleteModalOpen(false)}
+                title={`Delete ${selectedItems.size} item(s)?`}
+                maxWidthClass="max-w-md"
+            >
+                <div className="space-y-4">
+                    <p className="text-sm text-muted-foreground">
+                        Are you sure you want to delete the selected items? This action cannot be undone.
+                    </p>
+                    <div className="flex justify-end gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setDeleteModalOpen(false)}
+                            disabled={actionLoading}
+                            className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="button"
+                            onClick={executeDelete}
+                            disabled={actionLoading}
+                            className="px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {actionLoading && <Loader2 className="animate-spin" size={14} />}
+                            Delete
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+
+            <MoveModal
+                isOpen={moveModalOpen}
+                onClose={() => setMoveModalOpen(false)}
+                item={moveTargetItem}
+                sourceAccountId={moveTargetItem?.account_id}
+                onSuccess={() => {
+                    setMoveModalOpen(false);
+                    setSelectedItems(new Set());
+                    fetchItems();
                 }}
             />
 

@@ -17,16 +17,18 @@ export default function Jobs() {
     const [reprocessingJobId, setReprocessingJobId] = useState(null);
     const [attempts, setAttempts] = useState([]);
     const [loadingAttempts, setLoadingAttempts] = useState(false);
+    const [statusFilter, setStatusFilter] = useState('ALL');
     const { showToast } = useToast();
     const PAGE_SIZE = 20;
 
-    const fetchJobs = useCallback(async (pageNumber = page) => {
+    const fetchJobs = useCallback(async (pageNumber = page, statusValue = statusFilter) => {
         setLoading(true);
         try {
             const parsedPage = Number(pageNumber);
             const safePage = Number.isFinite(parsedPage) && parsedPage > 0 ? Math.floor(parsedPage) : page;
             const offset = (safePage - 1) * PAGE_SIZE;
-            const data = await getJobs(PAGE_SIZE, offset);
+            const statuses = statusValue === 'ALL' ? [] : [statusValue];
+            const data = await getJobs(PAGE_SIZE, offset, statuses);
             setJobs(data);
             setHasNextPage(data.length === PAGE_SIZE);
         } catch (error) {
@@ -35,26 +37,26 @@ export default function Jobs() {
         } finally {
             setLoading(false);
         }
-    }, [showToast, page]);
+    }, [showToast, page, statusFilter]);
 
     useEffect(() => {
-        fetchJobs();
-        const interval = setInterval(fetchJobs, 5000); // Poll every 5 seconds
+        fetchJobs(page, statusFilter);
+        const interval = setInterval(() => fetchJobs(page, statusFilter), 5000); // Poll every 5 seconds
         return () => clearInterval(interval);
-    }, [fetchJobs]);
+    }, [fetchJobs, page, statusFilter]);
 
     const goToPreviousPage = () => {
         if (page <= 1) return;
         const nextPage = page - 1;
         setPage(nextPage);
-        fetchJobs(nextPage);
+        fetchJobs(nextPage, statusFilter);
     };
 
     const goToNextPage = () => {
         if (!hasNextPage) return;
         const nextPage = page + 1;
         setPage(nextPage);
-        fetchJobs(nextPage);
+        fetchJobs(nextPage, statusFilter);
     };
 
     const getStatusIcon = (status) => {
@@ -153,6 +155,17 @@ export default function Jobs() {
         });
     };
 
+    const formatDuration = (seconds) => {
+        if (seconds === null || seconds === undefined || !Number.isFinite(Number(seconds))) return '-';
+        const safe = Math.max(0, Math.floor(Number(seconds)));
+        const hours = Math.floor(safe / 3600);
+        const minutes = Math.floor((safe % 3600) / 60);
+        const secs = safe % 60;
+        if (hours > 0) return `${hours}h ${minutes}m`;
+        if (minutes > 0) return `${minutes}m ${secs}s`;
+        return `${secs}s`;
+    };
+
     const pickMetricNumber = (source, keys) => {
         if (!source || typeof source !== 'object') return 0;
         for (const key of keys) {
@@ -182,6 +195,25 @@ export default function Jobs() {
                     <h1 className="text-lg font-semibold text-foreground">Background Jobs</h1>
                 </div>
                 <div className="flex items-center gap-2">
+                    <select
+                        className="border rounded-md px-2 py-1.5 text-sm bg-background"
+                        value={statusFilter}
+                        onChange={(event) => {
+                            const nextStatus = event.target.value;
+                            setStatusFilter(nextStatus);
+                            setPage(1);
+                            fetchJobs(1, nextStatus);
+                        }}
+                    >
+                        <option value="ALL">All status</option>
+                        <option value="PENDING">Pending</option>
+                        <option value="RUNNING">Running</option>
+                        <option value="RETRY_SCHEDULED">Retry Scheduled</option>
+                        <option value="COMPLETED">Completed</option>
+                        <option value="FAILED">Failed</option>
+                        <option value="DEAD_LETTER">Dead Letter</option>
+                        <option value="CANCELLED">Cancelled</option>
+                    </select>
                     <span className="text-sm text-muted-foreground">Page {page}</span>
                     <div className="flex gap-1">
                         <button
@@ -218,13 +250,14 @@ export default function Jobs() {
                     </div>
                 ) : (
                     <div className="border rounded-lg overflow-hidden bg-card">
-                        <div className="grid grid-cols-[130px_1fr_140px_140px_140px_110px_140px_170px_78px] gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
+                        <div className="grid grid-cols-[130px_1fr_140px_140px_140px_110px_150px_140px_170px_78px] gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
                             <div>Status</div>
                             <div>Type</div>
                             <div className="text-right">Created</div>
                             <div className="text-right">Started</div>
                             <div className="text-right">Finished</div>
                             <div className="text-right">Duration</div>
+                            <div>ETA</div>
                             <div>Progress</div>
                             <div>Metrics</div>
                             <div className="text-center"></div>
@@ -240,6 +273,10 @@ export default function Jobs() {
                                 const finishedAt = job.completed_at || job.dead_lettered_at || null;
                                 const progressPercent = job.progress_percent ?? 0;
                                 const metricSummary = getMetricSummary(job);
+                                const isQueued = ['PENDING', 'RETRY_SCHEDULED'].includes(job.status);
+                                const etaText = isQueued
+                                    ? `~${formatDuration(job.estimated_wait_seconds)} (${job.queue_position ? `#${job.queue_position}` : '-'})`
+                                    : '-';
                                 const canUndo = job.status === 'COMPLETED' && job.result?.batch_id;
                                 const canDelete = ['COMPLETED', 'FAILED', 'DEAD_LETTER', 'CANCELLED'].includes(job.status);
                                 const canCancel = ['PENDING', 'RUNNING', 'RETRY_SCHEDULED', 'CANCEL_REQUESTED'].includes(job.status);
@@ -247,7 +284,7 @@ export default function Jobs() {
                                 return (
                                     <div
                                         key={job.id}
-                                        className="grid grid-cols-[130px_1fr_140px_140px_140px_110px_140px_170px_78px] gap-4 p-3 items-center hover:bg-muted/30 transition-colors pointer-events-none"
+                                        className="grid grid-cols-[130px_1fr_140px_140px_140px_110px_150px_140px_170px_78px] gap-4 p-3 items-center hover:bg-muted/30 transition-colors pointer-events-none"
                                     >
                                         <div className="pointer-events-auto">
                                             <div className={`inline-flex items-center gap-2 font-medium ${job.status === 'COMPLETED' ? 'text-green-600' :
@@ -274,6 +311,14 @@ export default function Jobs() {
                                         </div>
                                         <div className="text-right text-muted-foreground tabular-nums font-mono pointer-events-auto">
                                             {duration}
+                                        </div>
+                                        <div className="text-xs text-muted-foreground pointer-events-auto tabular-nums leading-5">
+                                            <div>{etaText}</div>
+                                            {isQueued && (
+                                                <div>
+                                                    start: {formatDate(job.estimated_start_at)}
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="pointer-events-auto">
                                             <div className="h-2 w-full bg-muted rounded overflow-hidden">
@@ -406,6 +451,11 @@ export default function Jobs() {
                             {selectedJob.next_retry_at && (
                                 <div className="text-xs text-amber-600">
                                     Next retry: {formatDate(selectedJob.next_retry_at)}
+                                </div>
+                            )}
+                            {['PENDING', 'RETRY_SCHEDULED'].includes(selectedJob.status) && (
+                                <div className="text-xs text-muted-foreground">
+                                    Queue: {selectedJob.queue_position ? `#${selectedJob.queue_position}` : '-'} | ETA start: {formatDate(selectedJob.estimated_start_at)} | Wait: {formatDuration(selectedJob.estimated_wait_seconds)}
                                 </div>
                             )}
                             {selectedJob.dead_lettered_at && (

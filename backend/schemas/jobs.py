@@ -56,6 +56,10 @@ class Job(JobBase):
     dead_lettered_at: datetime | None = None
     dead_letter_reason: str | None = None
     reprocessed_from_job_id: UUID | None = None
+    queue_position: int | None = None
+    estimated_wait_seconds: int | None = None
+    estimated_duration_seconds: int | None = None
+    estimated_start_at: datetime | None = None
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None

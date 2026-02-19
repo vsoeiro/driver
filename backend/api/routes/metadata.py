@@ -47,6 +47,14 @@ from backend.services.token_manager import TokenManager
 
 router = APIRouter(prefix="/metadata", tags=["Metadata"])
 
+READ_ONLY_COMIC_FIELD_KEYS = {
+    "cover_item_id",
+    "cover_filename",
+    "cover_account_id",
+    "page_count",
+    "file_format",
+}
+
 
 def _to_json_compatible(value):
     if isinstance(value, datetime):
@@ -150,6 +158,14 @@ def _coerce_attribute_value(attribute: MetadataAttribute, raw_value: Any) -> Any
         return value
 
     return stripped
+
+
+def _can_inline_edit_attribute(attribute: MetadataAttribute) -> bool:
+    # Comic plugin fields are editable except technical read-only keys.
+    if attribute.plugin_key == COMIC_PLUGIN_KEY:
+        return (attribute.plugin_field_key or "") not in READ_ONLY_COMIC_FIELD_KEYS
+    # Non-plugin attributes follow lock rules.
+    return not (attribute.is_locked or attribute.managed_by_plugin)
 
 
 async def _validate_rule_configuration(session: AsyncSession, payload: dict) -> None:
@@ -384,7 +400,7 @@ async def update_item_metadata_attribute(
     attribute = await session.get(MetadataAttribute, attribute_id)
     if not attribute:
         raise HTTPException(status_code=404, detail="Attribute not found")
-    if attribute.is_locked or attribute.managed_by_plugin:
+    if not _can_inline_edit_attribute(attribute):
         raise HTTPException(status_code=400, detail="Attribute is locked and cannot be edited")
 
     stmt = select(ItemMetadata).where(

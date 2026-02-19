@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from backend.api.routes.metadata import _coerce_attribute_value
+from backend.api.routes.metadata import _can_inline_edit_attribute, _coerce_attribute_value
 
 
 def _attr(data_type: str, name: str = "Field", options=None):
@@ -43,3 +43,21 @@ def test_coerce_attribute_select_invalid_option():
 def test_coerce_attribute_blank_returns_none():
     attr = _attr("text", "Title")
     assert _coerce_attribute_value(attr, "   ") is None
+
+
+def test_can_inline_edit_allows_non_readonly_comic_field():
+    attr = _attr("text", "Series")
+    attr.plugin_key = "comicrack_core"
+    attr.plugin_field_key = "series"
+    attr.is_locked = True
+    attr.managed_by_plugin = True
+    assert _can_inline_edit_attribute(attr) is True
+
+
+def test_can_inline_edit_blocks_readonly_comic_field():
+    attr = _attr("text", "Cover Item ID")
+    attr.plugin_key = "comicrack_core"
+    attr.plugin_field_key = "cover_item_id"
+    attr.is_locked = True
+    attr.managed_by_plugin = True
+    assert _can_inline_edit_attribute(attr) is False

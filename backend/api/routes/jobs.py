@@ -5,11 +5,11 @@ This module provides endpoints for creating and managing background jobs.
 
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Query, Request, status, UploadFile, File, Form
 from sqlalchemy import func, select
 
 from backend.api.dependencies import DBSession, JobServiceDep
-from backend.db.models import Item
+from backend.db.models import Item, ItemMetadata
 from backend.schemas.jobs import (
     Job, JobAttempt, JobCreate, JobMoveRequest, JobMetadataUpdateRequest,
     JobSyncRequest, JobApplyMetadataRecursiveRequest,
@@ -22,8 +22,65 @@ from backend.schemas.jobs import (
     JobReindexComicCoversRequest,
 )
 from backend.services.jobs import JobService
+from backend.services.metadata_plugins import MetadataPluginService
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
+
+
+def _is_comic_item_already_mapped(values: dict | None, attr_ids: dict[str, str]) -> bool:
+    values = values or {}
+    check_fields = ("cover_item_id", "cover_account_id", "page_count", "file_format")
+    for field_key in check_fields:
+        attr_id = attr_ids.get(field_key)
+        if not attr_id:
+            continue
+        value = values.get(attr_id)
+        if value is not None and value != "":
+            return True
+    return False
+
+
+async def _filter_unmapped_comic_items(
+    db: DBSession,
+    by_account: dict[UUID, list[str]],
+) -> dict[UUID, list[str]]:
+    if not by_account:
+        return by_account
+
+    plugin_service = MetadataPluginService(db)
+    try:
+        category = await plugin_service.ensure_active_comic_category()
+    except Exception:
+        # If plugin schema is unavailable, keep current behavior (no pre-filter).
+        return by_account
+
+    attr_ids = {
+        attr.plugin_field_key: str(attr.id)
+        for attr in category.attributes
+        if attr.plugin_field_key
+    }
+    if not attr_ids:
+        return by_account
+
+    filtered: dict[UUID, list[str]] = {}
+    for account_id, item_ids in by_account.items():
+        if not item_ids:
+            continue
+        stmt = select(ItemMetadata.item_id, ItemMetadata.values).where(
+            ItemMetadata.account_id == account_id,
+            ItemMetadata.category_id == category.id,
+            ItemMetadata.item_id.in_(item_ids),
+        )
+        rows = (await db.execute(stmt)).all()
+        already_mapped_ids = {
+            str(item_id)
+            for item_id, values in rows
+            if _is_comic_item_already_mapped(values, attr_ids)
+        }
+        remaining = [item_id for item_id in item_ids if str(item_id) not in already_mapped_ids]
+        if remaining:
+            filtered[account_id] = remaining
+    return filtered
 
 
 @router.post("/move", response_model=Job, status_code=status.HTTP_201_CREATED)
@@ -48,15 +105,27 @@ async def create_move_job(
 
 @router.get("/", response_model=list[Job])
 async def list_jobs(
+    request: Request,
     job_service: JobServiceDep,
     limit: int = 50,
     offset: int = 0,
+    status_filter: list[str] | None = Query(default=None, alias="status"),
 ) -> list[Job]:
     """List recent jobs.
     
     Returns a list of jobs ordered by creation date (newest first).
     """
-    return await job_service.get_jobs(limit, offset)
+    raw_statuses = []
+    raw_statuses.extend(status_filter or [])
+    raw_statuses.extend(request.query_params.getlist("status[]"))
+
+    statuses: list[str] = []
+    for value in raw_statuses:
+        if not value:
+            continue
+        parts = [part.strip().upper() for part in str(value).split(",")]
+        statuses.extend([part for part in parts if part])
+    return await job_service.get_jobs(limit=limit, offset=offset, statuses=statuses or None)
 
 
 @router.post("/upload", response_model=Job, status_code=status.HTTP_201_CREATED)
@@ -255,6 +324,16 @@ async def create_extract_library_comic_assets_job(
     for account_id, item_id in rows:
         by_account.setdefault(account_id, []).append(item_id)
 
+    by_account = await _filter_unmapped_comic_items(db, by_account)
+    total_unmapped_items = sum(len(item_ids) for item_ids in by_account.values())
+    if total_unmapped_items == 0:
+        return JobExtractLibraryComicAssetsResponse(
+            total_items=0,
+            total_jobs=0,
+            chunk_size=chunk_size,
+            job_ids=[],
+        )
+
     job_service = JobService(db)
     created_job_ids: list[UUID] = []
     for account_id, item_ids in by_account.items():
@@ -273,7 +352,7 @@ async def create_extract_library_comic_assets_job(
             created_job_ids.append(job.id)
 
     return JobExtractLibraryComicAssetsResponse(
-        total_items=len(rows),
+        total_items=total_unmapped_items,
         total_jobs=len(created_job_ids),
         chunk_size=chunk_size,
         job_ids=created_job_ids,

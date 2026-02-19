@@ -5,7 +5,7 @@ import { jobsService } from '../services/jobs';
 import { aiService } from '../services/ai';
 import { driveService } from '../services/drive';
 import { useToast } from '../contexts/ToastContext';
-import { Loader2, AlertTriangle, Sparkles } from 'lucide-react';
+import { Loader2, AlertTriangle, Sparkles, ZoomIn, ZoomOut, X } from 'lucide-react';
 import { getCategoryPluginView } from '../plugins/metadataCategoryViews';
 import { buildCoverCacheKey, getCachedCoverUrl, setCachedCoverUrl } from '../utils/coverCache';
 import { getSelectOptions } from '../utils/metadata';
@@ -37,6 +37,8 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
     const [aiSuggestions, setAiSuggestions] = useState({});
     const [coverUrl, setCoverUrl] = useState(null);
     const [coverLoading, setCoverLoading] = useState(false);
+    const [isCoverZoomOpen, setIsCoverZoomOpen] = useState(false);
+    const [coverZoomLevel, setCoverZoomLevel] = useState(1);
 
     // Form State
     const [selectedCategoryId, setSelectedCategoryId] = useState('');
@@ -80,8 +82,30 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
             setFormValues({});
             setAiSuggestions({});
             setHistory([]);
+            setIsCoverZoomOpen(false);
+            setCoverZoomLevel(1);
         }
     }, [isOpen, item, loadData]);
+
+    useEffect(() => {
+        if (!isCoverZoomOpen) return;
+
+        const onKeyDown = (event) => {
+            if (event.key === 'Escape') {
+                setIsCoverZoomOpen(false);
+                return;
+            }
+            if (event.key === '+' || event.key === '=') {
+                setCoverZoomLevel((prev) => Math.min(4, Number((prev + 0.25).toFixed(2))));
+            }
+            if (event.key === '-') {
+                setCoverZoomLevel((prev) => Math.max(1, Number((prev - 0.25).toFixed(2))));
+            }
+        };
+
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [isCoverZoomOpen]);
 
     const normalizeAiValue = (attribute, value) => {
         if (value === undefined || value === null || value === '') return value;
@@ -370,11 +394,26 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                 </div>
             ) : (
                 <form onSubmit={handleSave}>
-                    <div className={`grid gap-4 ${showCoverPanel ? 'grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]' : 'grid-cols-1'}`}>
+                    <div className={`grid gap-4 ${showCoverPanel ? 'grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)]' : 'grid-cols-1'}`}>
                         {showCoverPanel && (
                             <aside className="border rounded-md bg-muted/20 p-3 h-fit lg:sticky lg:top-0">
-                                <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                                    Cover Preview
+                                <div className="flex items-center justify-between gap-2 mb-2">
+                                    <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                        Cover Preview
+                                    </div>
+                                    {coverUrl && (
+                                        <button
+                                            type="button"
+                                            className="text-xs px-2 py-1 border rounded hover:bg-accent flex items-center gap-1"
+                                            onClick={() => {
+                                                setCoverZoomLevel(1);
+                                                setIsCoverZoomOpen(true);
+                                            }}
+                                        >
+                                            <ZoomIn size={12} />
+                                            Zoom
+                                        </button>
+                                    )}
                                 </div>
                                 <div className="w-full aspect-[3/4] rounded-md overflow-hidden border bg-background">
                                     {coverLoading ? (
@@ -382,7 +421,16 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                                             <Loader2 className="animate-spin text-primary" size={24} />
                                         </div>
                                     ) : coverUrl ? (
-                                        <img src={coverUrl} alt={item?.name || 'Cover'} className="w-full h-full object-cover" />
+                                        <button
+                                            type="button"
+                                            className="w-full h-full cursor-zoom-in"
+                                            onClick={() => {
+                                                setCoverZoomLevel(1);
+                                                setIsCoverZoomOpen(true);
+                                            }}
+                                        >
+                                            <img src={coverUrl} alt={item?.name || 'Cover'} className="w-full h-full object-cover" />
+                                        </button>
                                     ) : (
                                         <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground">
                                             No cover available
@@ -619,6 +667,70 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                         </div>
                     </div>
                 </form>
+            )}
+            {isCoverZoomOpen && coverUrl && (
+                <div
+                    className="fixed inset-0 z-[70] bg-black/85 flex flex-col"
+                    onClick={() => setIsCoverZoomOpen(false)}
+                >
+                    <div className="flex items-center justify-between p-3 border-b border-white/10">
+                        <div className="text-xs text-white/80 truncate pr-2">
+                            {item?.name || 'Cover'}
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                className="px-2 py-1 text-white border border-white/20 rounded hover:bg-white/10"
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    setCoverZoomLevel((prev) => Math.max(1, Number((prev - 0.25).toFixed(2))));
+                                }}
+                            >
+                                <ZoomOut size={14} />
+                            </button>
+                            <div className="text-xs text-white min-w-12 text-center">{Math.round(coverZoomLevel * 100)}%</div>
+                            <button
+                                type="button"
+                                className="px-2 py-1 text-white border border-white/20 rounded hover:bg-white/10"
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    setCoverZoomLevel((prev) => Math.min(4, Number((prev + 0.25).toFixed(2))));
+                                }}
+                            >
+                                <ZoomIn size={14} />
+                            </button>
+                            <button
+                                type="button"
+                                className="px-2 py-1 text-white border border-white/20 rounded hover:bg-white/10"
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    setIsCoverZoomOpen(false);
+                                }}
+                            >
+                                <X size={14} />
+                            </button>
+                        </div>
+                    </div>
+                    <div
+                        className="flex-1 overflow-auto p-4 flex items-center justify-center"
+                        onClick={(event) => event.stopPropagation()}
+                        onWheel={(event) => {
+                            if (!event.ctrlKey) return;
+                            event.preventDefault();
+                            setCoverZoomLevel((prev) => {
+                                const delta = event.deltaY < 0 ? 0.1 : -0.1;
+                                return Math.max(1, Math.min(4, Number((prev + delta).toFixed(2))));
+                            });
+                        }}
+                    >
+                        <img
+                            src={coverUrl}
+                            alt={item?.name || 'Cover zoom'}
+                            className="max-w-none rounded shadow-2xl"
+                            style={{ transform: `scale(${coverZoomLevel})`, transformOrigin: 'center center' }}
+                        />
+                    </div>
+                </div>
             )}
         </Modal>
     );
