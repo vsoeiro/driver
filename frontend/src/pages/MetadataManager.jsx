@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { metadataService } from '../services/metadata';
 import { itemsService } from '../services/items';
 import { accountsService } from '../services/accounts';
@@ -28,12 +28,20 @@ const READ_ONLY_COMIC_FIELDS = new Set([
     'page_count',
     'file_format',
 ]);
+const ITEMS_PER_PAGE = 50;
+const BASE_SORT_OPTIONS = [
+    { value: 'modified_at', label: 'Order: Modified' },
+    { value: 'name', label: 'Order: Name' },
+    { value: 'size', label: 'Order: Size' },
+    { value: 'created_at', label: 'Order: Created' },
+];
 
 
 // -- Category Items Table --
 const CategoryItemsTable = ({ category, onBack }) => {
     const { showToast } = useToast();
     const [items, setItems] = useState([]);
+    const [seriesRows, setSeriesRows] = useState([]);
     const [accounts, setAccounts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [page, setPage] = useState(1);
@@ -68,6 +76,25 @@ const CategoryItemsTable = ({ category, onBack }) => {
     });
     const pluginView = getCategoryPluginView(category);
     const supportsGallery = !!pluginView?.modes?.includes('gallery');
+    const supportsSeriesTracker = !!pluginView?.modes?.includes('series_tracker');
+    const metadataSortOptions = useMemo(
+        () =>
+            (category.attributes || []).map((attr) => ({
+                value: `metadata:${attr.id}`,
+                label: `Order: ${attr.name}`,
+                attributeId: attr.id,
+                dataType: attr.data_type,
+            })),
+        [category.attributes]
+    );
+    const sortOptions = useMemo(
+        () => [...BASE_SORT_OPTIONS, ...metadataSortOptions],
+        [metadataSortOptions]
+    );
+    const selectedMetadataSort = useMemo(() => {
+        if (!sort.by?.startsWith('metadata:')) return null;
+        return metadataSortOptions.find((option) => option.value === sort.by) || null;
+    }, [sort.by, metadataSortOptions]);
 
     useEffect(() => {
         accountsService.getAccounts().then(setAccounts).catch(console.error);
@@ -82,6 +109,12 @@ const CategoryItemsTable = ({ category, onBack }) => {
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
+
+    useEffect(() => {
+        if (sort.by?.startsWith('metadata:') && !selectedMetadataSort) {
+            setSort((prev) => ({ ...prev, by: 'modified_at' }));
+        }
+    }, [sort.by, selectedMetadataSort]);
 
     const CategoryFilterBar = ({ onFilter, currentFilters }) => {
         const [localFilters, setLocalFilters] = useState(currentFilters);
@@ -310,6 +343,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
         setLoading(true);
         try {
             const effectivePage = overridePage ?? page;
+            const isSeriesTrackerMode = supportsSeriesTracker && viewMode === 'series_tracker';
             const metadataFilters = {};
             Object.entries(filters.attributes || {}).forEach(([attrId, config]) => {
                 if (config === null || config === undefined) return;
@@ -336,11 +370,11 @@ const CategoryItemsTable = ({ category, onBack }) => {
                 }
             });
 
-            const data = await itemsService.listItems({
-                page: effectivePage,
-                page_size: 50,
-                sort_by: sort.by,
+            const baseParams = {
+                sort_by: selectedMetadataSort ? 'modified_at' : sort.by,
                 sort_order: sort.order,
+                metadata_sort_attribute_id: selectedMetadataSort?.attributeId,
+                metadata_sort_data_type: selectedMetadataSort?.dataType,
                 category_id: category.id,
                 has_metadata: true,
                 q: appliedSearchTerm,
@@ -348,16 +382,42 @@ const CategoryItemsTable = ({ category, onBack }) => {
                 account_id: filters.account_id || undefined,
                 item_type: filters.item_type || undefined,
                 metadata: metadataFilters
-            });
-            setItems(data.items);
-            setTotal(data.total);
-            setTotalPages(data.total_pages);
+            };
+
+            if (isSeriesTrackerMode) {
+                const seriesSortBy = sort.by === 'size' ? 'total_items' : 'series';
+                const data = await metadataService.getSeriesSummary(category.id, {
+                    page: effectivePage,
+                    page_size: ITEMS_PER_PAGE,
+                    sort_by: seriesSortBy,
+                    sort_order: sort.order,
+                    q: appliedSearchTerm,
+                    search_fields: searchScope,
+                    account_id: filters.account_id || undefined,
+                    item_type: filters.item_type || undefined,
+                    metadata: metadataFilters,
+                });
+                setSeriesRows(data.rows || []);
+                setItems([]);
+                setTotal(data.total || 0);
+                setTotalPages(data.total_pages || 1);
+            } else {
+                const data = await itemsService.listItems({
+                    ...baseParams,
+                    page: effectivePage,
+                    page_size: ITEMS_PER_PAGE,
+                });
+                setSeriesRows([]);
+                setItems(data.items);
+                setTotal(data.total);
+                setTotalPages(data.total_pages);
+            }
         } catch (error) {
             console.error('Failed to fetch category items:', error);
         } finally {
             setLoading(false);
         }
-    }, [page, sort.by, sort.order, category.id, appliedSearchTerm, searchScope, filters]);
+    }, [page, sort.by, sort.order, selectedMetadataSort, category.id, supportsSeriesTracker, viewMode, appliedSearchTerm, searchScope, filters]);
 
     useEffect(() => {
         fetchItems();
@@ -368,10 +428,13 @@ const CategoryItemsTable = ({ category, onBack }) => {
     }, [items]);
 
     useEffect(() => {
-        if (!supportsGallery) {
+        const allowedModes = ['table'];
+        if (supportsGallery) allowedModes.push('gallery');
+        if (supportsSeriesTracker) allowedModes.push('series_tracker');
+        if (!allowedModes.includes(viewMode)) {
             setViewMode('table');
         }
-    }, [supportsGallery, category?.id]);
+    }, [supportsGallery, supportsSeriesTracker, viewMode, category?.id]);
 
     useEffect(() => {
         if (!supportsGallery || viewMode !== 'gallery') {
@@ -583,6 +646,20 @@ const CategoryItemsTable = ({ category, onBack }) => {
     const pageCountAttr = findAttr(pluginView?.gallery?.pageCountField, 'Page Count');
     const volumeAttr = findAttr(pluginView?.gallery?.volumeField, 'Volume');
     const issueNumberAttr = findAttr(pluginView?.gallery?.issueNumberField, 'Issue Number');
+    const statusLabel = {
+        ongoing: 'Ongoing',
+        completed: 'Completed',
+        hiatus: 'Hiatus',
+        cancelled: 'Cancelled',
+        unknown: 'Unknown',
+    };
+    const statusClass = {
+        ongoing: 'bg-blue-100 text-blue-700',
+        completed: 'bg-emerald-100 text-emerald-700',
+        hiatus: 'bg-amber-100 text-amber-700',
+        cancelled: 'bg-rose-100 text-rose-700',
+        unknown: 'bg-zinc-100 text-zinc-700',
+    };
 
     const fixedColTemplate = '40px 40px 2fr 120px 80px';
     const attrCols = attributes.map(() => 'minmax(100px, 1fr)').join(' ');
@@ -730,7 +807,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
-                    {supportsGallery && (
+                    {(supportsGallery || supportsSeriesTracker) && (
                         <div className="inline-flex items-center border rounded-md overflow-hidden">
                             <button
                                 onClick={() => setViewMode('table')}
@@ -744,6 +821,14 @@ const CategoryItemsTable = ({ category, onBack }) => {
                             >
                                 Gallery
                             </button>
+                            {supportsSeriesTracker && (
+                                <button
+                                    onClick={() => setViewMode('series_tracker')}
+                                    className={`px-3 py-1.5 text-sm ${viewMode === 'series_tracker' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}
+                                >
+                                    Series
+                                </button>
+                            )}
                         </div>
                     )}
                     <select
@@ -754,6 +839,31 @@ const CategoryItemsTable = ({ category, onBack }) => {
                         <option value="both">Title + Path</option>
                         <option value="name">Title</option>
                         <option value="path">Path</option>
+                    </select>
+                    <select
+                        className="border rounded-md px-2 py-1.5 text-sm bg-background"
+                        value={sort.by}
+                        onChange={(e) => {
+                            setSort((prev) => ({ ...prev, by: e.target.value }));
+                            setPage(1);
+                        }}
+                    >
+                        {sortOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                                {option.label}
+                            </option>
+                        ))}
+                    </select>
+                    <select
+                        className="border rounded-md px-2 py-1.5 text-sm bg-background"
+                        value={sort.order}
+                        onChange={(e) => {
+                            setSort((prev) => ({ ...prev, order: e.target.value }));
+                            setPage(1);
+                        }}
+                    >
+                        <option value="desc">Desc</option>
+                        <option value="asc">Asc</option>
                     </select>
                     <div className="relative">
                         <Search className="absolute left-2 top-1.5 text-muted-foreground" size={16} />
@@ -890,12 +1000,112 @@ const CategoryItemsTable = ({ category, onBack }) => {
                     <div className="flex justify-center p-12">
                         <Loader2 className="animate-spin text-primary" size={32} />
                     </div>
-                ) : items.length === 0 ? (
+                ) : (viewMode === 'series_tracker' && supportsSeriesTracker ? seriesRows.length === 0 : items.length === 0) ? (
                     <div className="text-center p-12 text-muted-foreground">
                         No items found in this category.
                     </div>
                 ) : (
-                    viewMode === 'gallery' && supportsGallery ? (
+                    viewMode === 'series_tracker' && supportsSeriesTracker ? (
+                        <div className="space-y-4">
+                            {seriesRows.length === 0 ? (
+                                <div className="border rounded-lg bg-card p-6 text-sm text-muted-foreground">
+                                    Series tracker needs at least one item with the "Series" field filled.
+                                </div>
+                            ) : (
+                                seriesRows.map((seriesRow) => {
+                                    const statusKey = statusLabel[seriesRow.series_status] ? seriesRow.series_status : 'unknown';
+                                    const maxVolumes = Math.max(0, seriesRow.max_volumes || 0);
+                                    const maxIssues = Math.max(0, seriesRow.max_issues || 0);
+                                    const shownVolumes = maxVolumes > 0 ? maxVolumes : 0;
+                                    const shownIssues = maxIssues > 0 ? maxIssues : 0;
+                                    const ownedVolumes = Array.isArray(seriesRow.owned_volumes) ? seriesRow.owned_volumes : [];
+                                    const ownedVolumesSet = new Set(ownedVolumes);
+                                    const issuesByVolume = seriesRow.issues_by_volume || {};
+
+                                    return (
+                                        <div key={seriesRow.series_name} className="border rounded-lg bg-card p-4">
+                                            <div className="flex items-center justify-between gap-3 mb-3">
+                                                <div className="min-w-0">
+                                                    <h3 className="font-semibold truncate">{seriesRow.series_name}</h3>
+                                                    <p className="text-xs text-muted-foreground">
+                                                        {seriesRow.total_items} item(s) | owned volumes: {ownedVolumes.length}
+                                                    </p>
+                                                </div>
+                                                <div className={`px-2 py-1 rounded text-xs font-medium ${statusClass[statusKey]}`}>
+                                                    {statusLabel[statusKey]}
+                                                </div>
+                                            </div>
+
+                                            <div className="space-y-3">
+                                                <div>
+                                                    <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+                                                        <span>Volumes</span>
+                                                        <span>
+                                                            {maxVolumes > 0 ? `max ${maxVolumes}` : 'max not set'}
+                                                        </span>
+                                                    </div>
+                                                    {shownVolumes > 0 ? (
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {Array.from({ length: shownVolumes }, (_, idx) => {
+                                                                const volumeNo = idx + 1;
+                                                                const owned = ownedVolumesSet.has(volumeNo);
+                                                                return (
+                                                                    <div
+                                                                        key={`${seriesRow.series_name}-vol-${volumeNo}`}
+                                                                        title={`Volume ${volumeNo} ${owned ? '(owned)' : '(missing)'}`}
+                                                                        className={`h-4 w-3 rounded-sm border ${owned ? 'bg-blue-500 border-blue-500' : 'bg-white border-zinc-300'}`}
+                                                                    />
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    ) : (
+                                                        <div className="text-xs text-muted-foreground">Set "Max Volumes" to show the tracker.</div>
+                                                    )}
+                                                </div>
+
+                                                {shownIssues > 0 && (
+                                                    <div className="space-y-2">
+                                                        <div className="text-xs text-muted-foreground">
+                                                            Issues per volume (max {maxIssues})
+                                                        </div>
+                                                        {ownedVolumes
+                                                            .sort((a, b) => a - b)
+                                                            .slice(0, 10)
+                                                            .map((volumeNo) => {
+                                                                const issues = new Set(issuesByVolume[String(volumeNo)] || []);
+                                                                return (
+                                                                    <div key={`${seriesRow.series_name}-issues-${volumeNo}`} className="flex items-center gap-2">
+                                                                        <div className="w-10 text-xs text-muted-foreground">V{volumeNo}</div>
+                                                                        <div className="flex flex-wrap gap-1">
+                                                                            {Array.from({ length: shownIssues }, (_, idx) => {
+                                                                                const issueNo = idx + 1;
+                                                                                const owned = issues.has(issueNo);
+                                                                                return (
+                                                                                    <div
+                                                                                        key={`${seriesRow.series_name}-vol-${volumeNo}-issue-${issueNo}`}
+                                                                                        title={`V${volumeNo} #${issueNo} ${owned ? '(owned)' : '(missing)'}`}
+                                                                                        className={`h-3 w-2 rounded-sm border ${owned ? 'bg-blue-500 border-blue-500' : 'bg-white border-zinc-300'}`}
+                                                                                    />
+                                                                                );
+                                                                            })}
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        {ownedVolumes.length > 10 && (
+                                                            <div className="text-xs text-muted-foreground">
+                                                                Showing first 10 owned volumes.
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+                    ) : viewMode === 'gallery' && supportsGallery ? (
                         <div className="border rounded-lg bg-card p-4">
                             <div className="grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-4">
                                 {items.map((item, index) => {

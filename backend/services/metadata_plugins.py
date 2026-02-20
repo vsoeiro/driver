@@ -28,6 +28,14 @@ COMIC_PLUGIN_FIELDS: list[PluginFieldSpec] = [
     PluginFieldSpec("series", "Series", "text"),
     PluginFieldSpec("volume", "Volume", "number"),
     PluginFieldSpec("issue_number", "Issue Number", "text"),
+    PluginFieldSpec("max_volumes", "Max Volumes", "number"),
+    PluginFieldSpec("max_issues", "Max Issues", "number"),
+    PluginFieldSpec(
+        "series_status",
+        "Series Status",
+        "select",
+        options={"options": ["ongoing", "completed", "hiatus", "cancelled", "unknown"]},
+    ),
     PluginFieldSpec("title", "Title", "text"),
     PluginFieldSpec("year", "Year", "number"),
     PluginFieldSpec("month", "Month", "number"),
@@ -118,7 +126,9 @@ class MetadataPluginService:
         category = await self.get_active_comic_category()
         if category is None:
             raise ValueError("Comic plugin is not active. Activate comicrack_core first.")
-        return category
+        # Reconcile schema to guarantee newly introduced plugin fields exist
+        # even for already-active installations.
+        return await self._ensure_comic_category()
 
     async def comic_attribute_id_map(self) -> dict[str, str]:
         category = await self.ensure_active_comic_category()

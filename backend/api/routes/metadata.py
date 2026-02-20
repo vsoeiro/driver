@@ -5,9 +5,9 @@ from uuid import UUID
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import OperationalError
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, cast, Float
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -39,6 +39,7 @@ from backend.schemas.metadata import (
     MetadataRulePreviewRequest,
     MetadataRulePreviewResponse,
     MetadataRuleUpdate,
+    SeriesSummaryResponse,
 )
 from backend.services.metadata_plugins import COMIC_PLUGIN_KEY, MetadataPluginService
 from backend.services.metadata_versioning import apply_metadata_change, normalize_metadata_values, undo_metadata_batch
@@ -54,6 +55,94 @@ READ_ONLY_COMIC_FIELD_KEYS = {
     "page_count",
     "file_format",
 }
+
+
+def _build_metadata_filter_conditions(filters: dict) -> list:
+    conditions = []
+    for attr_id, raw_filter in (filters or {}).items():
+        if not attr_id:
+            continue
+
+        field_text = ItemMetadata.values[attr_id].as_string()
+        field_number = cast(field_text, Float)
+
+        if isinstance(raw_filter, dict):
+            op = str(raw_filter.get("op", "eq")).lower()
+
+            min_value = raw_filter.get("min")
+            max_value = raw_filter.get("max")
+            if min_value not in (None, ""):
+                try:
+                    conditions.append(field_number >= float(min_value))
+                except (TypeError, ValueError):
+                    pass
+            if max_value not in (None, ""):
+                try:
+                    conditions.append(field_number <= float(max_value))
+                except (TypeError, ValueError):
+                    pass
+            if min_value not in (None, "") or max_value not in (None, ""):
+                continue
+
+            value = raw_filter.get("value")
+        else:
+            op = "eq"
+            value = raw_filter
+
+        if value in (None, ""):
+            continue
+
+        value_str = str(value)
+
+        if op == "eq":
+            conditions.append(field_text == value_str)
+        elif op == "ne":
+            conditions.append(field_text != value_str)
+        elif op == "contains":
+            conditions.append(field_text.ilike(f"%{value_str}%"))
+        elif op == "not_contains":
+            conditions.append(~field_text.ilike(f"%{value_str}%"))
+        elif op == "starts_with":
+            conditions.append(field_text.ilike(f"{value_str}%"))
+        elif op == "ends_with":
+            conditions.append(field_text.ilike(f"%{value_str}"))
+        elif op == "gt":
+            try:
+                conditions.append(field_number > float(value))
+            except (TypeError, ValueError):
+                pass
+        elif op == "gte":
+            try:
+                conditions.append(field_number >= float(value))
+            except (TypeError, ValueError):
+                pass
+        elif op == "lt":
+            try:
+                conditions.append(field_number < float(value))
+            except (TypeError, ValueError):
+                pass
+        elif op == "lte":
+            try:
+                conditions.append(field_number <= float(value))
+            except (TypeError, ValueError):
+                pass
+
+    return conditions
+
+
+def _parse_positive_int(value: str | None) -> int | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = int(float(text))
+    except (TypeError, ValueError):
+        return None
+    if parsed <= 0:
+        return None
+    return parsed
 
 
 def _to_json_compatible(value):
@@ -262,6 +351,275 @@ async def get_category_stats(session: AsyncSession = Depends(get_session)):
         }
         for cat, item_count in rows
     ]
+
+
+@router.get("/categories/{category_id}/series-summary", response_model=SeriesSummaryResponse)
+async def get_category_series_summary(
+    category_id: UUID,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    sort_by: str = Query("series", pattern="^(series|total_items)$"),
+    sort_order: str = Query("asc", pattern="^(asc|desc)$"),
+    q: str | None = None,
+    search_fields: str = Query("both", pattern="^(name|path|both)$"),
+    account_id: UUID | None = None,
+    item_type: str | None = Query(None, pattern="^(file|folder)$"),
+    metadata_filters: str | None = Query(None, alias="metadata"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Return one-page summary grouped by comic series for Series view."""
+    category_query = (
+        select(MetadataCategory)
+        .where(MetadataCategory.id == category_id)
+        .options(selectinload(MetadataCategory.attributes))
+    )
+    category_result = await session.execute(category_query)
+    category = category_result.scalar_one_or_none()
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    attr_by_plugin_key = {
+        (attr.plugin_field_key or "").strip().lower(): str(attr.id)
+        for attr in category.attributes
+        if attr.plugin_field_key
+    }
+    attr_by_name = {
+        (attr.name or "").strip().lower(): str(attr.id)
+        for attr in category.attributes
+        if attr.name
+    }
+
+    series_attr_id = attr_by_plugin_key.get("series") or attr_by_name.get("series")
+    if not series_attr_id:
+        return SeriesSummaryResponse(rows=[], total=0, page=page, page_size=page_size, total_pages=0)
+
+    volume_attr_id = attr_by_plugin_key.get("volume") or attr_by_name.get("volume")
+    issue_attr_id = attr_by_plugin_key.get("issue_number") or attr_by_name.get("issue number")
+    max_volumes_attr_id = attr_by_plugin_key.get("max_volumes") or attr_by_name.get("max volumes")
+    max_issues_attr_id = attr_by_plugin_key.get("max_issues") or attr_by_name.get("max issues")
+    status_attr_id = attr_by_plugin_key.get("series_status") or attr_by_name.get("series status")
+
+    series_text_expr = func.trim(ItemMetadata.values[series_attr_id].as_string())
+    series_key_expr = func.lower(series_text_expr)
+    conditions = [
+        ItemMetadata.category_id == category_id,
+        series_text_expr.isnot(None),
+        series_text_expr != "",
+        ItemMetadata.account_id == Item.account_id,
+        ItemMetadata.item_id == Item.item_id,
+    ]
+
+    if account_id:
+        conditions.append(Item.account_id == account_id)
+    if item_type:
+        conditions.append(Item.item_type == item_type)
+    if q:
+        search_pattern = f"%{q}%"
+        if search_fields == "name":
+            conditions.append(Item.name.ilike(search_pattern))
+        elif search_fields == "path":
+            conditions.append(Item.path.ilike(search_pattern))
+        else:
+            conditions.append(Item.name.ilike(search_pattern) | Item.path.ilike(search_pattern))
+
+    if metadata_filters:
+        import json
+        try:
+            parsed_filters = json.loads(metadata_filters)
+            conditions.extend(_build_metadata_filter_conditions(parsed_filters))
+        except Exception:
+            pass
+
+    count_stmt = (
+        select(func.count(func.distinct(series_key_expr)))
+        .select_from(ItemMetadata, Item)
+        .where(*conditions)
+    )
+    total = int((await session.execute(count_stmt)).scalar_one() or 0)
+    total_pages = (total + page_size - 1) // page_size if total > 0 else 0
+    if total == 0:
+        return SeriesSummaryResponse(rows=[], total=0, page=page, page_size=page_size, total_pages=0)
+
+    series_name_agg = func.min(series_text_expr)
+    total_items_agg = func.count(ItemMetadata.id)
+    series_rows_stmt = (
+        select(
+            series_key_expr.label("series_key"),
+            series_name_agg.label("series_name"),
+            total_items_agg.label("total_items"),
+        )
+        .select_from(ItemMetadata, Item)
+        .where(*conditions)
+        .group_by(series_key_expr)
+    )
+    if sort_by == "total_items":
+        series_rows_stmt = series_rows_stmt.order_by(
+            total_items_agg.desc() if sort_order == "desc" else total_items_agg.asc(),
+            series_name_agg.asc(),
+        )
+    else:
+        series_rows_stmt = series_rows_stmt.order_by(
+            series_name_agg.desc() if sort_order == "desc" else series_name_agg.asc()
+        )
+
+    series_rows_stmt = series_rows_stmt.offset((page - 1) * page_size).limit(page_size)
+    series_rows_result = await session.execute(series_rows_stmt)
+    series_rows = series_rows_result.all()
+    if not series_rows:
+        return SeriesSummaryResponse(rows=[], total=total, page=page, page_size=page_size, total_pages=total_pages)
+
+    page_series_keys = [row.series_key for row in series_rows]
+    by_key = {
+        row.series_key: {
+            "series_name": (row.series_name or "").strip() or "Unknown",
+            "total_items": int(row.total_items or 0),
+            "owned_volumes": set(),
+            "issues_by_volume": {},
+            "max_volumes_candidates": [],
+            "max_issues_candidates": [],
+            "status_votes": {},
+        }
+        for row in series_rows
+    }
+
+    if volume_attr_id:
+        volume_expr = func.trim(ItemMetadata.values[volume_attr_id].as_string())
+        volume_stmt = (
+            select(series_key_expr.label("series_key"), volume_expr.label("volume_text"))
+            .select_from(ItemMetadata, Item)
+            .where(*conditions, series_key_expr.in_(page_series_keys), volume_expr.isnot(None), volume_expr != "")
+            .group_by(series_key_expr, volume_expr)
+        )
+        for row in (await session.execute(volume_stmt)).all():
+            parsed_volume = _parse_positive_int(row.volume_text)
+            if parsed_volume:
+                by_key[row.series_key]["owned_volumes"].add(parsed_volume)
+
+    if volume_attr_id and issue_attr_id:
+        volume_expr = func.trim(ItemMetadata.values[volume_attr_id].as_string())
+        issue_expr = func.trim(ItemMetadata.values[issue_attr_id].as_string())
+        issue_stmt = (
+            select(
+                series_key_expr.label("series_key"),
+                volume_expr.label("volume_text"),
+                issue_expr.label("issue_text"),
+            )
+            .select_from(ItemMetadata, Item)
+            .where(
+                *conditions,
+                series_key_expr.in_(page_series_keys),
+                volume_expr.isnot(None),
+                volume_expr != "",
+                issue_expr.isnot(None),
+                issue_expr != "",
+            )
+            .group_by(series_key_expr, volume_expr, issue_expr)
+        )
+        for row in (await session.execute(issue_stmt)).all():
+            parsed_volume = _parse_positive_int(row.volume_text)
+            parsed_issue = _parse_positive_int(row.issue_text)
+            if not parsed_volume or not parsed_issue:
+                continue
+            volume_bucket = by_key[row.series_key]["issues_by_volume"].setdefault(parsed_volume, set())
+            volume_bucket.add(parsed_issue)
+
+    if max_volumes_attr_id:
+        max_volumes_expr = func.trim(ItemMetadata.values[max_volumes_attr_id].as_string())
+        max_volumes_stmt = (
+            select(series_key_expr.label("series_key"), max_volumes_expr.label("max_volumes_text"))
+            .select_from(ItemMetadata, Item)
+            .where(
+                *conditions,
+                series_key_expr.in_(page_series_keys),
+                max_volumes_expr.isnot(None),
+                max_volumes_expr != "",
+            )
+            .group_by(series_key_expr, max_volumes_expr)
+        )
+        for row in (await session.execute(max_volumes_stmt)).all():
+            parsed_value = _parse_positive_int(row.max_volumes_text)
+            if parsed_value:
+                by_key[row.series_key]["max_volumes_candidates"].append(parsed_value)
+
+    if max_issues_attr_id:
+        max_issues_expr = func.trim(ItemMetadata.values[max_issues_attr_id].as_string())
+        max_issues_stmt = (
+            select(series_key_expr.label("series_key"), max_issues_expr.label("max_issues_text"))
+            .select_from(ItemMetadata, Item)
+            .where(
+                *conditions,
+                series_key_expr.in_(page_series_keys),
+                max_issues_expr.isnot(None),
+                max_issues_expr != "",
+            )
+            .group_by(series_key_expr, max_issues_expr)
+        )
+        for row in (await session.execute(max_issues_stmt)).all():
+            parsed_value = _parse_positive_int(row.max_issues_text)
+            if parsed_value:
+                by_key[row.series_key]["max_issues_candidates"].append(parsed_value)
+
+    if status_attr_id:
+        status_expr = func.lower(func.trim(ItemMetadata.values[status_attr_id].as_string()))
+        status_stmt = (
+            select(
+                series_key_expr.label("series_key"),
+                status_expr.label("series_status"),
+                func.count(ItemMetadata.id).label("status_count"),
+            )
+            .select_from(ItemMetadata, Item)
+            .where(
+                *conditions,
+                series_key_expr.in_(page_series_keys),
+                status_expr.isnot(None),
+                status_expr != "",
+            )
+            .group_by(series_key_expr, status_expr)
+        )
+        for row in (await session.execute(status_stmt)).all():
+            by_key[row.series_key]["status_votes"][row.series_status] = int(row.status_count or 0)
+
+    rows = []
+    for series_key in page_series_keys:
+        row = by_key.get(series_key)
+        if not row:
+            continue
+
+        owned_volumes = sorted(row["owned_volumes"])
+        owned_volume_max = max(owned_volumes) if owned_volumes else 0
+        declared_max_volumes = max(row["max_volumes_candidates"]) if row["max_volumes_candidates"] else 0
+        max_volumes = max(owned_volume_max, declared_max_volumes)
+        max_issues = max(row["max_issues_candidates"]) if row["max_issues_candidates"] else 0
+
+        status_votes = row["status_votes"]
+        if status_votes:
+            series_status = max(status_votes.items(), key=lambda item: item[1])[0]
+        else:
+            series_status = "unknown"
+
+        issues_by_volume = {
+            str(volume): sorted(issue_set)
+            for volume, issue_set in row["issues_by_volume"].items()
+        }
+        rows.append(
+            {
+                "series_name": row["series_name"],
+                "total_items": row["total_items"],
+                "owned_volumes": owned_volumes,
+                "issues_by_volume": issues_by_volume,
+                "max_volumes": max_volumes,
+                "max_issues": max_issues,
+                "series_status": series_status,
+            }
+        )
+
+    return SeriesSummaryResponse(
+        rows=rows,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+    )
 
 
 @router.post("/categories", response_model=MetadataCategorySchema, status_code=status.HTTP_201_CREATED)

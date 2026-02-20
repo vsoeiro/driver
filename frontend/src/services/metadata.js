@@ -108,6 +108,25 @@ export const getCategoryStats = async () => {
     return response.data;
 };
 
+export const getSeriesSummary = async (categoryId, params = {}) => {
+    const queryParams = new URLSearchParams();
+
+    Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+            if (Array.isArray(value)) {
+                value.forEach((v) => queryParams.append(key, v));
+            } else if (typeof value === 'object') {
+                queryParams.append(key, JSON.stringify(value));
+            } else {
+                queryParams.append(key, value);
+            }
+        }
+    });
+
+    const response = await api.get(`/metadata/categories/${categoryId}/series-summary?${queryParams.toString()}`);
+    return response.data;
+};
+
 export const listPlugins = async () => {
     const response = await api.get('/metadata/plugins');
     return response.data;
@@ -127,6 +146,7 @@ export const metadataService = {
     getCategories,
     listCategories: getCategories,
     getCategoryStats,
+    getSeriesSummary,
     listPlugins,
     activatePlugin,
     deactivatePlugin,

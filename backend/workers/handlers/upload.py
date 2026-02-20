@@ -12,6 +12,7 @@ from backend.services.item_index import parent_id_from_breadcrumb, path_from_bre
 from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
 from backend.workers.dispatcher import register_handler
+from backend.workers.job_progress import JobProgressReporter
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,9 @@ async def upload_file_handler(payload: dict, session: AsyncSession) -> dict:
     folder_id = payload.get("folder_id", "root")
     filename = payload["filename"]
     temp_path = payload["temp_path"]
+    progress = JobProgressReporter.from_payload(session, payload)
+    await progress.set_total(1)
+    await progress.update_metrics(total=1, success=0, failed=0, skipped=0)
 
     # Ensure temp file exists
     if not os.path.exists(temp_path):
@@ -106,9 +110,32 @@ async def upload_file_handler(payload: dict, session: AsyncSession) -> dict:
             )
             await session.commit()
 
-        return {"filename": filename, "size": file_size, "message": msg}
+        progress.current = 1
+        await progress.update_metrics(total=1, success=1, failed=0, skipped=0)
+        await progress.flush(force=True)
+        return {
+            "filename": filename,
+            "size": file_size,
+            "message": msg,
+            "total": 1,
+            "success": 1,
+            "failed": 0,
+            "skipped": 0,
+            "metrics": {
+                "total": 1,
+                "success": 1,
+                "failed": 0,
+                "skipped": 0,
+            },
+        }
 
     except Exception as e:
+        progress.current = 1
+        try:
+            await progress.update_metrics(total=1, success=0, failed=1, skipped=0)
+            await progress.flush(force=True)
+        except Exception:
+            logger.exception("Failed to persist upload progress metrics for %s", filename)
         logger.error(f"Upload job failed for {filename}: {e}")
         raise
     finally:

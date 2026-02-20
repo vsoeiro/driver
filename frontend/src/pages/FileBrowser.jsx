@@ -338,7 +338,16 @@ export default function FileBrowser() {
                         {uploading ? <Loader2 className="animate-spin" size={16} /> : <UploadCloud size={16} />}
                         {uploading ? `Uploading ${uploadProgress}%` : 'Upload'}
                     </button>
-                    <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => upload(e.target.files[0])} />
+                    <input
+                        type="file"
+                        ref={fileInputRef}
+                        className="hidden"
+                        multiple
+                        onChange={(e) => {
+                            upload(e.target.files);
+                            e.target.value = '';
+                        }}
+                    />
                 </div>
             </header>
 

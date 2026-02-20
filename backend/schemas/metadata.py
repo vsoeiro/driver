@@ -213,3 +213,21 @@ class MetadataRulePreviewResponse(BaseModel):
     to_change: int
     already_compliant: int
     sample_item_ids: list[str]
+
+
+class SeriesSummaryRow(BaseModel):
+    series_name: str
+    total_items: int
+    owned_volumes: list[int] = Field(default_factory=list)
+    issues_by_volume: dict[str, list[int]] = Field(default_factory=dict)
+    max_volumes: int = 0
+    max_issues: int = 0
+    series_status: str = "unknown"
+
+
+class SeriesSummaryResponse(BaseModel):
+    rows: list[SeriesSummaryRow] = Field(default_factory=list)
+    total: int
+    page: int
+    page_size: int
+    total_pages: int

@@ -6,7 +6,7 @@ from typing import Optional
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func, cast, Float
+from sqlalchemy import select, func, cast, Float, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.dependencies import get_session
@@ -96,6 +96,8 @@ async def list_items(
     page_size: int = Query(50, ge=1, le=100),
     sort_by: str = Query("modified_at", pattern="^(name|size|modified_at|created_at)$"),
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
+    metadata_sort_attribute_id: Optional[str] = None,
+    metadata_sort_data_type: Optional[str] = Query(None, pattern="^(text|number|date|boolean|select)$"),
     q: Optional[str] = None,
     search_fields: str = Query("both", pattern="^(name|path|both)$"),
     path_prefix: Optional[str] = None,
@@ -251,10 +253,24 @@ async def list_items(
 
     # Sort
     sort_column = getattr(Item, sort_by)
+    sort_expression = sort_column
+    if metadata_sort_attribute_id:
+        metadata_field_text = ItemMetadata.values[metadata_sort_attribute_id].as_string()
+        if metadata_sort_data_type == "number":
+            # Clean values before casting so non-numeric strings don't fail.
+            numeric_text = func.nullif(
+                func.regexp_replace(metadata_field_text, r"[^0-9.\-]+", "", "g"),
+                "",
+            )
+            sort_expression = cast(numeric_text, Float)
+        else:
+            sort_expression = metadata_field_text
+
+    nulls_last = case((sort_expression.is_(None), 1), else_=0)
     if sort_order == "desc":
-        query = query.order_by(sort_column.desc())
+        query = query.order_by(nulls_last.asc(), sort_expression.desc(), Item.modified_at.desc())
     else:
-        query = query.order_by(sort_column.asc())
+        query = query.order_by(nulls_last.asc(), sort_expression.asc(), Item.modified_at.desc())
 
     # Pagination
     query = query.offset((page - 1) * page_size).limit(page_size)
