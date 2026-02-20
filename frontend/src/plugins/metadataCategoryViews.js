@@ -19,6 +19,26 @@ export const metadataCategoryViews = {
             maxIssuesField: 'max_issues',
             statusField: 'series_status',
         },
+        formLayout: {
+            groups: [
+                ['series', 'title'],
+                ['volume', 'issue_number', 'year', 'month'],
+                ['max_volumes', 'max_issues', 'series_status'],
+                ['publisher', 'imprint'],
+                ['writer', 'penciller', 'colorist', 'letterer'],
+                ['genre', 'language', 'original_language'],
+                ['tags'],
+                ['summary'],
+            ],
+            compactFields: [
+                'volume',
+                'issue_number',
+                'year',
+                'month',
+                'max_volumes',
+                'max_issues',
+            ],
+        },
     },
 };
 

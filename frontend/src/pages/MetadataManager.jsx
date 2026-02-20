@@ -6,7 +6,13 @@ import { aiService } from '../services/ai';
 import { driveService } from '../services/drive';
 import { getCategoryPluginView } from '../plugins/metadataCategoryViews';
 import { buildCoverCacheKey, getCachedCoverUrl, setCachedCoverUrl } from '../utils/coverCache';
-import { getSelectOptions } from '../utils/metadata';
+import {
+    getSelectOptions,
+    parseTagsInput,
+    READ_ONLY_COMIC_FIELD_KEYS,
+    sortAttributesForCategory,
+    tagsToInputValue,
+} from '../utils/metadata';
 import {
     Plus, Trash2, ChevronRight, ChevronDown, ChevronLeft,
     Database, Loader2, Tag, Hash, ArrowLeft,
@@ -21,13 +27,6 @@ import RemoveMetadataModal from '../components/RemoveMetadataModal';
 import MetadataModal from '../components/MetadataModal';
 import MoveModal from '../components/MoveModal';
 
-const READ_ONLY_COMIC_FIELDS = new Set([
-    'cover_item_id',
-    'cover_filename',
-    'cover_account_id',
-    'page_count',
-    'file_format',
-]);
 const ITEMS_PER_PAGE = 50;
 const BASE_SORT_OPTIONS = [
     { value: 'modified_at', label: 'Order: Modified' },
@@ -120,7 +119,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
         const [localFilters, setLocalFilters] = useState(currentFilters);
         const [isOpen, setIsOpen] = useState(false);
         const filterableAttributes = (category.attributes || []).filter(
-            (attr) => !attr.is_read_only && !READ_ONLY_COMIC_FIELDS.has(attr.plugin_field_key)
+            (attr) => !attr.is_read_only && !READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key)
         );
 
         useEffect(() => {
@@ -269,7 +268,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                     placeholder="Max"
                                                 />
                                             </div>
-                                        ) : attr.data_type === 'text' ? (
+                                        ) : attr.data_type === 'text' || attr.data_type === 'tags' ? (
                                             <div className="grid grid-cols-2 gap-2">
                                                 <select
                                                     className="w-full border rounded-md p-2 text-sm bg-background"
@@ -286,7 +285,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                     className="w-full border rounded-md p-2 text-sm bg-background"
                                                     value={(localFilters.attributes[attr.id]?.value) ?? ''}
                                                     onChange={(e) => handleAttributeConfigChange(attr.id, 'value', e.target.value)}
-                                                    placeholder={`Filter by ${attr.name}`}
+                                                    placeholder={attr.data_type === 'tags' ? 'tag1, tag2' : `Filter by ${attr.name}`}
                                                 />
                                             </div>
                                         ) : attr.data_type === 'date' ? (
@@ -543,6 +542,10 @@ const CategoryItemsTable = ({ category, onBack }) => {
         if (val === undefined || val === null || val === '') return '-';
 
         if (attr.data_type === 'boolean') return val ? 'Yes' : 'No';
+        if (attr.data_type === 'tags') {
+            const tags = Array.isArray(val) ? val : parseTagsInput(String(val));
+            return tags.length > 0 ? tags.join(', ') : '-';
+        }
         if (attr.data_type === 'date' && val) {
             return new Date(val).toLocaleDateString('en-GB');
         }
@@ -552,7 +555,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
     const isReadOnlyAttribute = (attr) => {
         if (!attr) return true;
         if (attr.plugin_key === 'comicrack_core') {
-            return READ_ONLY_COMIC_FIELDS.has(attr.plugin_field_key);
+            return READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key);
         }
         return Boolean(attr.is_locked || attr.managed_by_plugin);
     };
@@ -561,6 +564,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
         const rawValue = item.metadata?.values?.[attr.id];
         if (rawValue === undefined || rawValue === null) return '';
         if (attr.data_type === 'boolean') return rawValue ? 'true' : 'false';
+        if (attr.data_type === 'tags') return tagsToInputValue(rawValue);
         if (attr.data_type === 'date') {
             const text = String(rawValue);
             return text.includes('T') ? text.slice(0, 10) : text;
@@ -586,6 +590,10 @@ const CategoryItemsTable = ({ category, onBack }) => {
             if (value === 'true' || value === true) return true;
             if (value === 'false' || value === false) return false;
             return null;
+        }
+        if (attr.data_type === 'tags') {
+            const parsed = parseTagsInput(String(value || ''));
+            return parsed.length > 0 ? parsed : null;
         }
         return value;
     };
@@ -629,7 +637,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
         }
     };
 
-    const attributes = category.attributes || [];
+    const attributes = sortAttributesForCategory(category);
     const findAttr = (pluginKey, fallbackName) => {
         if (!pluginKey && !fallbackName) return null;
         const byPluginKey = pluginKey
@@ -1281,6 +1289,25 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                                                 <option value="true">Yes</option>
                                                                                 <option value="false">No</option>
                                                                             </select>
+                                                                        ) : attr.data_type === 'tags' ? (
+                                                                            <input
+                                                                                type="text"
+                                                                                value={editingValue}
+                                                                                onChange={(e) => setEditingValue(e.target.value)}
+                                                                                onKeyDown={(e) => {
+                                                                                    if (e.key === 'Enter') {
+                                                                                        e.preventDefault();
+                                                                                        saveInlineEdit(item, attr);
+                                                                                    }
+                                                                                    if (e.key === 'Escape') {
+                                                                                        e.preventDefault();
+                                                                                        cancelInlineEdit();
+                                                                                    }
+                                                                                }}
+                                                                                placeholder="tag1, tag2, tag3"
+                                                                                className="w-full border rounded px-2 py-1 text-xs bg-background"
+                                                                                autoFocus
+                                                                            />
                                                                         ) : (
                                                                             <input
                                                                                 type={attr.data_type === 'number' ? 'number' : attr.data_type === 'date' ? 'date' : 'text'}
@@ -2000,6 +2027,7 @@ export default function MetadataManager() {
                                 <option value="date">Date</option>
                                 <option value="boolean">Boolean (Checkbox)</option>
                                 <option value="select">Select (Dropdown)</option>
+                                <option value="tags">Tags (Array)</option>
                             </select>
                         </div>
                         <div className="flex items-center pt-6">
@@ -2078,6 +2106,7 @@ export default function MetadataManager() {
                                 <option value="date">Date</option>
                                 <option value="boolean">Boolean (Checkbox)</option>
                                 <option value="select">Select (Dropdown)</option>
+                                <option value="tags">Tags (Array)</option>
                             </select>
                         </div>
                         <div className="flex items-center pt-6">
@@ -2130,3 +2159,4 @@ export default function MetadataManager() {
         </div>
     );
 }
+

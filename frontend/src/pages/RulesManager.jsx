@@ -4,7 +4,7 @@ import { metadataService } from '../services/metadata';
 import { accountsService } from '../services/accounts';
 import { jobsService } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
-import { getSelectOptions } from '../utils/metadata';
+import { getSelectOptions, parseTagsInput, tagsToInputValue } from '../utils/metadata';
 
 const DEFAULT_FORM = {
     name: '',
@@ -203,6 +203,18 @@ export default function RulesManager() {
                     <option value="true">Yes</option>
                     <option value="false">No</option>
                 </select>
+            );
+        }
+
+        if (attribute.data_type === 'tags') {
+            return (
+                <input
+                    type="text"
+                    className="w-full border rounded-md p-2 text-sm bg-background"
+                    value={tagsToInputValue(value)}
+                    onChange={(e) => setAttributeValue(attribute, parseTagsInput(e.target.value))}
+                    placeholder={`Set ${attribute.name} tags (comma separated)`}
+                />
             );
         }
 

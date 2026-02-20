@@ -5,7 +5,13 @@ import { accountsService } from '../services/accounts';
 import { jobsService } from '../services/jobs';
 import { driveService } from '../services/drive';
 import { useToast } from '../contexts/ToastContext';
-import { getSelectOptions } from '../utils/metadata';
+import {
+    getSelectOptions,
+    parseTagsInput,
+    READ_ONLY_COMIC_FIELD_KEYS,
+    sortAttributesForCategory,
+    tagsToInputValue,
+} from '../utils/metadata';
 import {
     File, Folder, FolderOpen, Search, Filter, Database, CheckSquare, Square,
     Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, X, Trash2, ChevronDown, BookOpen, Pencil,
@@ -17,7 +23,6 @@ import MetadataModal from '../components/MetadataModal';
 import MoveModal from '../components/MoveModal';
 
 const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'cbw', 'pdf', 'epub', 'cbr', 'rar', 'cb7', '7z', 'cbt', 'tar']);
-const READ_ONLY_COMIC_FIELDS = new Set(['cover_item_id', 'cover_filename', 'cover_account_id', 'page_count', 'file_format']);
 
 // Filter Component
 const FilterBar = ({ onFilter, filters, accounts, categories }) => {
@@ -303,6 +308,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
     };
 
     const currentCategory = categories.find(c => c.id === selectedCategory);
+    const orderedAttributes = sortAttributesForCategory(currentCategory);
 
     return (
         <Modal isOpen={isOpen} onClose={onClose} title={`Edit Metadata for ${selectedItems.length} item${selectedItems.length > 1 ? 's' : ''}`}>
@@ -330,11 +336,11 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
 
                         {currentCategory && (
                             <div className="space-y-3 border p-3 rounded-md bg-muted/20">
-                                {currentCategory.attributes.map(attr => (
+                                {orderedAttributes.map(attr => (
                                     <div key={attr.id}>
                                         {(() => {
                                             const isReadOnlyComputed = currentCategory?.plugin_key === 'comicrack_core'
-                                                && READ_ONLY_COMIC_FIELDS.has(attr.plugin_field_key);
+                                                && READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key);
                                             return (
                                                 <>
                                         <label className="block text-xs font-medium mb-1 uppercase text-muted-foreground">{attr.name} {attr.is_required && '*'}</label>
@@ -361,6 +367,15 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                                                 <option value="true">Yes</option>
                                                 <option value="false">No</option>
                                             </select>
+                                        ) : attr.data_type === 'tags' ? (
+                                            <input
+                                                type="text"
+                                                className="w-full border rounded-md p-2 text-sm bg-background"
+                                                value={tagsToInputValue(attributeValues[attr.id] ?? [])}
+                                                placeholder="tag1, tag2, tag3"
+                                                disabled={isReadOnlyComputed}
+                                                onChange={e => setAttributeValues(prev => ({ ...prev, [attr.id]: parseTagsInput(e.target.value) }))}
+                                            />
                                         ) : (
                                             <input
                                                 type={attr.data_type === 'number' ? 'number' : attr.data_type === 'date' ? 'date' : 'text'}

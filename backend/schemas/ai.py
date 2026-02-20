@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 class AISuggestAttribute(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
-    data_type: str = Field(..., pattern="^(text|number|date|boolean|select)$")
+    data_type: str = Field(..., pattern="^(text|number|date|boolean|select|tags)$")
     is_required: bool = False
     options: dict | None = None
 

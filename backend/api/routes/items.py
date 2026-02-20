@@ -6,7 +6,7 @@ from typing import Optional
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func, cast, Float, case
+from sqlalchemy import select, func, cast, Float, case, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.dependencies import get_session
@@ -23,7 +23,10 @@ def _build_metadata_filter_conditions(filters: dict) -> list:
         if not attr_id:
             continue
 
-        field_text = ItemMetadata.values[attr_id].as_string()
+        field_text = func.coalesce(
+            ItemMetadata.values[attr_id].as_string(),
+            cast(ItemMetadata.values[attr_id], String),
+        )
         field_number = cast(field_text, Float)
 
         if isinstance(raw_filter, dict):
@@ -97,7 +100,7 @@ async def list_items(
     sort_by: str = Query("modified_at", pattern="^(name|size|modified_at|created_at)$"),
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     metadata_sort_attribute_id: Optional[str] = None,
-    metadata_sort_data_type: Optional[str] = Query(None, pattern="^(text|number|date|boolean|select)$"),
+    metadata_sort_data_type: Optional[str] = Query(None, pattern="^(text|number|date|boolean|select|tags)$"),
     q: Optional[str] = None,
     search_fields: str = Query("both", pattern="^(name|path|both)$"),
     path_prefix: Optional[str] = None,
@@ -255,7 +258,10 @@ async def list_items(
     sort_column = getattr(Item, sort_by)
     sort_expression = sort_column
     if metadata_sort_attribute_id:
-        metadata_field_text = ItemMetadata.values[metadata_sort_attribute_id].as_string()
+        metadata_field_text = func.coalesce(
+            ItemMetadata.values[metadata_sort_attribute_id].as_string(),
+            cast(ItemMetadata.values[metadata_sort_attribute_id], String),
+        )
         if metadata_sort_data_type == "number":
             # Clean values before casting so non-numeric strings don't fail.
             numeric_text = func.nullif(

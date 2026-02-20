@@ -361,7 +361,7 @@ class AIService:
         system = (
             "You are an information architect for document metadata.\n"
             "Return only strict JSON object with keys: category_name, description, attributes.\n"
-            "Each attribute must have: name, data_type (text|number|date|boolean|select), is_required, options.\n"
+            "Each attribute must have: name, data_type (text|number|date|boolean|select|tags), is_required, options.\n"
             "For non-select attributes set options=null.\n"
             "Do not include markdown or extra text."
         )

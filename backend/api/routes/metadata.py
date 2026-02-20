@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import OperationalError
-from sqlalchemy import select, func, delete, cast, Float
+from sqlalchemy import select, func, delete, cast, Float, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -63,7 +63,10 @@ def _build_metadata_filter_conditions(filters: dict) -> list:
         if not attr_id:
             continue
 
-        field_text = ItemMetadata.values[attr_id].as_string()
+        field_text = func.coalesce(
+            ItemMetadata.values[attr_id].as_string(),
+            cast(ItemMetadata.values[attr_id], String),
+        )
         field_number = cast(field_text, Float)
 
         if isinstance(raw_filter, dict):
@@ -246,7 +249,37 @@ def _coerce_attribute_value(attribute: MetadataAttribute, raw_value: Any) -> Any
             raise HTTPException(status_code=400, detail=f"Invalid option for '{attribute.name}'")
         return value
 
+    if data_type == "tags":
+        values: list[str] = []
+        if isinstance(stripped, list):
+            raw_values = stripped
+        else:
+            raw_values = str(stripped).split(",")
+        seen: set[str] = set()
+        for raw_entry in raw_values:
+            candidate = str(raw_entry or "").strip()
+            if not candidate:
+                continue
+            key = candidate.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            values.append(candidate)
+        return values or None
+
     return stripped
+
+
+async def _reconcile_active_comic_schema(session: AsyncSession) -> None:
+    service = MetadataPluginService(session)
+    plugins = await service.list_plugins()
+    if any(plugin.key == COMIC_PLUGIN_KEY and plugin.is_active for plugin in plugins):
+        try:
+            await service.ensure_active_comic_category()
+            await session.commit()
+        except ValueError:
+            # Plugin flagged active but category is missing/inactive; keep request resilient.
+            return
 
 
 def _can_inline_edit_attribute(attribute: MetadataAttribute) -> bool:
@@ -280,6 +313,7 @@ async def _validate_rule_configuration(session: AsyncSession, payload: dict) -> 
 @router.get("/categories", response_model=list[MetadataCategorySchema])
 async def list_categories(session: AsyncSession = Depends(get_session)):
     """List all metadata categories with their attributes."""
+    await _reconcile_active_comic_schema(session)
     query = (
         select(MetadataCategory)
         .where(MetadataCategory.is_active.is_(True))
@@ -299,6 +333,7 @@ async def get_category_stats(session: AsyncSession = Depends(get_session)):
     list[dict]
         Each dict contains category fields plus ``item_count``.
     """
+    await _reconcile_active_comic_schema(session)
     count_subq = (
         select(
             ItemMetadata.category_id,

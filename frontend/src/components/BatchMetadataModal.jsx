@@ -5,17 +5,15 @@ import { jobsService } from '../services/jobs';
 import { driveService } from '../services/drive';
 import { getCategoryPluginView } from '../plugins/metadataCategoryViews';
 import { buildCoverCacheKey, getCachedCoverUrl, setCachedCoverUrl } from '../utils/coverCache';
-import { getSelectOptions } from '../utils/metadata';
+import {
+    getSelectOptions,
+    parseTagsInput,
+    READ_ONLY_COMIC_FIELD_KEYS,
+    sortAttributesForCategory,
+    tagsToInputValue,
+} from '../utils/metadata';
 import { Loader2 } from 'lucide-react';
 import Modal from './Modal';
-
-const READ_ONLY_COMIC_FIELDS = new Set([
-    'cover_item_id',
-    'cover_filename',
-    'cover_account_id',
-    'page_count',
-    'file_format',
-]);
 
 const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToast }) => {
     const [categories, setCategories] = useState([]);
@@ -156,6 +154,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
     };
 
     const currentCategory = categories.find(c => c.id === selectedCategory);
+    const orderedAttributes = sortAttributesForCategory(currentCategory);
     const pluginView = getCategoryPluginView(currentCategory);
     const coverAttr = currentCategory?.attributes?.find(
         (attr) => attr.plugin_field_key === pluginView?.gallery?.coverField
@@ -268,11 +267,11 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
 
                         {currentCategory && (
                             <div className="space-y-3 border p-3 rounded-md bg-muted/20">
-                                {currentCategory.attributes.map(attr => (
+                                {orderedAttributes.map(attr => (
                                     <div key={attr.id}>
                                         {(() => {
                                             const isReadOnlyComputed = currentCategory?.plugin_key === 'comicrack_core'
-                                                && READ_ONLY_COMIC_FIELDS.has(attr.plugin_field_key);
+                                                && READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key);
                                             return (
                                                 <>
                                         <label className="block text-xs font-medium mb-1 uppercase text-muted-foreground">{attr.name} {attr.is_required && '*'}</label>
@@ -299,6 +298,15 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                                                 <option value="true">Yes</option>
                                                 <option value="false">No</option>
                                             </select>
+                                        ) : attr.data_type === 'tags' ? (
+                                            <input
+                                                type="text"
+                                                className="w-full border rounded-md p-2 text-sm bg-background"
+                                                value={tagsToInputValue(attributeValues[attr.id] ?? [])}
+                                                placeholder="tag1, tag2, tag3"
+                                                disabled={isReadOnlyComputed}
+                                                onChange={e => setAttributeValues(prev => ({ ...prev, [attr.id]: parseTagsInput(e.target.value) }))}
+                                            />
                                         ) : (
                                             <input
                                                 type={attr.data_type === 'number' ? 'number' : attr.data_type === 'date' ? 'date' : 'text'}

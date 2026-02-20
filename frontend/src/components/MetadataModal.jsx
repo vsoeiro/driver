@@ -8,15 +8,13 @@ import { useToast } from '../contexts/ToastContext';
 import { Loader2, AlertTriangle, Sparkles, ZoomIn, ZoomOut, X } from 'lucide-react';
 import { getCategoryPluginView } from '../plugins/metadataCategoryViews';
 import { buildCoverCacheKey, getCachedCoverUrl, setCachedCoverUrl } from '../utils/coverCache';
-import { getSelectOptions } from '../utils/metadata';
-
-const READ_ONLY_COMIC_FIELDS = new Set([
-    'cover_item_id',
-    'cover_filename',
-    'cover_account_id',
-    'page_count',
-    'file_format',
-]);
+import {
+    getSelectOptions,
+    parseTagsInput,
+    READ_ONLY_COMIC_FIELD_KEYS,
+    sortAttributesForCategory,
+    tagsToInputValue,
+} from '../utils/metadata';
 const COMIC_AI_ALLOWED_FIELDS = new Set([
     'series',
     'volume',
@@ -25,6 +23,24 @@ const COMIC_AI_ALLOWED_FIELDS = new Set([
     'publisher',
     'writer',
     'penciller',
+]);
+const DEFAULT_COMIC_FORM_FIELD_GROUPS = [
+    ['series', 'title'],
+    ['volume', 'issue_number', 'year', 'month'],
+    ['max_volumes', 'max_issues', 'series_status'],
+    ['publisher', 'imprint'],
+    ['writer', 'penciller', 'colorist', 'letterer'],
+    ['genre', 'language', 'original_language'],
+    ['tags'],
+    ['summary'],
+];
+const DEFAULT_COMIC_COMPACT_FIELD_KEYS = new Set([
+    'volume',
+    'issue_number',
+    'year',
+    'month',
+    'max_volumes',
+    'max_issues',
 ]);
 
 export default function MetadataModal({ isOpen, onClose, item, accountId, onSuccess }) {
@@ -131,6 +147,10 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
             return strValue.length >= 10 ? strValue.slice(0, 10) : strValue;
         }
 
+        if (attribute.data_type === 'tags') {
+            return Array.isArray(value) ? value : parseTagsInput(String(value));
+        }
+
         return value;
     };
 
@@ -181,7 +201,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                 if (!attr || !rawSuggestion || typeof rawSuggestion !== 'object') return;
                 if (isComicPluginCategory) {
                     if (!COMIC_AI_ALLOWED_FIELDS.has(attr.plugin_field_key)) return;
-                    if (READ_ONLY_COMIC_FIELDS.has(attr.plugin_field_key)) return;
+                    if (READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key)) return;
                 }
                 normalizedSuggestions[attrId] = {
                     ...rawSuggestion,
@@ -223,7 +243,14 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
             if (!category) return;
 
             const missingRequired = category.attributes
-                .filter(attr => attr.is_required && !formValues[attr.id]);
+                .filter((attr) => {
+                    if (!attr.is_required) return false;
+                    const value = formValues[attr.id];
+                    if (attr.data_type === 'tags') {
+                        return !Array.isArray(value) || value.length === 0;
+                    }
+                    return value === undefined || value === null || value === '';
+                });
 
             if (missingRequired.length > 0) {
                 showToast(`Missing required fields: ${missingRequired.map(a => a.name).join(', ')}`, 'error');
@@ -326,6 +353,25 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
     const selectedCategory = categories.find(c => c.id === selectedCategoryId);
     const pluginView = getCategoryPluginView(selectedCategory);
     const isComicPluginCategory = selectedCategory?.plugin_key === 'comicrack_core';
+    const configuredFieldGroups = pluginView?.formLayout?.groups || DEFAULT_COMIC_FORM_FIELD_GROUPS;
+    const compactFieldKeys = new Set(pluginView?.formLayout?.compactFields || Array.from(DEFAULT_COMIC_COMPACT_FIELD_KEYS));
+    const orderedAttributes = sortAttributesForCategory(selectedCategory);
+    const orderedFieldGroups = isComicPluginCategory
+        ? (() => {
+            const configuredKeys = configuredFieldGroups.flat();
+            const grouped = configuredFieldGroups
+                .map((group) =>
+                    group
+                        .map((fieldKey) => orderedAttributes.find((attr) => attr.plugin_field_key === fieldKey))
+                        .filter(Boolean)
+                )
+                .filter((group) => group.length > 0);
+            const leftovers = orderedAttributes
+                .filter((attr) => !configuredKeys.includes(attr.plugin_field_key || ''))
+                .map((attr) => [attr]);
+            return [...grouped, ...leftovers];
+        })()
+        : orderedAttributes.map((attr) => [attr]);
     const coverAttr = selectedCategory?.attributes?.find(
         (attr) => attr.plugin_field_key === pluginView?.gallery?.coverField
     );
@@ -504,125 +550,166 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
 
                             {selectedCategory && (
                                 <div className="space-y-3 border-t pt-4">
-                                    {selectedCategory.attributes.length === 0 ? (
+                                    {orderedAttributes.length === 0 ? (
                                         <p className="text-sm text-muted-foreground italic">No attributes defined for this category.</p>
                                     ) : (
-                                        selectedCategory.attributes.map(attr => (
-                                            <div key={attr.id}>
-                                                <label className="block text-sm font-medium mb-1">
-                                                    {attr.name}
-                                                    {attr.is_required && <span className="text-destructive ml-1">*</span>}
-                                                </label>
-                                                {(() => {
-                                                    const isReadOnlyComputed = selectedCategory?.plugin_key === 'comicrack_core'
-                                                        && READ_ONLY_COMIC_FIELDS.has(attr.plugin_field_key);
-                                                    const isAiEligibleComputed = !(
-                                                        isComicPluginCategory && !COMIC_AI_ALLOWED_FIELDS.has(attr.plugin_field_key)
-                                                    );
-                                                    const suggestion = isAiEligibleComputed ? aiSuggestions[attr.id] : null;
-                                                    const suggestionValue = suggestion?.value;
-                                                    const suggestionText = suggestionValue === undefined || suggestionValue === null
-                                                        ? ''
-                                                        : String(suggestionValue);
-                                                    const confidence = typeof suggestion?.confidence === 'number'
-                                                        ? Math.round(suggestion.confidence * 100)
-                                                        : null;
-                                                    return (
-                                                        <>
+                                        <div className={`grid gap-3 ${isComicPluginCategory ? 'md:grid-cols-2' : 'grid-cols-1'}`}>
+                                            {orderedFieldGroups.map((group, groupIndex) => (
+                                                <div
+                                                    key={`group-${groupIndex}`}
+                                                    className={group.length > 1 && isComicPluginCategory ? 'contents' : 'md:col-span-2'}
+                                                >
+                                                    {group.map((attr) => {
+                                                        const isReadOnlyComputed = selectedCategory?.plugin_key === 'comicrack_core'
+                                                            && READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key);
+                                                        const isAiEligibleComputed = !(
+                                                            isComicPluginCategory && !COMIC_AI_ALLOWED_FIELDS.has(attr.plugin_field_key)
+                                                        );
+                                                        const suggestion = isAiEligibleComputed ? aiSuggestions[attr.id] : null;
+                                                        const suggestionValue = suggestion?.value;
+                                                        const suggestionText = suggestionValue === undefined || suggestionValue === null
+                                                            ? ''
+                                                            : Array.isArray(suggestionValue)
+                                                                ? suggestionValue.join(', ')
+                                                                : String(suggestionValue);
+                                                        const confidence = typeof suggestion?.confidence === 'number'
+                                                            ? Math.round(suggestion.confidence * 100)
+                                                            : null;
+                                                        const fieldContainerClass = isComicPluginCategory
+                                                            ? (
+                                                                READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key)
+                                                                    || attr.plugin_field_key === 'summary'
+                                                                    || attr.plugin_field_key === 'tags'
+                                                                    || (attr.data_type === 'text' && !compactFieldKeys.has(attr.plugin_field_key || ''))
+                                                                    ? 'md:col-span-2'
+                                                                    : 'md:col-span-1'
+                                                            )
+                                                            : 'col-span-1';
+                                                        const tagsValue = tagsToInputValue(formValues[attr.id] || []);
 
-                                                            {attr.data_type === 'text' && (
-                                                                <input
-                                                                    type="text"
-                                                                    className="w-full border rounded-md p-2 bg-background"
-                                                                    value={formValues[attr.id] || ''}
-                                                                    placeholder={!formValues[attr.id] ? suggestionText : ''}
-                                                                    disabled={isReadOnlyComputed}
-                                                                    onChange={e => handleInputChange(attr.id, e.target.value)}
-                                                                />
-                                                            )}
+                                                        return (
+                                                            <div key={attr.id} className={fieldContainerClass}>
+                                                                <label className="block text-sm font-medium mb-1">
+                                                                    {attr.name}
+                                                                    {attr.is_required && <span className="text-destructive ml-1">*</span>}
+                                                                </label>
 
-                                                            {attr.data_type === 'number' && (
-                                                                <input
-                                                                    type="number"
-                                                                    className="w-full border rounded-md p-2 bg-background"
-                                                                    value={formValues[attr.id] || ''}
-                                                                    placeholder={!formValues[attr.id] ? suggestionText : ''}
-                                                                    disabled={isReadOnlyComputed}
-                                                                    onChange={e => handleInputChange(attr.id, e.target.value)}
-                                                                />
-                                                            )}
-
-                                                            {attr.data_type === 'date' && (
-                                                                <input
-                                                                    type="date"
-                                                                    className="w-full border rounded-md p-2 bg-background"
-                                                                    value={formValues[attr.id] || ''}
-                                                                    disabled={isReadOnlyComputed}
-                                                                    onChange={e => handleInputChange(attr.id, e.target.value)}
-                                                                />
-                                                            )}
-
-                                                            {attr.data_type === 'boolean' && (
-                                                                <div className="flex items-center gap-2">
+                                                                {attr.data_type === 'text' && (
                                                                     <input
-                                                                        type="checkbox"
-                                                                        className="rounded border-gray-300"
-                                                                        checked={!!formValues[attr.id]}
+                                                                        type="text"
+                                                                        className="w-full border rounded-md p-2 bg-background"
+                                                                        value={formValues[attr.id] || ''}
+                                                                        placeholder={!formValues[attr.id] ? suggestionText : ''}
                                                                         disabled={isReadOnlyComputed}
-                                                                        onChange={e => handleInputChange(attr.id, e.target.checked)}
+                                                                        onChange={(e) => handleInputChange(attr.id, e.target.value)}
                                                                     />
-                                                                    <span className="text-sm text-muted-foreground">Yes</span>
-                                                                </div>
-                                                            )}
+                                                                )}
 
-                                                            {attr.data_type === 'select' && (
-                                                                <select
-                                                                    className="w-full border rounded-md p-2 bg-background"
-                                                                    value={formValues[attr.id] || ''}
-                                                                    disabled={isReadOnlyComputed}
-                                                                    onChange={e => handleInputChange(attr.id, e.target.value)}
-                                                                >
-                                                                    <option value="">
-                                                                        {suggestionText ? `AI: ${suggestionText}` : 'Select...'}
-                                                                    </option>
-                                                                    {getSelectOptions(attr.options).map(opt => (
-                                                                        <option key={opt} value={opt}>{opt}</option>
-                                                                    ))}
-                                                                </select>
-                                                            )}
+                                                                {attr.data_type === 'number' && (
+                                                                    <input
+                                                                        type="number"
+                                                                        className="w-full border rounded-md p-2 bg-background"
+                                                                        value={formValues[attr.id] || ''}
+                                                                        placeholder={!formValues[attr.id] ? suggestionText : ''}
+                                                                        disabled={isReadOnlyComputed}
+                                                                        onChange={(e) => handleInputChange(attr.id, e.target.value)}
+                                                                    />
+                                                                )}
 
-                                                            {isReadOnlyComputed && (
-                                                                <div className="mt-1 text-xs text-muted-foreground">
-                                                                    Mapped field (read-only)
-                                                                </div>
-                                                            )}
+                                                                {attr.data_type === 'date' && (
+                                                                    <input
+                                                                        type="date"
+                                                                        className="w-full border rounded-md p-2 bg-background"
+                                                                        value={formValues[attr.id] || ''}
+                                                                        disabled={isReadOnlyComputed}
+                                                                        onChange={(e) => handleInputChange(attr.id, e.target.value)}
+                                                                    />
+                                                                )}
 
-                                                            {suggestion && (
-                                                                <div className="mt-2 flex items-center gap-2 text-xs">
-                                                                    <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-700">
-                                                                        AI suggestion{confidence !== null ? ` (${confidence}%)` : ''}
-                                                                    </span>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleAcceptSuggestion(attr.id)}
-                                                                        className="px-2 py-0.5 rounded border hover:bg-accent"
+                                                                {attr.data_type === 'boolean' && (
+                                                                    <div className="flex items-center gap-2">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            className="rounded border-gray-300"
+                                                                            checked={!!formValues[attr.id]}
+                                                                            disabled={isReadOnlyComputed}
+                                                                            onChange={(e) => handleInputChange(attr.id, e.target.checked)}
+                                                                        />
+                                                                        <span className="text-sm text-muted-foreground">Yes</span>
+                                                                    </div>
+                                                                )}
+
+                                                                {attr.data_type === 'select' && (
+                                                                    <select
+                                                                        className="w-full border rounded-md p-2 bg-background"
+                                                                        value={formValues[attr.id] || ''}
+                                                                        disabled={isReadOnlyComputed}
+                                                                        onChange={(e) => handleInputChange(attr.id, e.target.value)}
                                                                     >
-                                                                        Accept
-                                                                    </button>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleRejectSuggestion(attr.id)}
-                                                                        className="px-2 py-0.5 rounded border hover:bg-accent"
-                                                                    >
-                                                                        Reject
-                                                                    </button>
-                                                                </div>
-                                                            )}
-                                                        </>
-                                                    );
-                                                })()}
-                                            </div>
-                                        ))
+                                                                        <option value="">
+                                                                            {suggestionText ? `AI: ${suggestionText}` : 'Select...'}
+                                                                        </option>
+                                                                        {getSelectOptions(attr.options).map((opt) => (
+                                                                            <option key={opt} value={opt}>{opt}</option>
+                                                                        ))}
+                                                                    </select>
+                                                                )}
+
+                                                                {attr.data_type === 'tags' && (
+                                                                    <div className="space-y-2">
+                                                                        <input
+                                                                            type="text"
+                                                                            className="w-full border rounded-md p-2 bg-background"
+                                                                            value={tagsValue}
+                                                                            placeholder={!tagsValue ? (suggestionText || 'tag1, tag2, tag3') : ''}
+                                                                            disabled={isReadOnlyComputed}
+                                                                            onChange={(e) => handleInputChange(attr.id, parseTagsInput(e.target.value))}
+                                                                        />
+                                                                        {Array.isArray(formValues[attr.id]) && formValues[attr.id].length > 0 && (
+                                                                            <div className="flex flex-wrap gap-1">
+                                                                                {formValues[attr.id].map((tag) => (
+                                                                                    <span key={`${attr.id}-${tag}`} className="px-2 py-0.5 rounded-full text-xs bg-muted border">
+                                                                                        {tag}
+                                                                                    </span>
+                                                                                ))}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+
+                                                                {isReadOnlyComputed && (
+                                                                    <div className="mt-1 text-xs text-muted-foreground">
+                                                                        Mapped field (read-only)
+                                                                    </div>
+                                                                )}
+
+                                                                {suggestion && (
+                                                                    <div className="mt-2 flex items-center gap-2 text-xs">
+                                                                        <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-700">
+                                                                            AI suggestion{confidence !== null ? ` (${confidence}%)` : ''}
+                                                                        </span>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleAcceptSuggestion(attr.id)}
+                                                                            className="px-2 py-0.5 rounded border hover:bg-accent"
+                                                                        >
+                                                                            Accept
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleRejectSuggestion(attr.id)}
+                                                                            className="px-2 py-0.5 rounded border hover:bg-accent"
+                                                                        >
+                                                                            Reject
+                                                                        </button>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            ))}
+                                        </div>
                                     )}
                                 </div>
                             )}
