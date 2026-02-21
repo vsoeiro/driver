@@ -36,6 +36,7 @@ COMIC_MAPPING_COMMIT_BATCH_SIZE = 10
 COMIC_DOWNLOAD_BASE_TIMEOUT_SECONDS = 120.0
 COMIC_DOWNLOAD_MAX_TIMEOUT_SECONDS = 1800.0
 COMIC_DOWNLOAD_BYTES_PER_SECOND = 1.5 * 1024 * 1024  # 1.5 MB/s baseline for timeout scaling.
+COMIC_ERROR_ITEMS_LIMIT = 50
 
 SUPPORTED_COMIC_EXTENSIONS = {
     "cbz",
@@ -77,16 +78,153 @@ def file_extension(filename: str | None) -> str:
     return filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
 
+def _container_from_extension(ext: str) -> str | None:
+    if ext in {"zip", "cbz", "cbw"}:
+        return "zip"
+    if ext in {"rar", "cbr"}:
+        return "rar"
+    if ext in {"7z", "cb7"}:
+        return "7z"
+    if ext in {"tar", "cbt"}:
+        return "tar"
+    if ext == "epub":
+        return "epub"
+    if ext == "pdf":
+        return "pdf"
+    return None
+
+
+def _detect_archive_container(local_path: str) -> str | None:
+    try:
+        with open(local_path, "rb") as handle:
+            head = handle.read(560)
+    except OSError:
+        return None
+
+    if head.startswith((b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")):
+        return "zip"
+    if head.startswith((b"Rar!\x1A\x07\x00", b"Rar!\x1A\x07\x01\x00")):
+        return "rar"
+    if head.startswith(b"\x37\x7A\xBC\xAF\x27\x1C"):
+        return "7z"
+    if head.startswith(b"%PDF-"):
+        return "pdf"
+    if len(head) >= 262 and head[257:262] == b"ustar":
+        return "tar"
+    return None
+
+
+def _run_container_extractor(local_path: str, *, fmt: str, container: str) -> ComicExtractionResult:
+    if container == "zip":
+        return _extract_from_zip(local_path, fmt=fmt)
+    if container == "rar":
+        return _extract_from_rar(local_path, fmt=fmt)
+    if container == "7z":
+        return _extract_from_7z(local_path, fmt=fmt)
+    if container == "tar":
+        return _extract_from_tar(local_path, fmt=fmt)
+    if container == "pdf":
+        return _extract_from_pdf(local_path)
+    raise ValueError(f"Unsupported fallback container: {container}")
+
+
+def _extract_archive_with_fallback(
+    local_path: str,
+    *,
+    fmt: str,
+    primary_container: str,
+    primary_error: Exception,
+) -> ComicExtractionResult:
+    detected = _detect_archive_container(local_path)
+    attempts: list[tuple[str, str]] = []
+    candidate_containers: list[str] = []
+    if detected and detected != primary_container and detected in {"zip", "rar", "7z", "tar", "pdf"}:
+        candidate_containers.append(detected)
+
+    for container in ("zip", "rar", "7z", "tar", "pdf"):
+        if container == primary_container:
+            continue
+        if container in candidate_containers:
+            continue
+        candidate_containers.append(container)
+
+    for container in candidate_containers:
+        try:
+            extracted = _run_container_extractor(local_path, fmt=fmt, container=container)
+            extracted.details["fallback_used"] = container
+            if detected:
+                extracted.details["detected_container"] = detected
+            extracted.details["primary_container"] = primary_container
+            return extracted
+        except Exception as exc:  # noqa: BLE001
+            attempts.append((container, str(exc)))
+
+    try:
+        extracted = _extract_from_rar_with_7z(local_path, fmt=fmt)
+        extracted.details["fallback_used"] = "7z_cli"
+        if detected:
+            extracted.details["detected_container"] = detected
+        extracted.details["primary_container"] = primary_container
+        return extracted
+    except Exception as exc:  # noqa: BLE001
+        attempts.append(("7z_cli", str(exc)))
+
+    attempts_preview = "; ".join(f"{name}: {reason}" for name, reason in attempts[:5])
+    raise ValueError(
+        f"Archive extraction failed for .{fmt}. primary={primary_container}: {primary_error}. "
+        f"fallbacks={attempts_preview}"
+    )
+
+
 def extract_comic_asset(local_path: str, extension: str) -> ComicExtractionResult:
     ext = extension.lower()
     if ext in {"zip", "cbz", "cbw"}:
-        return _extract_from_zip(local_path, fmt=ext)
+        try:
+            return _extract_from_zip(local_path, fmt=ext)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "ZIP extraction failed for %s (%s). Trying archive fallbacks.",
+                local_path,
+                exc,
+            )
+            return _extract_archive_with_fallback(
+                local_path,
+                fmt=ext,
+                primary_container="zip",
+                primary_error=exc,
+            )
     if ext in {"rar", "cbr"}:
         return _extract_from_rar(local_path, fmt=ext)
     if ext in {"7z", "cb7"}:
-        return _extract_from_7z(local_path, fmt=ext)
+        try:
+            return _extract_from_7z(local_path, fmt=ext)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "7Z extraction failed for %s (%s). Trying archive fallbacks.",
+                local_path,
+                exc,
+            )
+            return _extract_archive_with_fallback(
+                local_path,
+                fmt=ext,
+                primary_container="7z",
+                primary_error=exc,
+            )
     if ext in {"tar", "cbt"}:
-        return _extract_from_tar(local_path, fmt=ext)
+        try:
+            return _extract_from_tar(local_path, fmt=ext)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "TAR extraction failed for %s (%s). Trying archive fallbacks.",
+                local_path,
+                exc,
+            )
+            return _extract_archive_with_fallback(
+                local_path,
+                fmt=ext,
+                primary_container="tar",
+                primary_error=exc,
+            )
     if ext == "epub":
         return _extract_from_epub(local_path)
     if ext == "pdf":
@@ -204,15 +342,17 @@ def _extract_from_rar_with_7z(local_path: str, *, fmt: str) -> ComicExtractionRe
     with tempfile.TemporaryDirectory(prefix="comic_rar_7z_") as extract_dir:
         extract_cmd = [tool, "x", "-y", f"-o{extract_dir}", local_path]
         extract_proc = subprocess.run(extract_cmd, capture_output=True, check=False)
-        if extract_proc.returncode not in (0, 1):
-            stderr = extract_proc.stderr.decode("utf-8", errors="ignore").strip()
-            raise ValueError(f"7z extract failed: code={extract_proc.returncode} stderr={stderr}")
+        stderr = extract_proc.stderr.decode("utf-8", errors="ignore").strip()
+        stdout = extract_proc.stdout.decode("utf-8", errors="ignore").strip()
 
         root = Path(extract_dir)
         image_paths = [path for path in root.rglob("*") if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS]
         if not image_paths:
-            stderr = extract_proc.stderr.decode("utf-8", errors="ignore").strip()
-            raise ValueError(f"Archive has no image pages after 7z extract. stderr={stderr}")
+            if extract_proc.returncode not in (0, 1):
+                raise ValueError(
+                    f"7z extract failed: code={extract_proc.returncode} stderr={stderr} stdout={stdout}"
+                )
+            raise ValueError(f"Archive has no image pages after 7z extract. stderr={stderr} stdout={stdout}")
 
         image_paths.sort(key=lambda path: path.relative_to(root).as_posix().lower())
         cover_path = image_paths[0]
@@ -227,7 +367,12 @@ def _extract_from_rar_with_7z(local_path: str, *, fmt: str) -> ComicExtractionRe
             page_count=len(image_paths),
             cover_bytes=cover_bytes,
             cover_extension=cover_extension,
-            details={"cover_member": cover_member, "backend": "7z_fallback"},
+            details={
+                "cover_member": cover_member,
+                "backend": "7z_fallback",
+                "7z_return_code": extract_proc.returncode,
+                "7z_stderr": stderr[:2000] if stderr else "",
+            },
         )
 
 
@@ -453,6 +598,66 @@ class ComicMetadataService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    @staticmethod
+    def _init_stats(total: int, *, accounts: int | None = None) -> dict[str, Any]:
+        stats: dict[str, Any] = {
+            "total": total,
+            "mapped": 0,
+            "skipped": 0,
+            "failed": 0,
+            "error_items": [],
+            "error_items_truncated": 0,
+        }
+        if accounts is not None:
+            stats["accounts"] = accounts
+        return stats
+
+    @staticmethod
+    def _record_error_item(
+        stats: dict[str, Any],
+        *,
+        reason: str,
+        item_id: str | None = None,
+        item_name: str | None = None,
+        account_id: str | None = None,
+    ) -> None:
+        error_items = stats.get("error_items")
+        if not isinstance(error_items, list):
+            error_items = []
+            stats["error_items"] = error_items
+
+        if len(error_items) >= COMIC_ERROR_ITEMS_LIMIT:
+            stats["error_items_truncated"] = int(stats.get("error_items_truncated", 0) or 0) + 1
+            return
+
+        reason_text = str(reason or "Unknown error").strip() or "Unknown error"
+        entry: dict[str, str] = {"reason": reason_text[:2000]}
+        if item_id:
+            entry["item_id"] = str(item_id)
+        if item_name:
+            entry["item_name"] = str(item_name)
+        if account_id:
+            entry["account_id"] = str(account_id)
+        error_items.append(entry)
+
+    @classmethod
+    def _merge_error_items(cls, target: dict[str, Any], source: dict[str, Any]) -> None:
+        source_items = source.get("error_items")
+        if isinstance(source_items, list):
+            for entry in source_items:
+                if not isinstance(entry, dict):
+                    continue
+                cls._record_error_item(
+                    target,
+                    reason=str(entry.get("reason") or "Unknown error"),
+                    item_id=str(entry.get("item_id")) if entry.get("item_id") else None,
+                    item_name=str(entry.get("item_name")) if entry.get("item_name") else None,
+                    account_id=str(entry.get("account_id")) if entry.get("account_id") else None,
+                )
+        target["error_items_truncated"] = int(target.get("error_items_truncated", 0) or 0) + int(
+            source.get("error_items_truncated", 0) or 0
+        )
+
     async def _get_linked_account(self, account_id: str | UUID | None) -> LinkedAccount | None:
         if account_id is None:
             return None
@@ -473,7 +678,7 @@ class ComicMetadataService:
         batch_id=None,
         progress_reporter=None,
         initialize_progress_total: bool = True,
-    ) -> dict[str, int]:
+    ) -> dict[str, Any]:
         account = await self.session.get(LinkedAccount, account_id)
         if not account:
             raise ValueError("Account not found")
@@ -493,7 +698,7 @@ class ComicMetadataService:
         target_client = build_drive_client(target_account, token_manager)
 
         files_to_process = await self._expand_items(client, account, item_ids)
-        stats = {"total": len(files_to_process), "mapped": 0, "skipped": 0, "failed": 0}
+        stats = self._init_stats(len(files_to_process))
         logger.info(
             "Comic mapping started account_id=%s selected_items=%s expanded_files=%s job_id=%s",
             account.id,
@@ -528,7 +733,7 @@ class ComicMetadataService:
         batch_id=None,
         progress_reporter=None,
         initialize_progress_total: bool = True,
-    ) -> dict[str, int]:
+    ) -> dict[str, Any]:
         account = await self.session.get(LinkedAccount, account_id)
         if not account:
             raise ValueError("Account not found")
@@ -547,7 +752,7 @@ class ComicMetadataService:
                 target_account = maybe_target
         target_client = build_drive_client(target_account, token_manager)
 
-        stats = {"total": len(files_to_process), "mapped": 0, "skipped": 0, "failed": 0}
+        stats = self._init_stats(len(files_to_process))
         logger.info(
             "Comic mapping started (indexed) account_id=%s selected_items=%s expanded_files=%s job_id=%s",
             account.id,
@@ -573,7 +778,7 @@ class ComicMetadataService:
             progress_reporter=progress_reporter,
         )
 
-    async def reindex_mapped_comics(self, *, job_id=None, batch_id=None) -> dict[str, int]:
+    async def reindex_mapped_comics(self, *, job_id=None, batch_id=None) -> dict[str, Any]:
         plugin_service = MetadataPluginService(self.session)
         category = await plugin_service.ensure_active_comic_category()
         stmt = select(ItemMetadata.account_id, ItemMetadata.item_id).where(ItemMetadata.category_id == category.id)
@@ -583,15 +788,20 @@ class ComicMetadataService:
         for account_id, item_id in rows:
             by_account.setdefault(account_id, []).append(item_id)
         if not by_account:
-            return {"total": 0, "mapped": 0, "skipped": 0, "failed": 0, "accounts": 0}
+            return self._init_stats(0, accounts=0)
 
         plugin_settings = await PluginSettingsService(self.session).get_comic_runtime_settings()
-        overall = {"total": 0, "mapped": 0, "skipped": 0, "failed": 0, "accounts": len(by_account)}
+        overall = self._init_stats(0, accounts=len(by_account))
         for account_id, item_ids in by_account.items():
             account = await self._get_linked_account(account_id)
             if not account:
                 overall["failed"] += len(item_ids)
                 overall["total"] += len(item_ids)
+                self._record_error_item(
+                    overall,
+                    reason=f"Linked account {account_id} not found",
+                    account_id=str(account_id),
+                )
                 continue
 
             plugin_service = MetadataPluginService(self.session)
@@ -605,7 +815,7 @@ class ComicMetadataService:
                     target_account = maybe_target
             target_client = build_drive_client(target_account, token_manager)
             files_to_process = await self._expand_items(source_client, account, item_ids)
-            stats = {"total": len(files_to_process), "mapped": 0, "skipped": 0, "failed": 0}
+            stats = self._init_stats(len(files_to_process))
             stats = await self._process_files(
                 files_to_process=files_to_process,
                 source_account=account,
@@ -624,6 +834,7 @@ class ComicMetadataService:
             overall["mapped"] += stats["mapped"]
             overall["skipped"] += stats["skipped"]
             overall["failed"] += stats["failed"]
+            self._merge_error_items(overall, stats)
         return overall
 
     async def _process_files(
@@ -637,12 +848,12 @@ class ComicMetadataService:
         category_id,
         attr_ids: dict[str, str],
         plugin_settings: ComicRuntimeSettings,
-        stats: dict[str, int],
+        stats: dict[str, Any],
         job_id,
         batch_id,
         force_remap: bool,
         progress_reporter=None,
-    ) -> dict[str, int]:
+    ) -> dict[str, Any]:
         batch_size = COMIC_MAPPING_COMMIT_BATCH_SIZE
         processed_since_commit = 0
         source_account_pk = source_account.id
@@ -689,7 +900,7 @@ class ComicMetadataService:
                         stats["failed"],
                         stats["total"],
                     )
-            except Exception:
+            except Exception as exc:
                 await self.session.rollback()
                 refreshed_source = await self.session.get(LinkedAccount, source_account_pk)
                 if refreshed_source is not None:
@@ -698,6 +909,13 @@ class ComicMetadataService:
                 if refreshed_target is not None:
                     target_account = refreshed_target
                 stats["failed"] += 1
+                self._record_error_item(
+                    stats,
+                    reason=str(exc),
+                    item_id=getattr(file_item, "id", None),
+                    item_name=getattr(file_item, "name", None),
+                    account_id=source_account_id,
+                )
                 logger.exception(
                     "Comic mapping failed for account=%s item=%s",
                     source_account_id,
@@ -711,6 +929,8 @@ class ComicMetadataService:
                             mapped=stats["mapped"],
                             skipped=stats["skipped"],
                             failed=stats["failed"],
+                            error_items=stats.get("error_items", []),
+                            error_items_truncated=stats.get("error_items_truncated", 0),
                         )
 
         if processed_since_commit > 0:
@@ -721,6 +941,8 @@ class ComicMetadataService:
                 mapped=stats["mapped"],
                 skipped=stats["skipped"],
                 failed=stats["failed"],
+                error_items=stats.get("error_items", []),
+                error_items_truncated=stats.get("error_items_truncated", 0),
             )
 
         logger.info(

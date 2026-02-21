@@ -18,6 +18,35 @@ from backend.workers.job_progress import JobProgressReporter
 from backend.workers.dispatcher import register_handler
 
 logger = logging.getLogger(__name__)
+ERROR_ITEMS_LIMIT = 50
+
+
+def _record_error_item(
+    stats: dict,
+    *,
+    reason: str,
+    item_id: str | None = None,
+    item_name: str | None = None,
+    stage: str | None = None,
+) -> None:
+    error_items = stats.get("error_items")
+    if not isinstance(error_items, list):
+        error_items = []
+        stats["error_items"] = error_items
+
+    if len(error_items) >= ERROR_ITEMS_LIMIT:
+        stats["error_items_truncated"] = int(stats.get("error_items_truncated", 0) or 0) + 1
+        return
+
+    reason_text = str(reason or "Unknown error").strip() or "Unknown error"
+    entry: dict[str, str] = {"reason": reason_text[:2000]}
+    if item_id:
+        entry["item_id"] = str(item_id)
+    if item_name:
+        entry["item_name"] = str(item_name)
+    if stage:
+        entry["stage"] = stage
+    error_items.append(entry)
 
 
 @register_handler("update_metadata")
@@ -81,7 +110,14 @@ async def update_metadata_handler(payload: dict, session: AsyncSession) -> dict:
     client = build_drive_client(account, token_manager)
 
     # 3. Start recursive update
-    stats = {"processed": 0, "updated": 0, "errors": 0, "batch_id": str(batch_id)}
+    stats = {
+        "processed": 0,
+        "updated": 0,
+        "errors": 0,
+        "batch_id": str(batch_id),
+        "error_items": [],
+        "error_items_truncated": 0,
+    }
     
     # Check root item type
     root_item = await client.get_item_metadata(account, root_item_id)
@@ -168,6 +204,12 @@ async def _update_metadata_recursive(
     except Exception as e:
         logger.error(f"Failed to list folder {folder_id}: {e}")
         stats["errors"] += 1
+        _record_error_item(
+            stats,
+            reason=str(e),
+            item_id=folder_id,
+            stage="list_folder",
+        )
         return
 
     items_to_process = children.items
@@ -218,6 +260,13 @@ async def _update_metadata_recursive(
                 except Exception as e:
                     logger.error(f"Failed to update item {item.id}: {e}")
                     stats["errors"] += 1
+                    _record_error_item(
+                        stats,
+                        reason=str(e),
+                        item_id=item.id,
+                        item_name=item.name,
+                        stage="update_item",
+                    )
                 finally:
                     stats["processed"] += 1
                     if stats["processed"] % 10 == 0:
@@ -239,6 +288,13 @@ async def _update_metadata_recursive(
                         await progress.set_total(progress.total + discovered)
             except Exception as e:
                 logger.error(f"Failed to fetch next page for folder {folder_id}: {e}")
+                stats["errors"] += 1
+                _record_error_item(
+                    stats,
+                    reason=str(e),
+                    item_id=folder_id,
+                    stage="list_next_page",
+                )
                 break
         else:
             break
@@ -317,6 +373,8 @@ async def apply_metadata_recursive_handler(
         "updated": 0,
         "errors": 0,
         "batch_id": str(batch_id),
+        "error_items": [],
+        "error_items_truncated": 0,
     }
     await progress.set_total(len(items))
     batch_count = 0
@@ -356,6 +414,13 @@ async def apply_metadata_recursive_handler(
         except Exception as e:
             logger.error(f"Failed to apply metadata to item {item.item_id}: {e}")
             stats["errors"] += 1
+            _record_error_item(
+                stats,
+                reason=str(e),
+                item_id=item.item_id,
+                item_name=item.name,
+                stage="apply_metadata_recursive",
+            )
         finally:
             await progress.increment()
             if progress.current % 10 == 0:

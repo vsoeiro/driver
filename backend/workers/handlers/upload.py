@@ -35,7 +35,14 @@ async def upload_file_handler(payload: dict, session: AsyncSession) -> dict:
     temp_path = payload["temp_path"]
     progress = JobProgressReporter.from_payload(session, payload)
     await progress.set_total(1)
-    await progress.update_metrics(total=1, success=0, failed=0, skipped=0)
+    await progress.update_metrics(
+        total=1,
+        success=0,
+        failed=0,
+        skipped=0,
+        error_items=[],
+        error_items_truncated=0,
+    )
 
     # Ensure temp file exists
     if not os.path.exists(temp_path):
@@ -111,7 +118,14 @@ async def upload_file_handler(payload: dict, session: AsyncSession) -> dict:
             await session.commit()
 
         progress.current = 1
-        await progress.update_metrics(total=1, success=1, failed=0, skipped=0)
+        await progress.update_metrics(
+            total=1,
+            success=1,
+            failed=0,
+            skipped=0,
+            error_items=[],
+            error_items_truncated=0,
+        )
         await progress.flush(force=True)
         return {
             "filename": filename,
@@ -121,18 +135,35 @@ async def upload_file_handler(payload: dict, session: AsyncSession) -> dict:
             "success": 1,
             "failed": 0,
             "skipped": 0,
+            "error_items": [],
+            "error_items_truncated": 0,
             "metrics": {
                 "total": 1,
                 "success": 1,
                 "failed": 0,
                 "skipped": 0,
+                "error_items": [],
+                "error_items_truncated": 0,
             },
         }
 
     except Exception as e:
         progress.current = 1
+        reason_text = str(e).strip() or e.__class__.__name__
+        error_entry = {
+            "item_name": filename,
+            "reason": reason_text[:2000],
+            "stage": "upload_file",
+        }
         try:
-            await progress.update_metrics(total=1, success=0, failed=1, skipped=0)
+            await progress.update_metrics(
+                total=1,
+                success=0,
+                failed=1,
+                skipped=0,
+                error_items=[error_entry],
+                error_items_truncated=0,
+            )
             await progress.flush(force=True)
         except Exception:
             logger.exception("Failed to persist upload progress metrics for %s", filename)

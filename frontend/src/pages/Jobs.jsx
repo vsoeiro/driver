@@ -5,6 +5,14 @@ import { useToast } from '../contexts/ToastContext';
 import Modal from '../components/Modal';
 import { formatJobStatus, formatJobType } from '../utils/jobLabels';
 
+const DATE_RANGE_MS = {
+    '24h': 24 * 60 * 60 * 1000,
+    '3d': 3 * 24 * 60 * 60 * 1000,
+    '7d': 7 * 24 * 60 * 60 * 1000,
+    '30d': 30 * 24 * 60 * 60 * 1000,
+    '90d': 90 * 24 * 60 * 60 * 1000,
+};
+
 export default function Jobs() {
     const [jobs, setJobs] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -18,17 +26,51 @@ export default function Jobs() {
     const [attempts, setAttempts] = useState([]);
     const [loadingAttempts, setLoadingAttempts] = useState(false);
     const [statusFilter, setStatusFilter] = useState('ALL');
+    const [typeFilter, setTypeFilter] = useState('ALL');
+    const [dateRangeFilter, setDateRangeFilter] = useState('ALL');
     const { showToast } = useToast();
     const PAGE_SIZE = 20;
 
-    const fetchJobs = useCallback(async (pageNumber = page, statusValue = statusFilter) => {
+    const DATE_RANGE_OPTIONS = [
+        { value: 'ALL', label: 'All time' },
+        { value: '24h', label: 'Last 24h', hours: 24 },
+        { value: '3d', label: 'Last 3 days', days: 3 },
+        { value: '7d', label: 'Last 7 days', days: 7 },
+        { value: '30d', label: 'Last 30 days', days: 30 },
+        { value: '90d', label: 'Last 90 days', days: 90 },
+    ];
+
+    const JOB_TYPE_OPTIONS = [
+        { value: 'ALL', label: 'All types' },
+        { value: 'sync_items', label: 'Sync Items' },
+        { value: 'move_items', label: 'Move Items' },
+        { value: 'upload_file', label: 'Upload File' },
+        { value: 'update_metadata', label: 'Update Metadata' },
+        { value: 'apply_metadata_recursive', label: 'Apply Metadata Recursive' },
+        { value: 'remove_metadata_recursive', label: 'Remove Metadata Recursive' },
+        { value: 'undo_metadata_batch', label: 'Undo Metadata Batch' },
+        { value: 'apply_metadata_rule', label: 'Apply Metadata Rule' },
+        { value: 'extract_comic_assets', label: 'Extract Comic Assets' },
+        { value: 'extract_library_comic_assets', label: 'Extract Library Comic Assets' },
+        { value: 'reindex_comic_covers', label: 'Reindex Comic Covers' },
+    ];
+
+    const fetchJobs = useCallback(async (
+        pageNumber = page,
+        statusValue = statusFilter,
+        typeValue = typeFilter,
+        dateRangeValue = dateRangeFilter
+    ) => {
         setLoading(true);
         try {
             const parsedPage = Number(pageNumber);
             const safePage = Number.isFinite(parsedPage) && parsedPage > 0 ? Math.floor(parsedPage) : page;
             const offset = (safePage - 1) * PAGE_SIZE;
             const statuses = statusValue === 'ALL' ? [] : [statusValue];
-            const data = await getJobs(PAGE_SIZE, offset, statuses);
+            const types = typeValue === 'ALL' ? [] : [typeValue];
+            const deltaMs = DATE_RANGE_MS[dateRangeValue] || 0;
+            const createdAfter = deltaMs > 0 ? new Date(Date.now() - deltaMs).toISOString() : null;
+            const data = await getJobs(PAGE_SIZE, offset, statuses, { types, createdAfter });
             setJobs(data);
             setHasNextPage(data.length === PAGE_SIZE);
         } catch (error) {
@@ -37,26 +79,26 @@ export default function Jobs() {
         } finally {
             setLoading(false);
         }
-    }, [showToast, page, statusFilter]);
+    }, [showToast, page, statusFilter, typeFilter, dateRangeFilter]);
 
     useEffect(() => {
-        fetchJobs(page, statusFilter);
-        const interval = setInterval(() => fetchJobs(page, statusFilter), 5000); // Poll every 5 seconds
+        fetchJobs(page, statusFilter, typeFilter, dateRangeFilter);
+        const interval = setInterval(() => fetchJobs(page, statusFilter, typeFilter, dateRangeFilter), 5000); // Poll every 5 seconds
         return () => clearInterval(interval);
-    }, [fetchJobs, page, statusFilter]);
+    }, [fetchJobs, page, statusFilter, typeFilter, dateRangeFilter]);
 
     const goToPreviousPage = () => {
         if (page <= 1) return;
         const nextPage = page - 1;
         setPage(nextPage);
-        fetchJobs(nextPage, statusFilter);
+        fetchJobs(nextPage, statusFilter, typeFilter, dateRangeFilter);
     };
 
     const goToNextPage = () => {
         if (!hasNextPage) return;
         const nextPage = page + 1;
         setPage(nextPage);
-        fetchJobs(nextPage, statusFilter);
+        fetchJobs(nextPage, statusFilter, typeFilter, dateRangeFilter);
     };
 
     const getStatusIcon = (status) => {
@@ -180,13 +222,101 @@ export default function Jobs() {
     const getMetricSummary = (job) => {
         const metrics = job?.metrics && typeof job.metrics === 'object' ? job.metrics : {};
         const result = job?.result && typeof job.result === 'object' ? job.result : {};
+        const success = pickMetricNumber(metrics, ['success', 'mapped', 'updated', 'changed']) || pickMetricNumber(result, ['success', 'mapped', 'updated', 'changed']);
+        const failed = pickMetricNumber(metrics, ['failed', 'errors']) || pickMetricNumber(result, ['failed', 'errors']);
+        const skipped = pickMetricNumber(metrics, ['skipped', 'unchanged']) || pickMetricNumber(result, ['skipped', 'unchanged']);
+        const explicitTotal = pickMetricNumber(metrics, ['total']) || pickMetricNumber(result, ['total']);
+        const derivedTotal = success + failed + skipped;
         return {
-            total: pickMetricNumber(metrics, ['total']) || pickMetricNumber(result, ['total']),
-            success: pickMetricNumber(metrics, ['success', 'mapped', 'updated', 'changed']) || pickMetricNumber(result, ['success', 'mapped', 'updated', 'changed']),
-            failed: pickMetricNumber(metrics, ['failed', 'errors']) || pickMetricNumber(result, ['failed', 'errors']),
-            skipped: pickMetricNumber(metrics, ['skipped', 'unchanged']) || pickMetricNumber(result, ['skipped', 'unchanged']),
+            total: explicitTotal > 0 ? explicitTotal : derivedTotal,
+            success,
+            failed,
+            skipped,
         };
     };
+
+    const normalizeErrorItems = (job) => {
+        const candidateSources = [];
+        if (job?.result && typeof job.result === 'object') candidateSources.push(job.result);
+        if (job?.metrics && typeof job.metrics === 'object') candidateSources.push(job.metrics);
+
+        const normalized = [];
+        const pushNormalized = (item, indexHint = 0) => {
+            if (typeof item === 'string') {
+                normalized.push({
+                    key: `error-${indexHint}`,
+                    reason: item,
+                    itemId: null,
+                    itemName: null,
+                    stage: null,
+                });
+                return;
+            }
+            if (!item || typeof item !== 'object') return;
+
+            const reasonRaw = item.reason ?? item.error ?? item.message ?? item.detail;
+            const reason = typeof reasonRaw === 'string' ? reasonRaw : reasonRaw ? String(reasonRaw) : '';
+            if (!reason) return;
+
+            const itemIdRaw = item.item_id ?? item.itemId ?? item.id ?? null;
+            const itemNameRaw = item.item_name ?? item.itemName ?? item.name ?? item.path ?? null;
+            const stageRaw = item.stage ?? null;
+            const itemId = itemIdRaw ? String(itemIdRaw) : null;
+            const itemName = itemNameRaw ? String(itemNameRaw) : null;
+            const stage = stageRaw ? String(stageRaw) : null;
+            const key = `${itemId || itemName || 'error'}-${reason}-${stage || ''}`;
+            normalized.push({
+                key,
+                reason,
+                itemId,
+                itemName,
+                stage,
+            });
+        };
+
+        candidateSources.forEach((source) => {
+            const errorItems = source.error_items ?? source.failed_items ?? source.errors_by_item ?? null;
+            if (Array.isArray(errorItems)) {
+                errorItems.forEach((item, index) => pushNormalized(item, index));
+            } else if (errorItems && typeof errorItems === 'object') {
+                Object.entries(errorItems).forEach(([itemId, reason], index) => {
+                    pushNormalized({ item_id: itemId, reason }, index);
+                });
+            }
+        });
+
+        const deduped = [];
+        const seen = new Set();
+        normalized.forEach((entry) => {
+            if (seen.has(entry.key)) return;
+            seen.add(entry.key);
+            deduped.push(entry);
+        });
+        return deduped;
+    };
+
+    const getErrorItemsTruncated = (job) => {
+        const resultTruncated = job?.result?.error_items_truncated;
+        const metricsTruncated = job?.metrics?.error_items_truncated;
+        const fromResult = Number.isFinite(Number(resultTruncated)) ? Math.max(0, Math.trunc(Number(resultTruncated))) : 0;
+        const fromMetrics = Number.isFinite(Number(metricsTruncated)) ? Math.max(0, Math.trunc(Number(metricsTruncated))) : 0;
+        return Math.max(fromResult, fromMetrics);
+    };
+
+    const getJobErrorText = (job, attemptRows = []) => {
+        if (!job || typeof job !== 'object') return null;
+        if (typeof job?.result?.error === 'string' && job.result.error.trim()) return job.result.error;
+        if (typeof job?.dead_letter_reason === 'string' && job.dead_letter_reason.trim()) return job.dead_letter_reason;
+        if (typeof job?.last_error === 'string' && job.last_error.trim()) return job.last_error;
+        const attemptError = Array.isArray(attemptRows) ? attemptRows.find((attempt) => typeof attempt?.error === 'string' && attempt.error.trim())?.error : null;
+        if (typeof attemptError === 'string' && attemptError.trim()) return attemptError;
+        return null;
+    };
+
+    const selectedMetricSummary = selectedJob ? getMetricSummary(selectedJob) : null;
+    const selectedErrorText = selectedJob ? getJobErrorText(selectedJob, attempts) : null;
+    const selectedErrorItems = selectedJob ? normalizeErrorItems(selectedJob) : [];
+    const selectedErrorItemsTruncated = selectedJob ? getErrorItemsTruncated(selectedJob) : 0;
 
     return (
         <div className="flex flex-col h-screen">
@@ -202,7 +332,7 @@ export default function Jobs() {
                             const nextStatus = event.target.value;
                             setStatusFilter(nextStatus);
                             setPage(1);
-                            fetchJobs(1, nextStatus);
+                            fetchJobs(1, nextStatus, typeFilter, dateRangeFilter);
                         }}
                     >
                         <option value="ALL">All status</option>
@@ -213,6 +343,34 @@ export default function Jobs() {
                         <option value="FAILED">Failed</option>
                         <option value="DEAD_LETTER">Dead Letter</option>
                         <option value="CANCELLED">Cancelled</option>
+                    </select>
+                    <select
+                        className="border rounded-md px-2 py-1.5 text-sm bg-background"
+                        value={typeFilter}
+                        onChange={(event) => {
+                            const nextType = event.target.value;
+                            setTypeFilter(nextType);
+                            setPage(1);
+                            fetchJobs(1, statusFilter, nextType, dateRangeFilter);
+                        }}
+                    >
+                        {JOB_TYPE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                    </select>
+                    <select
+                        className="border rounded-md px-2 py-1.5 text-sm bg-background"
+                        value={dateRangeFilter}
+                        onChange={(event) => {
+                            const nextRange = event.target.value;
+                            setDateRangeFilter(nextRange);
+                            setPage(1);
+                            fetchJobs(1, statusFilter, typeFilter, nextRange);
+                        }}
+                    >
+                        {DATE_RANGE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
                     </select>
                     <span className="text-sm text-muted-foreground">Page {page}</span>
                     <div className="flex gap-1">
@@ -249,22 +407,27 @@ export default function Jobs() {
                         No jobs found.
                     </div>
                 ) : (
-                    <div className="border rounded-lg overflow-hidden bg-card">
-                        <div className="grid grid-cols-[130px_1fr_140px_140px_140px_110px_150px_140px_170px_78px] gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
-                            <div>Status</div>
-                            <div>Type</div>
-                            <div className="text-right">Created</div>
-                            <div className="text-right">Started</div>
-                            <div className="text-right">Finished</div>
-                            <div className="text-right">Duration</div>
-                            <div>ETA</div>
-                            <div>Progress</div>
-                            <div>Metrics</div>
-                            <div className="text-center"></div>
-                        </div>
+                    <div className="border rounded-lg bg-card overflow-x-auto">
+                        <div className="min-w-[1660px]">
+                            <div className="grid grid-cols-[120px_120px_1fr_140px_140px_140px_100px_150px_120px_72px_72px_72px_72px_78px] gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
+                                <div>Status</div>
+                                <div>Job ID</div>
+                                <div>Type</div>
+                                <div className="text-right">Created</div>
+                                <div className="text-right">Started</div>
+                                <div className="text-right">Finished</div>
+                                <div className="text-right">Duration</div>
+                                <div>ETA</div>
+                                <div>Progress</div>
+                                <div className="text-right">Total</div>
+                                <div className="text-right">Success</div>
+                                <div className="text-right">Failed</div>
+                                <div className="text-right">Skipped</div>
+                                <div className="text-center"></div>
+                            </div>
 
-                        <div className="divide-y text-sm">
-                            {jobs.map((job) => {
+                            <div className="divide-y text-sm">
+                                {jobs.map((job) => {
                                 const started = job.started_at ? new Date(job.started_at) : null;
                                 const completed = job.completed_at ? new Date(job.completed_at) : null;
                                 const duration = started && completed
@@ -281,11 +444,11 @@ export default function Jobs() {
                                 const canDelete = ['COMPLETED', 'FAILED', 'DEAD_LETTER', 'CANCELLED'].includes(job.status);
                                 const canCancel = ['PENDING', 'RUNNING', 'RETRY_SCHEDULED', 'CANCEL_REQUESTED'].includes(job.status);
 
-                                return (
-                                    <div
-                                        key={job.id}
-                                        className="grid grid-cols-[130px_1fr_140px_140px_140px_110px_150px_140px_170px_78px] gap-4 p-3 items-center hover:bg-muted/30 transition-colors pointer-events-none"
-                                    >
+                                    return (
+                                        <div
+                                            key={job.id}
+                                            className="grid grid-cols-[120px_120px_1fr_140px_140px_140px_100px_150px_120px_72px_72px_72px_72px_78px] gap-4 p-3 items-center hover:bg-muted/30 transition-colors pointer-events-none"
+                                        >
                                         <div className="pointer-events-auto">
                                             <div className={`inline-flex items-center gap-2 font-medium ${job.status === 'COMPLETED' ? 'text-green-600' :
                                                 job.status === 'FAILED' || job.status === 'DEAD_LETTER' ? 'text-red-500' :
@@ -296,6 +459,9 @@ export default function Jobs() {
                                                 {getStatusIcon(job.status)}
                                                 <span>{formatJobStatus(job.status)}</span>
                                             </div>
+                                        </div>
+                                        <div className="pointer-events-auto font-mono text-xs text-muted-foreground truncate" title={job.id}>
+                                            {String(job.id).slice(0, 8)}...
                                         </div>
                                         <div className="font-medium text-foreground truncate pointer-events-auto">
                                             {formatJobType(job.type)}
@@ -331,9 +497,17 @@ export default function Jobs() {
                                                 {progressPercent}%
                                             </div>
                                         </div>
-                                        <div className="text-xs text-muted-foreground pointer-events-auto tabular-nums leading-5">
-                                            <div>T: {metricSummary.total}</div>
-                                            <div>S: {metricSummary.success} F: {metricSummary.failed} K: {metricSummary.skipped}</div>
+                                        <div className="text-right text-xs tabular-nums text-foreground pointer-events-auto">
+                                            {metricSummary.total}
+                                        </div>
+                                        <div className="text-right text-xs tabular-nums text-emerald-600 pointer-events-auto">
+                                            {metricSummary.success}
+                                        </div>
+                                        <div className={`text-right text-xs tabular-nums pointer-events-auto ${metricSummary.failed > 0 ? 'text-red-600 font-semibold' : 'text-muted-foreground'}`}>
+                                            {metricSummary.failed}
+                                        </div>
+                                        <div className="text-right text-xs tabular-nums text-amber-600 pointer-events-auto">
+                                            {metricSummary.skipped}
                                         </div>
                                         <div className="text-right pointer-events-auto">
                                             <div className="flex items-center justify-end gap-1">
@@ -397,9 +571,10 @@ export default function Jobs() {
                                                 )}
                                             </div>
                                         </div>
-                                    </div>
-                                );
-                            })}
+                                        </div>
+                                    );
+                                })}
+                            </div>
                         </div>
                     </div>
                 )}
@@ -463,6 +638,26 @@ export default function Jobs() {
                                     Dead Letter: {formatDate(selectedJob.dead_lettered_at)}
                                 </div>
                             )}
+                            {selectedMetricSummary && (
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-2">
+                                    <div className="rounded border bg-muted/30 px-2 py-1 text-xs">
+                                        <div className="text-muted-foreground">Total</div>
+                                        <div className="font-semibold tabular-nums">{selectedMetricSummary.total}</div>
+                                    </div>
+                                    <div className="rounded border border-emerald-500/30 bg-emerald-500/5 px-2 py-1 text-xs">
+                                        <div className="text-emerald-700">Success</div>
+                                        <div className="font-semibold tabular-nums text-emerald-700">{selectedMetricSummary.success}</div>
+                                    </div>
+                                    <div className={`rounded border px-2 py-1 text-xs ${selectedMetricSummary.failed > 0 ? 'border-red-500/30 bg-red-500/5' : 'border-muted bg-muted/20'}`}>
+                                        <div className={selectedMetricSummary.failed > 0 ? 'text-red-700' : 'text-muted-foreground'}>Failed</div>
+                                        <div className={`font-semibold tabular-nums ${selectedMetricSummary.failed > 0 ? 'text-red-700' : 'text-muted-foreground'}`}>{selectedMetricSummary.failed}</div>
+                                    </div>
+                                    <div className="rounded border border-amber-500/30 bg-amber-500/5 px-2 py-1 text-xs">
+                                        <div className="text-amber-700">Skipped</div>
+                                        <div className="font-semibold tabular-nums text-amber-700">{selectedMetricSummary.skipped}</div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         <div>
@@ -474,7 +669,7 @@ export default function Jobs() {
                             </div>
                         </div>
 
-                        {selectedJob.status === 'FAILED' && selectedJob.result?.error && (
+                        {selectedErrorText && (
                             <div>
                                 <span className="text-sm font-medium text-destructive mb-2 flex items-center gap-2">
                                     <AlertTriangle className="w-4 h-4" />
@@ -482,9 +677,40 @@ export default function Jobs() {
                                 </span>
                                 <div className="bg-destructive/5 p-3 rounded-md border border-destructive/20 text-xs font-mono overflow-auto max-h-60 text-destructive">
                                     <pre className="whitespace-pre-wrap break-all">
-                                        {selectedJob.result.error}
+                                        {selectedErrorText}
                                     </pre>
                                 </div>
+                            </div>
+                        )}
+
+                        {selectedErrorItems.length > 0 && (
+                            <div>
+                                <span className="text-sm font-medium text-destructive mb-2 flex items-center gap-2">
+                                    <AlertTriangle className="w-4 h-4" />
+                                    Failed Items {selectedErrorItemsTruncated > 0 ? `(showing ${selectedErrorItems.length}, +${selectedErrorItemsTruncated} hidden)` : `(${selectedErrorItems.length})`}
+                                </span>
+                                <div className="bg-destructive/5 p-3 rounded-md border border-destructive/20 text-xs overflow-auto max-h-72">
+                                    <div className="space-y-2">
+                                        {selectedErrorItems.map((entry) => (
+                                            <div key={entry.key} className="rounded border border-destructive/20 bg-background/70 p-2">
+                                                <div className="font-mono text-[11px] text-muted-foreground">
+                                                    {entry.itemId ? `item_id: ${entry.itemId}` : 'item_id: -'}
+                                                    {entry.itemName ? ` | name: ${entry.itemName}` : ''}
+                                                    {entry.stage ? ` | stage: ${entry.stage}` : ''}
+                                                </div>
+                                                <div className="mt-1 text-destructive break-all">
+                                                    {entry.reason}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {selectedMetricSummary && selectedMetricSummary.failed > 0 && selectedErrorItems.length === 0 && !selectedErrorText && (
+                            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">
+                                Failed items were counted, but no per-item error details were persisted for this job execution.
                             </div>
                         )}
 

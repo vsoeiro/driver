@@ -4,6 +4,7 @@ This module provides endpoints for creating and managing background jobs.
 """
 
 from uuid import UUID
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query, Request, status, UploadFile, File, Form
 from sqlalchemy import func, select
@@ -110,6 +111,8 @@ async def list_jobs(
     limit: int = 50,
     offset: int = 0,
     status_filter: list[str] | None = Query(default=None, alias="status"),
+    type_filter: list[str] | None = Query(default=None, alias="type"),
+    created_after: datetime | None = Query(default=None),
 ) -> list[Job]:
     """List recent jobs.
     
@@ -125,7 +128,24 @@ async def list_jobs(
             continue
         parts = [part.strip().upper() for part in str(value).split(",")]
         statuses.extend([part for part in parts if part])
-    return await job_service.get_jobs(limit=limit, offset=offset, statuses=statuses or None)
+
+    raw_types = []
+    raw_types.extend(type_filter or [])
+    raw_types.extend(request.query_params.getlist("type[]"))
+    types: list[str] = []
+    for value in raw_types:
+        if not value:
+            continue
+        parts = [part.strip().lower() for part in str(value).split(",")]
+        types.extend([part for part in parts if part])
+
+    return await job_service.get_jobs(
+        limit=limit,
+        offset=offset,
+        statuses=statuses or None,
+        job_types=types or None,
+        created_after=created_after,
+    )
 
 
 @router.post("/upload", response_model=Job, status_code=status.HTTP_201_CREATED)

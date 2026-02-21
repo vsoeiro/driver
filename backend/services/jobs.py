@@ -537,6 +537,8 @@ class JobService:
         limit: int = 50,
         offset: int = 0,
         statuses: Sequence[str] | None = None,
+        job_types: Sequence[str] | None = None,
+        created_after: datetime | None = None,
     ) -> Sequence[Job]:
         """Get a list of jobs ordered by creation date (newest first).
 
@@ -560,8 +562,16 @@ class JobService:
             .offset(offset)
         )
         normalized_statuses = [status.strip().upper() for status in (statuses or []) if status and status.strip()]
+        normalized_job_types = [job_type.strip().lower() for job_type in (job_types or []) if job_type and job_type.strip()]
+        normalized_created_after = created_after
+        if normalized_created_after and normalized_created_after.tzinfo is None:
+            normalized_created_after = normalized_created_after.replace(tzinfo=UTC)
         if normalized_statuses:
             stmt = stmt.where(Job.status.in_(normalized_statuses))
+        if normalized_job_types:
+            stmt = stmt.where(Job.type.in_(normalized_job_types))
+        if normalized_created_after is not None:
+            stmt = stmt.where(Job.created_at >= normalized_created_after)
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
             try:

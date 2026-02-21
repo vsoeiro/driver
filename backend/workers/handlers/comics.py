@@ -12,6 +12,54 @@ from backend.services.comics import ComicMetadataService, IndexedComicItem
 from backend.workers.dispatcher import register_handler
 from backend.workers.job_progress import JobProgressReporter
 
+COMIC_ERROR_ITEMS_LIMIT = 50
+
+
+def _record_error_item(
+    stats: dict,
+    *,
+    reason: str,
+    item_id: str | None = None,
+    item_name: str | None = None,
+    account_id: str | None = None,
+) -> None:
+    error_items = stats.get("error_items")
+    if not isinstance(error_items, list):
+        error_items = []
+        stats["error_items"] = error_items
+
+    if len(error_items) >= COMIC_ERROR_ITEMS_LIMIT:
+        stats["error_items_truncated"] = int(stats.get("error_items_truncated", 0) or 0) + 1
+        return
+
+    reason_text = str(reason or "Unknown error").strip() or "Unknown error"
+    entry: dict[str, str] = {"reason": reason_text[:2000]}
+    if item_id:
+        entry["item_id"] = str(item_id)
+    if item_name:
+        entry["item_name"] = str(item_name)
+    if account_id:
+        entry["account_id"] = str(account_id)
+    error_items.append(entry)
+
+
+def _merge_error_items(target: dict, source: dict) -> None:
+    source_items = source.get("error_items")
+    if isinstance(source_items, list):
+        for raw in source_items:
+            if not isinstance(raw, dict):
+                continue
+            _record_error_item(
+                target,
+                reason=str(raw.get("reason") or "Unknown error"),
+                item_id=str(raw.get("item_id")) if raw.get("item_id") else None,
+                item_name=str(raw.get("item_name")) if raw.get("item_name") else None,
+                account_id=str(raw.get("account_id")) if raw.get("account_id") else None,
+            )
+    target["error_items_truncated"] = int(target.get("error_items_truncated", 0) or 0) + int(
+        source.get("error_items_truncated", 0) or 0
+    )
+
 
 @register_handler("extract_comic_assets")
 async def extract_comic_assets_handler(payload: dict, session: AsyncSession) -> dict:
@@ -62,6 +110,8 @@ async def extract_comic_assets_handler(payload: dict, session: AsyncSession) -> 
         mapped=stats["mapped"],
         skipped=stats["skipped"],
         failed=stats["failed"],
+        error_items=stats.get("error_items", []),
+        error_items_truncated=stats.get("error_items_truncated", 0),
     )
     await progress.set_total(stats["total"])
     progress.current = stats["total"]
@@ -87,6 +137,8 @@ async def reindex_comic_covers_handler(payload: dict, session: AsyncSession) -> 
         skipped=stats.get("skipped", 0),
         failed=stats.get("failed", 0),
         accounts=stats.get("accounts", 0),
+        error_items=stats.get("error_items", []),
+        error_items_truncated=stats.get("error_items_truncated", 0),
     )
     await progress.set_total(max(1, stats.get("total", 0)))
     progress.current = max(1, stats.get("total", 0))
@@ -134,7 +186,15 @@ async def extract_library_comic_assets_handler(payload: dict, session: AsyncSess
     await progress.set_total(len(rows))
 
     service = ComicMetadataService(session)
-    stats = {"total": len(rows), "mapped": 0, "skipped": 0, "failed": 0, "accounts": len(by_account)}
+    stats = {
+        "total": len(rows),
+        "mapped": 0,
+        "skipped": 0,
+        "failed": 0,
+        "accounts": len(by_account),
+        "error_items": [],
+        "error_items_truncated": 0,
+    }
     for account_id, indexed_items in by_account.items():
         account_stats = await service.process_indexed_items(
             account_id,
@@ -146,6 +206,7 @@ async def extract_library_comic_assets_handler(payload: dict, session: AsyncSess
         stats["mapped"] += account_stats.get("mapped", 0)
         stats["skipped"] += account_stats.get("skipped", 0)
         stats["failed"] += account_stats.get("failed", 0)
+        _merge_error_items(stats, account_stats)
 
     await session.commit()
     await progress.update_metrics(
@@ -153,6 +214,8 @@ async def extract_library_comic_assets_handler(payload: dict, session: AsyncSess
         skipped=stats["skipped"],
         failed=stats["failed"],
         accounts=stats["accounts"],
+        error_items=stats.get("error_items", []),
+        error_items_truncated=stats.get("error_items_truncated", 0),
     )
     progress.current = stats["total"]
     await progress.flush(force=True)

@@ -17,17 +17,29 @@ export const createMoveJob = async (sourceAccountId, sourceItemId, destinationAc
     return response.data;
 };
 
-export const getJobs = async (limit = 50, offset = 0, statuses = []) => {
+export const getJobs = async (limit = 50, offset = 0, statuses = [], filters = {}) => {
     const safeLimit = Number.isFinite(Number(limit)) ? Math.max(1, Math.floor(Number(limit))) : 50;
     const safeOffset = Number.isFinite(Number(offset)) ? Math.max(0, Math.floor(Number(offset))) : 0;
     const normalizedStatuses = Array.isArray(statuses)
         ? statuses.map((status) => String(status || '').trim().toUpperCase()).filter(Boolean)
         : [];
+    const normalizedTypes = Array.isArray(filters?.types)
+        ? filters.types.map((type) => String(type || '').trim().toLowerCase()).filter(Boolean)
+        : [];
+    const createdAfter = typeof filters?.createdAfter === 'string' ? filters.createdAfter.trim() : '';
     const params = { limit: safeLimit, offset: safeOffset };
     if (normalizedStatuses.length === 1) {
         params.status = normalizedStatuses[0];
     } else if (normalizedStatuses.length > 1) {
         params.status = normalizedStatuses.join(',');
+    }
+    if (normalizedTypes.length === 1) {
+        params.type = normalizedTypes[0];
+    } else if (normalizedTypes.length > 1) {
+        params.type = normalizedTypes.join(',');
+    }
+    if (createdAfter) {
+        params.created_after = createdAfter;
     }
     const response = await api.get('/jobs/', { params });
     return response.data;

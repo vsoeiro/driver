@@ -20,6 +20,7 @@ from backend.workers.dispatcher import register_handler
 from backend.workers.job_progress import JobProgressReporter
 
 logger = logging.getLogger(__name__)
+SYNC_ERROR_ITEMS_LIMIT = 50
 
 
 @dataclass
@@ -43,13 +44,30 @@ async def _collect_provider_snapshot(
     root_item: object,
     *,
     worker_count: int,
-) -> tuple[list[SnapshotEntry], int, int]:
+) -> tuple[list[SnapshotEntry], int, int, list[dict[str, str]], int]:
     """Collect remote tree with concurrent folder listing workers."""
     entries: list[SnapshotEntry] = [SnapshotEntry(item=root_item, parent_id=None, path="/")]
     errors = 0
     pages_fetched = 0
+    error_items: list[dict[str, str]] = []
+    error_items_truncated = 0
     queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
     queue.put_nowait((getattr(root_item, "id"), "/"))
+
+    def _record_error_item(*, reason: str, item_id: str | None = None, item_name: str | None = None, stage: str | None = None) -> None:
+        nonlocal error_items_truncated
+        if len(error_items) >= SYNC_ERROR_ITEMS_LIMIT:
+            error_items_truncated += 1
+            return
+        reason_text = str(reason or "Unknown error").strip() or "Unknown error"
+        entry: dict[str, str] = {"reason": reason_text[:2000]}
+        if item_id:
+            entry["item_id"] = str(item_id)
+        if item_name:
+            entry["item_name"] = str(item_name)
+        if stage:
+            entry["stage"] = stage
+        error_items.append(entry)
 
     async def _worker() -> None:
         nonlocal errors
@@ -82,6 +100,11 @@ async def _collect_provider_snapshot(
             except Exception as exc:  # noqa: BLE001
                 logger.error("Failed to list folder %s: %s", folder_id, exc)
                 errors += 1
+                _record_error_item(
+                    reason=str(exc),
+                    item_id=str(folder_id),
+                    stage="list_folder",
+                )
             finally:
                 queue.task_done()
 
@@ -90,7 +113,7 @@ async def _collect_provider_snapshot(
     for _ in workers:
         queue.put_nowait(("__STOP__", ""))
     await asyncio.gather(*workers)
-    return entries, errors, pages_fetched
+    return entries, errors, pages_fetched, error_items, error_items_truncated
 
 
 @register_handler("sync_items")
@@ -115,7 +138,7 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
     settings = get_settings()
 
     root_item = await client.get_item_metadata(account, "root")
-    entries, list_errors, pages_fetched = await _collect_provider_snapshot(
+    entries, list_errors, pages_fetched, list_error_items, list_error_items_truncated = await _collect_provider_snapshot(
         client,
         account,
         root_item,
@@ -137,8 +160,24 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
         "deleted": 0,
         "errors": list_errors,
         "pages_fetched": pages_fetched,
+        "error_items": list_error_items,
+        "error_items_truncated": list_error_items_truncated,
     }
     await progress.set_total(len(entries))
+
+    def _record_error_item(*, reason: str, item_id: str | None = None, item_name: str | None = None, stage: str | None = None) -> None:
+        if len(stats["error_items"]) >= SYNC_ERROR_ITEMS_LIMIT:
+            stats["error_items_truncated"] += 1
+            return
+        reason_text = str(reason or "Unknown error").strip() or "Unknown error"
+        entry: dict[str, str] = {"reason": reason_text[:2000]}
+        if item_id:
+            entry["item_id"] = str(item_id)
+        if item_name:
+            entry["item_name"] = str(item_name)
+        if stage:
+            entry["stage"] = stage
+        stats["error_items"].append(entry)
 
     existing_rows = (
         await session.execute(select(Item.item_id).where(Item.account_id == account.id))
@@ -150,19 +189,29 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
         item_id = getattr(entry.item, "id")
         remote_ids.add(item_id)
 
-        result = await upsert_item_record(
-            session,
-            account_id=account.id,
-            item_data=entry.item,
-            parent_id=entry.parent_id,
-            path=entry.path,
-        )
-        if result == "created":
-            stats["created"] += 1
-        elif result == "updated":
-            stats["updated"] += 1
-        else:
-            stats["unchanged"] += 1
+        try:
+            result = await upsert_item_record(
+                session,
+                account_id=account.id,
+                item_data=entry.item,
+                parent_id=entry.parent_id,
+                path=entry.path,
+            )
+            if result == "created":
+                stats["created"] += 1
+            elif result == "updated":
+                stats["updated"] += 1
+            else:
+                stats["unchanged"] += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to upsert item %s during sync: %s", item_id, exc)
+            stats["errors"] += 1
+            _record_error_item(
+                reason=str(exc),
+                item_id=str(item_id),
+                item_name=getattr(entry.item, "name", None),
+                stage="upsert_item",
+            )
 
         stats["processed"] += 1
         await progress.increment()

@@ -27,8 +27,37 @@ from backend.workers.dispatcher import register_handler
 from backend.workers.job_progress import JobProgressReporter
 
 logger = logging.getLogger(__name__)
+ERROR_ITEMS_LIMIT = 50
 
 TOKEN_PATTERN = re.compile(r"\[([^\[\]]+)\]")
+
+
+def _record_error_item(
+    stats: dict[str, Any],
+    *,
+    reason: str,
+    item_id: str | None = None,
+    item_name: str | None = None,
+    stage: str | None = None,
+) -> None:
+    error_items = stats.get("error_items")
+    if not isinstance(error_items, list):
+        error_items = []
+        stats["error_items"] = error_items
+
+    if len(error_items) >= ERROR_ITEMS_LIMIT:
+        stats["error_items_truncated"] = int(stats.get("error_items_truncated", 0) or 0) + 1
+        return
+
+    reason_text = str(reason or "Unknown error").strip() or "Unknown error"
+    entry: dict[str, str] = {"reason": reason_text[:2000]}
+    if item_id:
+        entry["item_id"] = str(item_id)
+    if item_name:
+        entry["item_name"] = str(item_name)
+    if stage:
+        entry["stage"] = stage
+    error_items.append(entry)
 
 
 def _build_rule_item_query(rule: MetadataRule):
@@ -184,7 +213,15 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
 
     await progress.set_total(len(items))
 
-    stats = {"total": len(items), "changed": 0, "skipped": 0, "errors": 0, "batch_id": str(batch_id)}
+    stats = {
+        "total": len(items),
+        "changed": 0,
+        "skipped": 0,
+        "errors": 0,
+        "batch_id": str(batch_id),
+        "error_items": [],
+        "error_items_truncated": 0,
+    }
     batch_count = 0
     token_manager = TokenManager(session)
     account_cache: dict[UUID, LinkedAccount] = {}
@@ -354,6 +391,13 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
         except Exception as exc:
             logger.error("Rule %s failed for item %s: %s", rule_id, item.item_id, exc)
             stats["errors"] += 1
+            _record_error_item(
+                stats,
+                reason=str(exc),
+                item_id=item.item_id,
+                item_name=item.name,
+                stage="apply_rule",
+            )
         finally:
             await progress.increment()
             if progress.current % 10 == 0:
