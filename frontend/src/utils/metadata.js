@@ -385,6 +385,61 @@ export function normalizeFormLayoutForCategory(category, layout) {
     };
 }
 
+export function resolveLayoutItemsForRender(items, columnsInput = 12) {
+    const columns = clamp(toInt(columnsInput, 12), 1, 24);
+    const sourceItems = Array.isArray(items) ? items : [];
+    const sorted = sourceItems
+        .map((item, index) => ({
+            item_type: getLayoutItemType(item),
+            item_id: String(item?.item_id || item?.attribute_id || `item_${index + 1}`),
+            attribute_id: item?.attribute_id ? String(item.attribute_id) : null,
+            title: item?.title || null,
+            x: toInt(item?.x, 0),
+            y: toInt(item?.y, 0),
+            w: toInt(item?.w, columns),
+            h: 1,
+        }))
+        .sort((a, b) => (a.y - b.y) || (a.x - b.x));
+
+    const occupied = new Set();
+    const resolved = [];
+    const seenKeys = new Set();
+
+    sorted.forEach((item, index) => {
+        const itemType = item.item_type;
+        const itemKey = itemType === 'section'
+            ? `section:${String(item.item_id || `section_${index + 1}`)}`
+            : `attribute:${String(item.attribute_id || '')}`;
+        if (seenKeys.has(itemKey)) return;
+        seenKeys.add(itemKey);
+
+        const width = itemType === 'section'
+            ? columns
+            : clamp(toInt(item.w, columns), 1, columns);
+        let x = itemType === 'section'
+            ? 0
+            : clamp(toInt(item.x, 0), 0, columns - width);
+        let y = Math.max(0, toInt(item.y, 0));
+
+        if (!regionIsFree(occupied, x, y, width)) {
+            const freeSlot = findFirstFreeSlot(occupied, columns, width, y);
+            x = freeSlot.x;
+            y = freeSlot.y;
+        }
+        occupyRegion(occupied, x, y, width);
+
+        resolved.push({
+            ...item,
+            x,
+            y,
+            w: width,
+            h: 1,
+        });
+    });
+
+    return resolved.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+}
+
 export function formLayoutToPayload(layout) {
     const columns = clamp(toInt(layout?.columns, 12), 1, 24);
     const row_height = clamp(toInt(layout?.row_height, 1), 1, 4);

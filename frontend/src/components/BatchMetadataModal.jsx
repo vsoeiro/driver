@@ -7,8 +7,10 @@ import { getCategoryPluginView } from '../plugins/metadataCategoryViews';
 import { buildCoverCacheKey, getCachedCoverUrl, setCachedCoverUrl } from '../utils/coverCache';
 import {
     getSelectOptions,
+    normalizeFormLayoutForCategory,
     parseTagsInput,
     READ_ONLY_COMIC_FIELD_KEYS,
+    resolveLayoutItemsForRender,
     sortAttributesForCategory,
     tagsToInputValue,
 } from '../utils/metadata';
@@ -19,6 +21,8 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
     const [categories, setCategories] = useState([]);
     const [selectedCategory, setSelectedCategory] = useState('');
     const [attributeValues, setAttributeValues] = useState({});
+    const [tagInputDrafts, setTagInputDrafts] = useState({});
+    const [layoutMap, setLayoutMap] = useState({});
     const [applyRecursive, setApplyRecursive] = useState(false);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -33,6 +37,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
         if (itemsWithMeta.length === 0) {
             setSelectedCategory('');
             setAttributeValues({});
+            setTagInputDrafts({});
             return;
         }
 
@@ -44,6 +49,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
         if (!allSameCategory) {
             setSelectedCategory('');
             setAttributeValues({});
+            setTagInputDrafts({});
             return;
         }
 
@@ -51,6 +57,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
 
         if (itemsWithMeta.length === 1) {
             setAttributeValues(itemsWithMeta[0].metadata.values || {});
+            setTagInputDrafts({});
             return;
         }
 
@@ -65,6 +72,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
             }
         }
         setAttributeValues(commonValues);
+        setTagInputDrafts({});
     }, [selectedItems]);
 
     useEffect(() => {
@@ -75,8 +83,32 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
     const loadCategories = useCallback(async () => {
         setLoading(true);
         try {
-            const data = await metadataService.listCategories();
+            const [data, layouts] = await Promise.all([
+                metadataService.listCategories(),
+                metadataService.listFormLayouts(),
+            ]);
             setCategories(data);
+            const map = {};
+            (layouts || []).forEach((layout) => {
+                if (!layout?.category_id) return;
+                map[String(layout.category_id)] = {
+                    columns: layout.columns,
+                    row_height: layout.row_height,
+                    items: (layout.items || []).map((item, index) => ({
+                        item_type: String(item.item_type || (item.attribute_id ? 'attribute' : 'section')),
+                        item_id: String(item.item_id || (item.attribute_id ? String(item.attribute_id) : `section_${index + 1}`)),
+                        attribute_id: item.attribute_id ? String(item.attribute_id) : null,
+                        title: item.title || null,
+                        x: Number(item.x) || 0,
+                        y: Number(item.y) || 0,
+                        w: Number(item.w) || 12,
+                        h: Number(item.h) || 1,
+                    })),
+                    ordered_attribute_ids: (layout.ordered_attribute_ids || []).map(String),
+                    half_width_attribute_ids: (layout.half_width_attribute_ids || []).map(String),
+                };
+            });
+            setLayoutMap(map);
         } catch (error) {
             console.error(error);
         } finally {
@@ -88,6 +120,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
         if (isOpen) {
             loadCategories();
             setApplyRecursive(false);
+            setTagInputDrafts({});
         }
     }, [isOpen, loadCategories]);
 
@@ -153,8 +186,28 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
         }
     };
 
-    const currentCategory = categories.find(c => c.id === selectedCategory);
-    const orderedAttributes = sortAttributesForCategory(currentCategory);
+    const currentCategory = categories.find(c => String(c.id) === String(selectedCategory));
+    const rawCategoryLayout = currentCategory ? layoutMap[String(currentCategory.id)] : null;
+    const hasConfiguredLayout = !!(
+        rawCategoryLayout
+        && (
+            (Array.isArray(rawCategoryLayout.items) && rawCategoryLayout.items.length > 0)
+            || (Array.isArray(rawCategoryLayout.ordered_attribute_ids) && rawCategoryLayout.ordered_attribute_ids.length > 0)
+        )
+    );
+    const categoryLayout = hasConfiguredLayout
+        ? normalizeFormLayoutForCategory(currentCategory, rawCategoryLayout)
+        : null;
+    const orderedAttributes = sortAttributesForCategory(
+        currentCategory,
+        categoryLayout?.ordered_attribute_ids || null,
+    );
+    const categoryAttributesById = new Map(
+        (currentCategory?.attributes || []).map((attr) => [String(attr.id), attr]),
+    );
+    const layoutItemsForRender = categoryLayout
+        ? resolveLayoutItemsForRender(categoryLayout.items || [], categoryLayout.columns)
+        : [];
     const pluginView = getCategoryPluginView(currentCategory);
     const coverAttr = currentCategory?.attributes?.find(
         (attr) => attr.plugin_field_key === pluginView?.gallery?.coverField
@@ -214,6 +267,92 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
         };
     }, [isOpen, showCoverPanel, coverAccountId, coverItemId]);
 
+    const renderAttributeInput = (attr, className = '', style = null) => {
+        const isReadOnlyComputed = currentCategory?.plugin_key === 'comicrack_core'
+            && READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key);
+        const rawValue = attributeValues[attr.id];
+        const value = rawValue ?? '';
+
+        return (
+            <div key={attr.id} className={className} style={style || undefined}>
+                <label className="block text-xs font-medium mb-1 uppercase text-muted-foreground">
+                    {attr.name} {attr.is_required && '*'}
+                </label>
+
+                {attr.data_type === 'select' && (
+                    <select
+                        className="w-full border rounded-md p-2 text-sm bg-background"
+                        value={value}
+                        disabled={isReadOnlyComputed}
+                        onChange={(e) => setAttributeValues((prev) => ({ ...prev, [attr.id]: e.target.value }))}
+                    >
+                        <option value="">Select...</option>
+                        {getSelectOptions(attr.options).map((opt) => (
+                            <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                    </select>
+                )}
+
+                {attr.data_type === 'boolean' && (
+                    <select
+                        className="w-full border rounded-md p-2 text-sm bg-background"
+                        value={rawValue === true ? 'true' : rawValue === false ? 'false' : ''}
+                        disabled={isReadOnlyComputed}
+                        onChange={(e) => {
+                            const next = e.target.value === '' ? '' : e.target.value === 'true';
+                            setAttributeValues((prev) => ({ ...prev, [attr.id]: next }));
+                        }}
+                    >
+                        <option value="">Select...</option>
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                    </select>
+                )}
+
+                {attr.data_type === 'tags' && (
+                    <input
+                        type="text"
+                        className="w-full border rounded-md p-2 text-sm bg-background"
+                        value={tagInputDrafts[attr.id] ?? tagsToInputValue(rawValue ?? [])}
+                        placeholder="tag1, tag2, tag3"
+                        disabled={isReadOnlyComputed}
+                        onChange={(e) => {
+                            const text = e.target.value;
+                            setTagInputDrafts((prev) => ({ ...prev, [attr.id]: text }));
+                            setAttributeValues((prev) => ({ ...prev, [attr.id]: parseTagsInput(text) }));
+                        }}
+                        onBlur={() => {
+                            setTagInputDrafts((prev) => {
+                                const current = prev[attr.id];
+                                if (current === undefined) return prev;
+                                return {
+                                    ...prev,
+                                    [attr.id]: tagsToInputValue(parseTagsInput(current)),
+                                };
+                            });
+                        }}
+                    />
+                )}
+
+                {!['select', 'boolean', 'tags'].includes(attr.data_type) && (
+                    <input
+                        type={attr.data_type === 'number' ? 'number' : attr.data_type === 'date' ? 'date' : 'text'}
+                        className="w-full border rounded-md p-2 text-sm bg-background"
+                        value={value}
+                        disabled={isReadOnlyComputed}
+                        onChange={(e) => setAttributeValues((prev) => ({ ...prev, [attr.id]: e.target.value }))}
+                    />
+                )}
+
+                {isReadOnlyComputed && (
+                    <div className="mt-1 text-xs text-muted-foreground">
+                        Mapped field (read-only)
+                    </div>
+                )}
+            </div>
+        );
+    };
+
     return (
         <Modal
             isOpen={isOpen}
@@ -267,65 +406,49 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
 
                         {currentCategory && (
                             <div className="space-y-3 border p-3 rounded-md bg-muted/20">
-                                {orderedAttributes.map(attr => (
-                                    <div key={attr.id}>
-                                        {(() => {
-                                            const isReadOnlyComputed = currentCategory?.plugin_key === 'comicrack_core'
-                                                && READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key);
-                                            return (
-                                                <>
-                                        <label className="block text-xs font-medium mb-1 uppercase text-muted-foreground">{attr.name} {attr.is_required && '*'}</label>
-                                        {attr.data_type === 'select' ? (
-                                            <select
-                                                className="w-full border rounded-md p-2 text-sm bg-background"
-                                                value={attributeValues[attr.id] ?? ''}
-                                                disabled={isReadOnlyComputed}
-                                                onChange={e => setAttributeValues(prev => ({ ...prev, [attr.id]: e.target.value }))}
-                                            >
-                                                <option value="">Select...</option>
-                                                {getSelectOptions(attr.options).map(opt => (
-                                                    <option key={opt} value={opt}>{opt}</option>
-                                                ))}
-                                            </select>
-                                        ) : attr.data_type === 'boolean' ? (
-                                            <select
-                                                className="w-full border rounded-md p-2 text-sm bg-background"
-                                                value={attributeValues[attr.id] ?? ''}
-                                                disabled={isReadOnlyComputed}
-                                                onChange={e => setAttributeValues(prev => ({ ...prev, [attr.id]: e.target.value === 'true' }))}
-                                            >
-                                                <option value="">Select...</option>
-                                                <option value="true">Yes</option>
-                                                <option value="false">No</option>
-                                            </select>
-                                        ) : attr.data_type === 'tags' ? (
-                                            <input
-                                                type="text"
-                                                className="w-full border rounded-md p-2 text-sm bg-background"
-                                                value={tagsToInputValue(attributeValues[attr.id] ?? [])}
-                                                placeholder="tag1, tag2, tag3"
-                                                disabled={isReadOnlyComputed}
-                                                onChange={e => setAttributeValues(prev => ({ ...prev, [attr.id]: parseTagsInput(e.target.value) }))}
-                                            />
-                                        ) : (
-                                            <input
-                                                type={attr.data_type === 'number' ? 'number' : attr.data_type === 'date' ? 'date' : 'text'}
-                                                className="w-full border rounded-md p-2 text-sm bg-background"
-                                                value={attributeValues[attr.id] ?? ''}
-                                                disabled={isReadOnlyComputed}
-                                                onChange={e => setAttributeValues(prev => ({ ...prev, [attr.id]: e.target.value }))}
-                                            />
-                                        )}
-                                        {isReadOnlyComputed && (
-                                            <div className="mt-1 text-xs text-muted-foreground">
-                                                Mapped field (read-only)
-                                            </div>
-                                        )}
-                                                </>
-                                            );
-                                        })()}
+                                {categoryLayout ? (
+                                    <div
+                                        className="grid gap-3"
+                                        style={{
+                                            gridTemplateColumns: `repeat(${categoryLayout.columns}, minmax(0, 1fr))`,
+                                            gridAutoRows: 'minmax(0, auto)',
+                                        }}
+                                    >
+                                        {layoutItemsForRender.map((layoutItem, index) => {
+                                            const itemType = String(layoutItem.item_type || '').toLowerCase() === 'section' ? 'section' : 'attribute';
+                                            const x = Number(layoutItem.x || 0);
+                                            const y = Number(layoutItem.y || index);
+                                            const w = Number(layoutItem.w || categoryLayout.columns);
+                                            const style = {
+                                                gridColumn: `${Math.max(1, x + 1)} / span ${Math.max(1, w)}`,
+                                                gridRow: `${Math.max(1, y + 1)} / span 1`,
+                                            };
+
+                                            if (itemType === 'section') {
+                                                const sectionKey = String(layoutItem.item_id || `section_${index}`);
+                                                const sectionTitle = String(layoutItem.title || '').trim() || 'Section';
+                                                return (
+                                                    <div key={`section-${sectionKey}`} className="min-w-0 pt-1" style={style}>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                                                {sectionTitle}
+                                                            </span>
+                                                            <div className="h-px flex-1 bg-border" />
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }
+
+                                            const attr = categoryAttributesById.get(String(layoutItem.attribute_id));
+                                            if (!attr) return null;
+                                            return renderAttributeInput(attr, 'min-w-0', style);
+                                        })}
                                     </div>
-                                ))}
+                                ) : (
+                                    <div className="space-y-3">
+                                        {orderedAttributes.map((attr) => renderAttributeInput(attr))}
+                                    </div>
+                                )}
                             </div>
                         )}
 

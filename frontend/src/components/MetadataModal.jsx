@@ -13,6 +13,7 @@ import {
     normalizeFormLayoutForCategory,
     parseTagsInput,
     READ_ONLY_COMIC_FIELD_KEYS,
+    resolveLayoutItemsForRender,
     sortAttributesForCategory,
     tagsToInputValue,
 } from '../utils/metadata';
@@ -62,6 +63,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
     const [isCoverZoomOpen, setIsCoverZoomOpen] = useState(false);
     const [coverZoomLevel, setCoverZoomLevel] = useState(1);
     const [layoutMap, setLayoutMap] = useState({});
+    const [tagInputDrafts, setTagInputDrafts] = useState({});
 
     // Form State
     const [selectedCategoryId, setSelectedCategoryId] = useState('');
@@ -110,6 +112,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
             }
             const historyData = await metadataService.getItemMetadataHistory(accountId, providerItemId);
             setHistory(historyData || []);
+            setTagInputDrafts({});
         } catch (error) {
             console.error(error);
             showToast('Failed to load metadata', 'error');
@@ -128,6 +131,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
             setAiSuggestions({});
             setHistory([]);
             setLayoutMap({});
+            setTagInputDrafts({});
             setIsCoverZoomOpen(false);
             setCoverZoomLevel(1);
         }
@@ -358,6 +362,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
             });
             setFormValues(updated.values || {});
             setAiSuggestions(updated.ai_suggestions || {});
+            setTagInputDrafts({});
             showToast('AI suggestion accepted', 'success');
         } catch (error) {
             const message = error?.response?.data?.detail || 'Failed to accept AI suggestion';
@@ -398,7 +403,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
         (selectedCategory?.attributes || []).map((attr) => [String(attr.id), attr]),
     );
     const layoutItemsForRender = categoryLayout
-        ? [...(categoryLayout.items || [])].sort((a, b) => (Number(a.y) - Number(b.y)) || (Number(a.x) - Number(b.x)))
+        ? resolveLayoutItemsForRender(categoryLayout.items || [], categoryLayout.columns)
         : [];
     const configuredFieldGroups = pluginView?.formLayout?.groups || DEFAULT_COMIC_FORM_FIELD_GROUPS;
     const compactFieldKeys = new Set(pluginView?.formLayout?.compactFields || Array.from(DEFAULT_COMIC_COMPACT_FIELD_KEYS));
@@ -495,7 +500,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
         const confidence = typeof suggestion?.confidence === 'number'
             ? Math.round(suggestion.confidence * 100)
             : null;
-        const tagsValue = tagsToInputValue(formValues[attr.id] || []);
+        const tagsValue = tagInputDrafts[attr.id] ?? tagsToInputValue(formValues[attr.id] || []);
 
         return (
             <div key={attr.id} className={className} style={style || undefined}>
@@ -573,7 +578,21 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                             value={tagsValue}
                             placeholder={!tagsValue ? (suggestionText || 'tag1, tag2, tag3') : ''}
                             disabled={isReadOnlyComputed}
-                            onChange={(e) => handleInputChange(attr.id, parseTagsInput(e.target.value))}
+                            onChange={(e) => {
+                                const text = e.target.value;
+                                setTagInputDrafts((prev) => ({ ...prev, [attr.id]: text }));
+                                handleInputChange(attr.id, parseTagsInput(text));
+                            }}
+                            onBlur={() => {
+                                setTagInputDrafts((prev) => {
+                                    const current = prev[attr.id];
+                                    if (current === undefined) return prev;
+                                    return {
+                                        ...prev,
+                                        [attr.id]: tagsToInputValue(parseTagsInput(current)),
+                                    };
+                                });
+                            }}
                         />
                         {Array.isArray(formValues[attr.id]) && formValues[attr.id].length > 0 && (
                             <div className="flex flex-wrap gap-1">
@@ -747,7 +766,10 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                                         categoryLayout ? (
                                             <div
                                                 className="grid gap-3"
-                                                style={{ gridTemplateColumns: `repeat(${categoryLayout.columns}, minmax(0, 1fr))` }}
+                                                style={{
+                                                    gridTemplateColumns: `repeat(${categoryLayout.columns}, minmax(0, 1fr))`,
+                                                    gridAutoRows: 'minmax(0, auto)',
+                                                }}
                                             >
                                                 {layoutItemsForRender.map((layoutItem, index) => {
                                                     const itemType = getLayoutItemType(layoutItem);
@@ -756,7 +778,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                                                     const w = Number(layoutItem.w || categoryLayout.columns);
                                                     const style = {
                                                         gridColumn: `${Math.max(1, x + 1)} / span ${Math.max(1, w)}`,
-                                                        gridRow: `${Math.max(1, y + 1)}`,
+                                                        gridRow: `${Math.max(1, y + 1)} / span 1`,
                                                     };
 
                                                     if (itemType === 'section') {
