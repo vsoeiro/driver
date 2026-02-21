@@ -10,6 +10,7 @@ import { getCategoryPluginView } from '../plugins/metadataCategoryViews';
 import { buildCoverCacheKey, getCachedCoverUrl, setCachedCoverUrl } from '../utils/coverCache';
 import {
     getSelectOptions,
+    normalizeFormLayoutForCategory,
     parseTagsInput,
     READ_ONLY_COMIC_FIELD_KEYS,
     sortAttributesForCategory,
@@ -43,6 +44,11 @@ const DEFAULT_COMIC_COMPACT_FIELD_KEYS = new Set([
     'max_issues',
 ]);
 
+function getLayoutItemType(item) {
+    if (String(item?.item_type || '').toLowerCase() === 'section') return 'section';
+    return 'attribute';
+}
+
 export default function MetadataModal({ isOpen, onClose, item, accountId, onSuccess }) {
     const { showToast } = useToast();
     const [categories, setCategories] = useState([]);
@@ -55,6 +61,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
     const [coverLoading, setCoverLoading] = useState(false);
     const [isCoverZoomOpen, setIsCoverZoomOpen] = useState(false);
     const [coverZoomLevel, setCoverZoomLevel] = useState(1);
+    const [layoutMap, setLayoutMap] = useState({});
 
     // Form State
     const [selectedCategoryId, setSelectedCategoryId] = useState('');
@@ -64,11 +71,33 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
     const loadData = useCallback(async () => {
         try {
             setLoading(true);
-            const [cats, meta] = await Promise.all([
+            const [cats, meta, layouts] = await Promise.all([
                 metadataService.getCategories(),
-                metadataService.getItemMetadata(accountId, providerItemId)
+                metadataService.getItemMetadata(accountId, providerItemId),
+                metadataService.listFormLayouts(),
             ]);
             setCategories(cats);
+            const map = {};
+            (layouts || []).forEach((layout) => {
+                if (!layout?.category_id) return;
+                map[String(layout.category_id)] = {
+                    columns: layout.columns,
+                    row_height: layout.row_height,
+                    items: (layout.items || []).map((item, index) => ({
+                        item_type: String(item.item_type || (item.attribute_id ? 'attribute' : 'section')),
+                        item_id: String(item.item_id || (item.attribute_id ? String(item.attribute_id) : `section_${index + 1}`)),
+                        attribute_id: item.attribute_id ? String(item.attribute_id) : null,
+                        title: item.title || null,
+                        x: Number(item.x) || 0,
+                        y: Number(item.y) || 0,
+                        w: Number(item.w) || 12,
+                        h: Number(item.h) || 1,
+                    })),
+                    ordered_attribute_ids: (layout.ordered_attribute_ids || []).map(String),
+                    half_width_attribute_ids: (layout.half_width_attribute_ids || []).map(String),
+                };
+            });
+            setLayoutMap(map);
 
             if (meta) {
                 setSelectedCategoryId(meta.category_id);
@@ -87,7 +116,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
         } finally {
             setLoading(false);
         }
-    }, [accountId, item, showToast]);
+    }, [accountId, providerItemId, showToast]);
 
     useEffect(() => {
         if (isOpen && item) {
@@ -98,6 +127,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
             setFormValues({});
             setAiSuggestions({});
             setHistory([]);
+            setLayoutMap({});
             setIsCoverZoomOpen(false);
             setCoverZoomLevel(1);
         }
@@ -353,11 +383,31 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
     const selectedCategory = categories.find(c => c.id === selectedCategoryId);
     const pluginView = getCategoryPluginView(selectedCategory);
     const isComicPluginCategory = selectedCategory?.plugin_key === 'comicrack_core';
+    const rawCategoryLayout = selectedCategory ? layoutMap[String(selectedCategory.id)] : null;
+    const hasConfiguredLayout = !!(
+        rawCategoryLayout
+        && (
+            (Array.isArray(rawCategoryLayout.items) && rawCategoryLayout.items.length > 0)
+            || (Array.isArray(rawCategoryLayout.ordered_attribute_ids) && rawCategoryLayout.ordered_attribute_ids.length > 0)
+        )
+    );
+    const categoryLayout = hasConfiguredLayout
+        ? normalizeFormLayoutForCategory(selectedCategory, rawCategoryLayout)
+        : null;
+    const categoryAttributesById = new Map(
+        (selectedCategory?.attributes || []).map((attr) => [String(attr.id), attr]),
+    );
+    const layoutItemsForRender = categoryLayout
+        ? [...(categoryLayout.items || [])].sort((a, b) => (Number(a.y) - Number(b.y)) || (Number(a.x) - Number(b.x)))
+        : [];
     const configuredFieldGroups = pluginView?.formLayout?.groups || DEFAULT_COMIC_FORM_FIELD_GROUPS;
     const compactFieldKeys = new Set(pluginView?.formLayout?.compactFields || Array.from(DEFAULT_COMIC_COMPACT_FIELD_KEYS));
-    const orderedAttributes = sortAttributesForCategory(selectedCategory);
-    const orderedFieldGroups = isComicPluginCategory
-        ? (() => {
+    const orderedAttributes = sortAttributesForCategory(
+        selectedCategory,
+        categoryLayout?.ordered_attribute_ids || null,
+    );
+    const orderedFieldGroups = (() => {
+        if (isComicPluginCategory) {
             const configuredKeys = configuredFieldGroups.flat();
             const grouped = configuredFieldGroups
                 .map((group) =>
@@ -370,8 +420,10 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                 .filter((attr) => !configuredKeys.includes(attr.plugin_field_key || ''))
                 .map((attr) => [attr]);
             return [...grouped, ...leftovers];
-        })()
-        : orderedAttributes.map((attr) => [attr]);
+        }
+
+        return orderedAttributes.map((attr) => [attr]);
+    })();
     const coverAttr = selectedCategory?.attributes?.find(
         (attr) => attr.plugin_field_key === pluginView?.gallery?.coverField
     );
@@ -426,6 +478,145 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
             cancelled = true;
         };
     }, [isOpen, showCoverPanel, coverItemId, coverAccountId]);
+
+    const renderAttributeField = (attr, className = '', style = null) => {
+        const isReadOnlyComputed = selectedCategory?.plugin_key === 'comicrack_core'
+            && READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key);
+        const isAiEligibleComputed = !(
+            isComicPluginCategory && !COMIC_AI_ALLOWED_FIELDS.has(attr.plugin_field_key)
+        );
+        const suggestion = isAiEligibleComputed ? aiSuggestions[attr.id] : null;
+        const suggestionValue = suggestion?.value;
+        const suggestionText = suggestionValue === undefined || suggestionValue === null
+            ? ''
+            : Array.isArray(suggestionValue)
+                ? suggestionValue.join(', ')
+                : String(suggestionValue);
+        const confidence = typeof suggestion?.confidence === 'number'
+            ? Math.round(suggestion.confidence * 100)
+            : null;
+        const tagsValue = tagsToInputValue(formValues[attr.id] || []);
+
+        return (
+            <div key={attr.id} className={className} style={style || undefined}>
+                <label className="block text-sm font-medium mb-1">
+                    {attr.name}
+                    {attr.is_required && <span className="text-destructive ml-1">*</span>}
+                </label>
+
+                {attr.data_type === 'text' && (
+                    <input
+                        type="text"
+                        className="w-full border rounded-md p-2 bg-background"
+                        value={formValues[attr.id] || ''}
+                        placeholder={!formValues[attr.id] ? suggestionText : ''}
+                        disabled={isReadOnlyComputed}
+                        onChange={(e) => handleInputChange(attr.id, e.target.value)}
+                    />
+                )}
+
+                {attr.data_type === 'number' && (
+                    <input
+                        type="number"
+                        className="w-full border rounded-md p-2 bg-background"
+                        value={formValues[attr.id] || ''}
+                        placeholder={!formValues[attr.id] ? suggestionText : ''}
+                        disabled={isReadOnlyComputed}
+                        onChange={(e) => handleInputChange(attr.id, e.target.value)}
+                    />
+                )}
+
+                {attr.data_type === 'date' && (
+                    <input
+                        type="date"
+                        className="w-full border rounded-md p-2 bg-background"
+                        value={formValues[attr.id] || ''}
+                        disabled={isReadOnlyComputed}
+                        onChange={(e) => handleInputChange(attr.id, e.target.value)}
+                    />
+                )}
+
+                {attr.data_type === 'boolean' && (
+                    <div className="flex items-center gap-2">
+                        <input
+                            type="checkbox"
+                            className="rounded border-gray-300"
+                            checked={!!formValues[attr.id]}
+                            disabled={isReadOnlyComputed}
+                            onChange={(e) => handleInputChange(attr.id, e.target.checked)}
+                        />
+                        <span className="text-sm text-muted-foreground">Yes</span>
+                    </div>
+                )}
+
+                {attr.data_type === 'select' && (
+                    <select
+                        className="w-full border rounded-md p-2 bg-background"
+                        value={formValues[attr.id] || ''}
+                        disabled={isReadOnlyComputed}
+                        onChange={(e) => handleInputChange(attr.id, e.target.value)}
+                    >
+                        <option value="">
+                            {suggestionText ? `AI: ${suggestionText}` : 'Select...'}
+                        </option>
+                        {getSelectOptions(attr.options).map((opt) => (
+                            <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                    </select>
+                )}
+
+                {attr.data_type === 'tags' && (
+                    <div className="space-y-2">
+                        <input
+                            type="text"
+                            className="w-full border rounded-md p-2 bg-background"
+                            value={tagsValue}
+                            placeholder={!tagsValue ? (suggestionText || 'tag1, tag2, tag3') : ''}
+                            disabled={isReadOnlyComputed}
+                            onChange={(e) => handleInputChange(attr.id, parseTagsInput(e.target.value))}
+                        />
+                        {Array.isArray(formValues[attr.id]) && formValues[attr.id].length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                                {formValues[attr.id].map((tag) => (
+                                    <span key={`${attr.id}-${tag}`} className="px-2 py-0.5 rounded-full text-xs bg-muted border">
+                                        {tag}
+                                    </span>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {isReadOnlyComputed && (
+                    <div className="mt-1 text-xs text-muted-foreground">
+                        Mapped field (read-only)
+                    </div>
+                )}
+
+                {suggestion && (
+                    <div className="mt-2 flex items-center gap-2 text-xs">
+                        <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-700">
+                            AI suggestion{confidence !== null ? ` (${confidence}%)` : ''}
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => handleAcceptSuggestion(attr.id)}
+                            className="px-2 py-0.5 rounded border hover:bg-accent"
+                        >
+                            Accept
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => handleRejectSuggestion(attr.id)}
+                            className="px-2 py-0.5 rounded border hover:bg-accent"
+                        >
+                            Reject
+                        </button>
+                    </div>
+                )}
+            </div>
+        );
+    };
 
     return (
         <Modal
@@ -553,163 +744,65 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                                     {orderedAttributes.length === 0 ? (
                                         <p className="text-sm text-muted-foreground italic">No attributes defined for this category.</p>
                                     ) : (
-                                        <div className={`grid gap-3 ${isComicPluginCategory ? 'md:grid-cols-2' : 'grid-cols-1'}`}>
-                                            {orderedFieldGroups.map((group, groupIndex) => (
-                                                <div
-                                                    key={`group-${groupIndex}`}
-                                                    className={group.length > 1 && isComicPluginCategory ? 'contents' : 'md:col-span-2'}
-                                                >
-                                                    {group.map((attr) => {
-                                                        const isReadOnlyComputed = selectedCategory?.plugin_key === 'comicrack_core'
-                                                            && READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key);
-                                                        const isAiEligibleComputed = !(
-                                                            isComicPluginCategory && !COMIC_AI_ALLOWED_FIELDS.has(attr.plugin_field_key)
+                                        categoryLayout ? (
+                                            <div
+                                                className="grid gap-3"
+                                                style={{ gridTemplateColumns: `repeat(${categoryLayout.columns}, minmax(0, 1fr))` }}
+                                            >
+                                                {layoutItemsForRender.map((layoutItem, index) => {
+                                                    const itemType = getLayoutItemType(layoutItem);
+                                                    const x = Number(layoutItem.x || 0);
+                                                    const y = Number(layoutItem.y || index);
+                                                    const w = Number(layoutItem.w || categoryLayout.columns);
+                                                    const style = {
+                                                        gridColumn: `${Math.max(1, x + 1)} / span ${Math.max(1, w)}`,
+                                                        gridRow: `${Math.max(1, y + 1)}`,
+                                                    };
+
+                                                    if (itemType === 'section') {
+                                                        const sectionKey = String(layoutItem.item_id || `section_${index}`);
+                                                        const sectionTitle = String(layoutItem.title || '').trim() || 'Section';
+                                                        return (
+                                                            <div key={`section-${sectionKey}`} className="min-w-0 pt-1" style={style}>
+                                                                <div className="flex items-center gap-2">
+                                                                    <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                                                        {sectionTitle}
+                                                                    </span>
+                                                                    <div className="h-px flex-1 bg-border" />
+                                                                </div>
+                                                            </div>
                                                         );
-                                                        const suggestion = isAiEligibleComputed ? aiSuggestions[attr.id] : null;
-                                                        const suggestionValue = suggestion?.value;
-                                                        const suggestionText = suggestionValue === undefined || suggestionValue === null
-                                                            ? ''
-                                                            : Array.isArray(suggestionValue)
-                                                                ? suggestionValue.join(', ')
-                                                                : String(suggestionValue);
-                                                        const confidence = typeof suggestion?.confidence === 'number'
-                                                            ? Math.round(suggestion.confidence * 100)
-                                                            : null;
-                                                        const fieldContainerClass = isComicPluginCategory
-                                                            ? (
-                                                                READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key)
+                                                    }
+
+                                                    const attr = categoryAttributesById.get(String(layoutItem.attribute_id));
+                                                    if (!attr) return null;
+                                                    return renderAttributeField(attr, 'min-w-0', style);
+                                                })}
+                                            </div>
+                                        ) : (
+                                            <div className={`grid gap-3 ${isComicPluginCategory ? 'md:grid-cols-2' : 'grid-cols-1'}`}>
+                                                {orderedFieldGroups.map((group, groupIndex) => (
+                                                    <div
+                                                        key={`group-${groupIndex}`}
+                                                        className={group.length > 1 && isComicPluginCategory ? 'contents' : 'md:col-span-2'}
+                                                    >
+                                                        {group.map((attr) => {
+                                                            const fieldContainerClass = isComicPluginCategory
+                                                                ? (
+                                                                    READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key)
                                                                     || attr.plugin_field_key === 'summary'
                                                                     || attr.plugin_field_key === 'tags'
                                                                     || (attr.data_type === 'text' && !compactFieldKeys.has(attr.plugin_field_key || ''))
-                                                                    ? 'md:col-span-2'
-                                                                    : 'md:col-span-1'
-                                                            )
-                                                            : 'col-span-1';
-                                                        const tagsValue = tagsToInputValue(formValues[attr.id] || []);
-
-                                                        return (
-                                                            <div key={attr.id} className={fieldContainerClass}>
-                                                                <label className="block text-sm font-medium mb-1">
-                                                                    {attr.name}
-                                                                    {attr.is_required && <span className="text-destructive ml-1">*</span>}
-                                                                </label>
-
-                                                                {attr.data_type === 'text' && (
-                                                                    <input
-                                                                        type="text"
-                                                                        className="w-full border rounded-md p-2 bg-background"
-                                                                        value={formValues[attr.id] || ''}
-                                                                        placeholder={!formValues[attr.id] ? suggestionText : ''}
-                                                                        disabled={isReadOnlyComputed}
-                                                                        onChange={(e) => handleInputChange(attr.id, e.target.value)}
-                                                                    />
-                                                                )}
-
-                                                                {attr.data_type === 'number' && (
-                                                                    <input
-                                                                        type="number"
-                                                                        className="w-full border rounded-md p-2 bg-background"
-                                                                        value={formValues[attr.id] || ''}
-                                                                        placeholder={!formValues[attr.id] ? suggestionText : ''}
-                                                                        disabled={isReadOnlyComputed}
-                                                                        onChange={(e) => handleInputChange(attr.id, e.target.value)}
-                                                                    />
-                                                                )}
-
-                                                                {attr.data_type === 'date' && (
-                                                                    <input
-                                                                        type="date"
-                                                                        className="w-full border rounded-md p-2 bg-background"
-                                                                        value={formValues[attr.id] || ''}
-                                                                        disabled={isReadOnlyComputed}
-                                                                        onChange={(e) => handleInputChange(attr.id, e.target.value)}
-                                                                    />
-                                                                )}
-
-                                                                {attr.data_type === 'boolean' && (
-                                                                    <div className="flex items-center gap-2">
-                                                                        <input
-                                                                            type="checkbox"
-                                                                            className="rounded border-gray-300"
-                                                                            checked={!!formValues[attr.id]}
-                                                                            disabled={isReadOnlyComputed}
-                                                                            onChange={(e) => handleInputChange(attr.id, e.target.checked)}
-                                                                        />
-                                                                        <span className="text-sm text-muted-foreground">Yes</span>
-                                                                    </div>
-                                                                )}
-
-                                                                {attr.data_type === 'select' && (
-                                                                    <select
-                                                                        className="w-full border rounded-md p-2 bg-background"
-                                                                        value={formValues[attr.id] || ''}
-                                                                        disabled={isReadOnlyComputed}
-                                                                        onChange={(e) => handleInputChange(attr.id, e.target.value)}
-                                                                    >
-                                                                        <option value="">
-                                                                            {suggestionText ? `AI: ${suggestionText}` : 'Select...'}
-                                                                        </option>
-                                                                        {getSelectOptions(attr.options).map((opt) => (
-                                                                            <option key={opt} value={opt}>{opt}</option>
-                                                                        ))}
-                                                                    </select>
-                                                                )}
-
-                                                                {attr.data_type === 'tags' && (
-                                                                    <div className="space-y-2">
-                                                                        <input
-                                                                            type="text"
-                                                                            className="w-full border rounded-md p-2 bg-background"
-                                                                            value={tagsValue}
-                                                                            placeholder={!tagsValue ? (suggestionText || 'tag1, tag2, tag3') : ''}
-                                                                            disabled={isReadOnlyComputed}
-                                                                            onChange={(e) => handleInputChange(attr.id, parseTagsInput(e.target.value))}
-                                                                        />
-                                                                        {Array.isArray(formValues[attr.id]) && formValues[attr.id].length > 0 && (
-                                                                            <div className="flex flex-wrap gap-1">
-                                                                                {formValues[attr.id].map((tag) => (
-                                                                                    <span key={`${attr.id}-${tag}`} className="px-2 py-0.5 rounded-full text-xs bg-muted border">
-                                                                                        {tag}
-                                                                                    </span>
-                                                                                ))}
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                )}
-
-                                                                {isReadOnlyComputed && (
-                                                                    <div className="mt-1 text-xs text-muted-foreground">
-                                                                        Mapped field (read-only)
-                                                                    </div>
-                                                                )}
-
-                                                                {suggestion && (
-                                                                    <div className="mt-2 flex items-center gap-2 text-xs">
-                                                                        <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-700">
-                                                                            AI suggestion{confidence !== null ? ` (${confidence}%)` : ''}
-                                                                        </span>
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => handleAcceptSuggestion(attr.id)}
-                                                                            className="px-2 py-0.5 rounded border hover:bg-accent"
-                                                                        >
-                                                                            Accept
-                                                                        </button>
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => handleRejectSuggestion(attr.id)}
-                                                                            className="px-2 py-0.5 rounded border hover:bg-accent"
-                                                                        >
-                                                                            Reject
-                                                                        </button>
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            ))}
-                                        </div>
+                                                                        ? 'md:col-span-2'
+                                                                        : 'md:col-span-1'
+                                                                )
+                                                                : 'md:col-span-2';
+                                                            return renderAttributeField(attr, fieldContainerClass);
+                                                        })}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )
                                     )}
                                 </div>
                             )}

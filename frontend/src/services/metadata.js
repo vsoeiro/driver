@@ -108,6 +108,21 @@ export const getCategoryStats = async () => {
     return response.data;
 };
 
+export const listFormLayouts = async () => {
+    const response = await api.get('/metadata/layouts');
+    return response.data;
+};
+
+export const getFormLayout = async (categoryId) => {
+    const response = await api.get(`/metadata/layouts/${categoryId}`);
+    return response.data;
+};
+
+export const saveFormLayout = async (categoryId, payload) => {
+    const response = await api.put(`/metadata/layouts/${categoryId}`, payload);
+    return response.data;
+};
+
 export const getSeriesSummary = async (categoryId, params = {}) => {
     const queryParams = new URLSearchParams();
 
@@ -146,6 +161,9 @@ export const metadataService = {
     getCategories,
     listCategories: getCategories,
     getCategoryStats,
+    listFormLayouts,
+    getFormLayout,
+    saveFormLayout,
     getSeriesSummary,
     listPlugins,
     activatePlugin,

@@ -12,8 +12,8 @@ export default function PluginsManager() {
     const loadPlugins = useCallback(async () => {
         try {
             setLoading(true);
-            const data = await metadataService.listPlugins();
-            setPlugins(data);
+            const rows = await metadataService.listPlugins();
+            setPlugins(rows || []);
         } catch (error) {
             const message = error?.response?.data?.detail || 'Failed to load plugins';
             showToast(message, 'error');
@@ -105,4 +105,3 @@ export default function PluginsManager() {
         </div>
     );
 }
-

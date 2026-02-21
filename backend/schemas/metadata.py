@@ -231,3 +231,31 @@ class SeriesSummaryResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+
+class MetadataFormLayoutItem(BaseModel):
+    item_type: str = Field(default="attribute", pattern="^(attribute|section)$")
+    item_id: str | None = Field(default=None, min_length=1, max_length=120)
+    attribute_id: UUID | None = None
+    title: str | None = Field(default=None, max_length=80)
+    x: int = Field(default=0, ge=0)
+    y: int = Field(default=0, ge=0)
+    w: int = Field(default=12, ge=1)
+    h: int = Field(default=1, ge=1)
+
+
+class MetadataFormLayout(BaseModel):
+    category_id: UUID
+    columns: int = Field(default=12, ge=1, le=24)
+    row_height: int = Field(default=1, ge=1, le=4)
+    items: list[MetadataFormLayoutItem] = Field(default_factory=list)
+    ordered_attribute_ids: list[UUID] = Field(default_factory=list)
+    half_width_attribute_ids: list[UUID] = Field(default_factory=list)
+
+
+class MetadataFormLayoutUpdate(BaseModel):
+    columns: int = Field(default=12, ge=1, le=24)
+    row_height: int = Field(default=1, ge=1, le=4)
+    items: list[MetadataFormLayoutItem] = Field(default_factory=list)
+    ordered_attribute_ids: list[UUID] = Field(default_factory=list)
+    half_width_attribute_ids: list[UUID] = Field(default_factory=list)

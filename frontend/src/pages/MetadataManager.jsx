@@ -26,6 +26,7 @@ import BatchMetadataModal from '../components/BatchMetadataModal';
 import RemoveMetadataModal from '../components/RemoveMetadataModal';
 import MetadataModal from '../components/MetadataModal';
 import MoveModal from '../components/MoveModal';
+import MetadataLayoutBuilderModal from '../components/MetadataLayoutBuilderModal';
 
 const ITEMS_PER_PAGE = 50;
 const BASE_SORT_OPTIONS = [
@@ -1017,7 +1018,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                         <div className="space-y-4">
                             {seriesRows.length === 0 ? (
                                 <div className="border rounded-lg bg-card p-6 text-sm text-muted-foreground">
-                                    Series tracker needs at least one item with the "Series" field filled.
+                                    Series tracker needs at least one item with the &quot;Series&quot; field filled.
                                 </div>
                             ) : (
                                 seriesRows.map((seriesRow) => {
@@ -1067,7 +1068,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                             })}
                                                         </div>
                                                     ) : (
-                                                        <div className="text-xs text-muted-foreground">Set "Max Volumes" to show the tracker.</div>
+                                                        <div className="text-xs text-muted-foreground">Set &quot;Max Volumes&quot; to show the tracker.</div>
                                                     )}
                                                 </div>
 
@@ -1521,6 +1522,7 @@ export default function MetadataManager() {
     const [aiGeneratingCategory, setAiGeneratingCategory] = useState(false);
     const [aiDocumentType, setAiDocumentType] = useState('');
     const [aiSampleText, setAiSampleText] = useState('');
+    const [layoutBuilderOpen, setLayoutBuilderOpen] = useState(false);
 
     const loadCategories = useCallback(async () => {
         try {
@@ -1725,6 +1727,13 @@ export default function MetadataManager() {
                     </span>
                 </div>
                 <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => setLayoutBuilderOpen(true)}
+                        disabled={categories.length === 0}
+                        className="flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-accent text-sm font-medium transition-colors disabled:opacity-40"
+                    >
+                        Form Layout
+                    </button>
                     <button
                         onClick={() => setAiModalOpen(true)}
                         className="flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-accent text-sm font-medium transition-colors"
@@ -2156,6 +2165,15 @@ export default function MetadataManager() {
                     </div>
                 </form>
             </Modal>
+
+            <MetadataLayoutBuilderModal
+                isOpen={layoutBuilderOpen}
+                onClose={() => setLayoutBuilderOpen(false)}
+                categories={categories}
+                onSaved={async () => {
+                    await loadCategories();
+                }}
+            />
         </div>
     );
 }

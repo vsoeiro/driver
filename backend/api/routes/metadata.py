@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from backend.api.dependencies import get_session
 from backend.db.models import (
+    AppSetting,
     Item,
     ItemMetadata,
     ItemMetadataHistory,
@@ -39,6 +40,8 @@ from backend.schemas.metadata import (
     MetadataRulePreviewRequest,
     MetadataRulePreviewResponse,
     MetadataRuleUpdate,
+    MetadataFormLayout,
+    MetadataFormLayoutUpdate,
     SeriesSummaryResponse,
 )
 from backend.services.metadata_plugins import COMIC_PLUGIN_KEY, MetadataPluginService
@@ -47,6 +50,7 @@ from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
 
 router = APIRouter(prefix="/metadata", tags=["Metadata"])
+FORM_LAYOUTS_SETTING_KEY = "metadata_form_layouts_v1"
 
 READ_ONLY_COMIC_FIELD_KEYS = {
     "cover_item_id",
@@ -282,6 +286,377 @@ async def _reconcile_active_comic_schema(session: AsyncSession) -> None:
             return
 
 
+async def _load_form_layouts(session: AsyncSession) -> dict[str, dict]:
+    row = await session.get(AppSetting, FORM_LAYOUTS_SETTING_KEY)
+    if not row or not row.value:
+        return {}
+    import json
+    try:
+        parsed = json.loads(row.value)
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+async def _save_form_layouts(session: AsyncSession, layouts: dict[str, dict]) -> None:
+    import json
+    row = await session.get(AppSetting, FORM_LAYOUTS_SETTING_KEY)
+    serialized = json.dumps(layouts, ensure_ascii=True)
+    if row is None:
+        row = AppSetting(
+            key=FORM_LAYOUTS_SETTING_KEY,
+            value=serialized,
+            description="Metadata form layouts by category",
+        )
+        session.add(row)
+    else:
+        row.value = serialized
+        row.description = "Metadata form layouts by category"
+    await session.commit()
+
+
+def _to_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _clamp(value: int, minimum: int, maximum: int) -> int:
+    return max(minimum, min(value, maximum))
+
+
+def _region_is_free(occupied: set[tuple[int, int]], x: int, y: int, w: int) -> bool:
+    for col in range(x, x + w):
+        if (col, y) in occupied:
+            return False
+    return True
+
+
+def _occupy_region(occupied: set[tuple[int, int]], x: int, y: int, w: int) -> None:
+    for col in range(x, x + w):
+        occupied.add((col, y))
+
+
+def _find_first_free_slot(
+    occupied: set[tuple[int, int]],
+    columns: int,
+    width: int,
+    start_y: int = 0,
+) -> tuple[int, int]:
+    y = max(0, start_y)
+    while y <= 10000:
+        for x in range(0, max(1, columns - width + 1)):
+            if _region_is_free(occupied, x, y, width):
+                return x, y
+        y += 1
+    return 0, 0
+
+
+def _layout_item_key(item: dict[str, Any]) -> str:
+    item_type = str(item.get("item_type") or "attribute").lower()
+    if item_type == "section":
+        return f"section:{str(item.get('item_id') or '').strip()}"
+    return f"attribute:{str(item.get('attribute_id') or '').strip()}"
+
+
+def _parse_layout_items(raw_items: Any, columns: int) -> list[dict[str, Any]]:
+    if not isinstance(raw_items, list):
+        return []
+
+    seen: set[str] = set()
+    items: list[dict[str, Any]] = []
+    for index, raw_item in enumerate(raw_items):
+        if not isinstance(raw_item, dict):
+            continue
+        item_type = str(raw_item.get("item_type") or ("attribute" if raw_item.get("attribute_id") else "section")).lower()
+
+        if item_type == "section":
+            raw_item_id = str(raw_item.get("item_id") or "").strip()
+            item_id = raw_item_id or f"section_{index + 1}"
+            key = f"section:{item_id}"
+            if key in seen:
+                continue
+            seen.add(key)
+            y = max(0, _to_int(raw_item.get("y"), 0))
+            title = str(raw_item.get("title") or "").strip()
+            items.append(
+                {
+                    "item_type": "section",
+                    "item_id": item_id,
+                    "attribute_id": None,
+                    "title": title[:80] if title else None,
+                    "x": 0,
+                    "y": y,
+                    "w": columns,
+                    "h": 1,
+                }
+            )
+            continue
+
+        raw_attr_id = raw_item.get("attribute_id") or raw_item.get("item_id")
+        try:
+            attr_id = str(UUID(str(raw_attr_id)))
+        except Exception:
+            continue
+        key = f"attribute:{attr_id}"
+        if key in seen:
+            continue
+        seen.add(key)
+
+        w = _clamp(_to_int(raw_item.get("w"), columns), 1, columns)
+        x = _clamp(_to_int(raw_item.get("x"), 0), 0, columns - 1)
+        if x + w > columns:
+            x = max(0, columns - w)
+        y = max(0, _to_int(raw_item.get("y"), 0))
+        items.append(
+            {
+                "item_type": "attribute",
+                "item_id": attr_id,
+                "attribute_id": attr_id,
+                "title": None,
+                "x": x,
+                "y": y,
+                "w": w,
+                "h": 1,
+            }
+        )
+    return items
+
+
+def _build_legacy_layout_items(raw_layout: dict[str, Any], columns: int) -> list[dict[str, Any]]:
+    ordered = []
+    for raw_id in (raw_layout or {}).get("ordered_attribute_ids", []):
+        try:
+            ordered.append(str(UUID(str(raw_id))))
+        except Exception:
+            continue
+
+    half_ids: set[str] = set()
+    for raw_id in (raw_layout or {}).get("half_width_attribute_ids", []):
+        try:
+            half_ids.add(str(UUID(str(raw_id))))
+        except Exception:
+            continue
+
+    items: list[dict[str, Any]] = []
+    x = 0
+    y = 0
+    half_width = max(1, columns // 2)
+    for attr_id in ordered:
+        w = half_width if attr_id in half_ids else columns
+        if x + w > columns:
+            y += 1
+            x = 0
+        items.append(
+            {
+                "item_type": "attribute",
+                "item_id": attr_id,
+                "attribute_id": attr_id,
+                "title": None,
+                "x": x,
+                "y": y,
+                "w": w,
+                "h": 1,
+            }
+        )
+        if w >= columns:
+            y += 1
+            x = 0
+        else:
+            x += w
+            if x >= columns:
+                y += 1
+                x = 0
+    return items
+
+
+def _normalize_layout_payload(
+    raw_layout: dict[str, Any] | None,
+    *,
+    valid_attr_ids: set[str] | None = None,
+    ordered_attr_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    source = raw_layout or {}
+    columns = _clamp(_to_int(source.get("columns"), 12), 1, 24)
+    row_height = _clamp(_to_int(source.get("row_height"), 1), 1, 4)
+
+    items = _parse_layout_items(source.get("items"), columns)
+    if not items:
+        items = _build_legacy_layout_items(source, columns)
+
+    if valid_attr_ids is not None:
+        filtered: list[dict[str, Any]] = []
+        for item in items:
+            if str(item.get("item_type") or "attribute") == "section":
+                filtered.append(item)
+                continue
+            attr_id = str(item.get("attribute_id") or "")
+            if attr_id in valid_attr_ids:
+                filtered.append(item)
+        items = filtered
+
+    # Normalize occupancy to avoid overlaps and out-of-range placements.
+    occupied: set[tuple[int, int]] = set()
+    normalized_items: list[dict[str, Any]] = []
+    sortable = sorted(
+        items,
+        key=lambda item: (_to_int(item.get("y"), 0), _to_int(item.get("x"), 0)),
+    )
+    seen_ids: set[str] = set()
+    seen_item_keys: set[str] = set()
+    for item in sortable:
+        item_type = str(item.get("item_type") or "attribute").lower()
+        item_key = _layout_item_key(item)
+        if item_key in seen_item_keys:
+            continue
+        seen_item_keys.add(item_key)
+
+        if item_type == "section":
+            section_id = str(item.get("item_id") or "").strip()
+            if not section_id:
+                section_id = f"section_{len(seen_item_keys)}"
+            w = columns
+            x = 0
+            y = max(0, _to_int(item.get("y"), 0))
+            if not _region_is_free(occupied, x, y, w):
+                x, y = _find_first_free_slot(occupied, columns, w, y)
+            _occupy_region(occupied, x, y, w)
+            title = str(item.get("title") or "").strip()
+            normalized_items.append(
+                {
+                    "item_type": "section",
+                    "item_id": section_id,
+                    "attribute_id": None,
+                    "title": title[:80] if title else None,
+                    "x": x,
+                    "y": y,
+                    "w": w,
+                    "h": 1,
+                }
+            )
+            continue
+
+        attr_id = str(item.get("attribute_id") or "")
+        if not attr_id:
+            continue
+        seen_ids.add(attr_id)
+        w = _clamp(_to_int(item.get("w"), columns), 1, columns)
+        x = _clamp(_to_int(item.get("x"), 0), 0, columns - 1)
+        if x + w > columns:
+            x = max(0, columns - w)
+        y = max(0, _to_int(item.get("y"), 0))
+        if not _region_is_free(occupied, x, y, w):
+            x, y = _find_first_free_slot(occupied, columns, w, y)
+        _occupy_region(occupied, x, y, w)
+        normalized_items.append(
+            {
+                "item_type": "attribute",
+                "item_id": attr_id,
+                "attribute_id": attr_id,
+                "title": None,
+                "x": x,
+                "y": y,
+                "w": w,
+                "h": 1,
+            }
+        )
+
+    # Ensure every attribute has a layout position.
+    if ordered_attr_ids:
+        for attr_id in ordered_attr_ids:
+            if valid_attr_ids is not None and attr_id not in valid_attr_ids:
+                continue
+            if attr_id in seen_ids:
+                continue
+            x, y = _find_first_free_slot(occupied, columns, columns, 0)
+            _occupy_region(occupied, x, y, columns)
+            normalized_items.append(
+                {
+                    "item_type": "attribute",
+                    "item_id": attr_id,
+                    "attribute_id": attr_id,
+                    "title": None,
+                    "x": x,
+                    "y": y,
+                    "w": columns,
+                    "h": 1,
+                }
+            )
+            seen_ids.add(attr_id)
+
+    normalized_items.sort(key=lambda item: (_to_int(item.get("y"), 0), _to_int(item.get("x"), 0)))
+    ordered_ids = [
+        str(item["attribute_id"])
+        for item in normalized_items
+        if str(item.get("item_type") or "attribute") == "attribute" and item.get("attribute_id")
+    ]
+    half_ids = [
+        str(item["attribute_id"])
+        for item in normalized_items
+        if str(item.get("item_type") or "attribute") == "attribute"
+        and item.get("attribute_id")
+        and _to_int(item.get("w"), columns) <= max(1, columns // 2)
+    ]
+
+    return {
+        "columns": columns,
+        "row_height": row_height,
+        "items": normalized_items,
+        "ordered_attribute_ids": ordered_ids,
+        "half_width_attribute_ids": half_ids,
+    }
+
+
+def _to_form_layout_response(category_id: UUID, raw_layout: dict[str, Any]) -> MetadataFormLayout:
+    normalized = _normalize_layout_payload(raw_layout)
+    items_payload = []
+    for item in normalized["items"]:
+        try:
+            item_type = str(item.get("item_type") or "attribute")
+            item_id = str(item.get("item_id") or "").strip()
+            raw_attr_id = item.get("attribute_id")
+            attr_uuid = None
+            if raw_attr_id:
+                attr_uuid = UUID(str(raw_attr_id))
+            items_payload.append(
+                {
+                    "item_type": item_type,
+                    "item_id": item_id or (str(attr_uuid) if attr_uuid else None),
+                    "attribute_id": attr_uuid,
+                    "title": item.get("title"),
+                    "x": int(item["x"]),
+                    "y": int(item["y"]),
+                    "w": int(item["w"]),
+                    "h": int(item.get("h", 1)),
+                }
+            )
+        except Exception:
+            continue
+
+    ordered_ids = []
+    for raw_id in normalized["ordered_attribute_ids"]:
+        try:
+            ordered_ids.append(UUID(str(raw_id)))
+        except Exception:
+            continue
+    half_ids = []
+    for raw_id in normalized["half_width_attribute_ids"]:
+        try:
+            half_ids.append(UUID(str(raw_id)))
+        except Exception:
+            continue
+
+    return MetadataFormLayout(
+        category_id=category_id,
+        columns=int(normalized["columns"]),
+        row_height=int(normalized["row_height"]),
+        items=items_payload,
+        ordered_attribute_ids=ordered_ids,
+        half_width_attribute_ids=half_ids,
+    )
+
+
 def _can_inline_edit_attribute(attribute: MetadataAttribute) -> bool:
     # Comic plugin fields are editable except technical read-only keys.
     if attribute.plugin_key == COMIC_PLUGIN_KEY:
@@ -386,6 +761,87 @@ async def get_category_stats(session: AsyncSession = Depends(get_session)):
         }
         for cat, item_count in rows
     ]
+
+
+@router.get("/layouts", response_model=list[MetadataFormLayout])
+async def list_metadata_form_layouts(session: AsyncSession = Depends(get_session)):
+    layouts = await _load_form_layouts(session)
+    result: list[MetadataFormLayout] = []
+    for category_id, raw in layouts.items():
+        try:
+            cid = UUID(str(category_id))
+        except Exception:
+            continue
+        result.append(_to_form_layout_response(cid, raw if isinstance(raw, dict) else {}))
+    return result
+
+
+@router.get("/layouts/{category_id}", response_model=MetadataFormLayout)
+async def get_metadata_form_layout(
+    category_id: UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    attrs_stmt = (
+        select(MetadataAttribute.id)
+        .where(MetadataAttribute.category_id == category_id)
+        .order_by(MetadataAttribute.name.asc(), MetadataAttribute.id.asc())
+    )
+    category_attr_ids = [str(attr_id) for attr_id in (await session.execute(attrs_stmt)).scalars().all()]
+
+    layouts = await _load_form_layouts(session)
+    raw_layout = layouts.get(str(category_id), {})
+    normalized = _normalize_layout_payload(
+        raw_layout if isinstance(raw_layout, dict) else {},
+        valid_attr_ids=set(category_attr_ids),
+        ordered_attr_ids=category_attr_ids,
+    )
+    return _to_form_layout_response(category_id, normalized)
+
+
+@router.put("/layouts/{category_id}", response_model=MetadataFormLayout)
+async def upsert_metadata_form_layout(
+    category_id: UUID,
+    payload: MetadataFormLayoutUpdate,
+    session: AsyncSession = Depends(get_session),
+):
+    category = await session.get(MetadataCategory, category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    attrs_stmt = (
+        select(MetadataAttribute.id)
+        .where(MetadataAttribute.category_id == category_id)
+        .order_by(MetadataAttribute.name.asc(), MetadataAttribute.id.asc())
+    )
+    attr_ids_ordered = [str(attr_id) for attr_id in (await session.execute(attrs_stmt)).scalars().all()]
+    attr_ids = set(attr_ids_ordered)
+
+    raw_payload = payload.model_dump(mode="json")
+    # Backward compatibility: if caller sends only ordered/half arrays, build legacy item layout.
+    if not raw_payload.get("items"):
+        raw_payload["items"] = []
+    if not raw_payload.get("ordered_attribute_ids"):
+        raw_payload["ordered_attribute_ids"] = [str(attr_id) for attr_id in payload.ordered_attribute_ids]
+    if not raw_payload.get("half_width_attribute_ids"):
+        raw_payload["half_width_attribute_ids"] = [str(attr_id) for attr_id in payload.half_width_attribute_ids]
+
+    normalized = _normalize_layout_payload(
+        raw_payload,
+        valid_attr_ids=attr_ids,
+        ordered_attr_ids=attr_ids_ordered,
+    )
+
+    layouts = await _load_form_layouts(session)
+    layouts[str(category_id)] = {
+        "columns": normalized["columns"],
+        "row_height": normalized["row_height"],
+        "items": normalized["items"],
+        "ordered_attribute_ids": normalized["ordered_attribute_ids"],
+        "half_width_attribute_ids": normalized["half_width_attribute_ids"],
+    }
+    await _save_form_layouts(session, layouts)
+
+    return _to_form_layout_response(category_id, normalized)
 
 
 @router.get("/categories/{category_id}/series-summary", response_model=SeriesSummaryResponse)
