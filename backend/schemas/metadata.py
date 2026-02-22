@@ -58,7 +58,7 @@ class MetadataCategory(MetadataCategoryBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-class MetadataPlugin(BaseModel):
+class MetadataLibrary(BaseModel):
     key: str
     name: str
     description: str | None = None
@@ -68,6 +68,10 @@ class MetadataPlugin(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# Backward-compatible alias for existing imports.
+MetadataPlugin = MetadataLibrary
 
 
 # --- Item Metadata Schemas ---

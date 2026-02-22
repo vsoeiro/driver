@@ -80,7 +80,7 @@ Complete inventory of endpoints exposed by the backend application.
 | `POST` | `/api/v1/jobs/apply-rule` | Create a job that applies one metadata rule. | `create_apply_rule_job` | `backend/api/routes/jobs.py:278` |
 | `POST` | `/api/v1/jobs/comics/extract` | Create a job that extracts comic cover/page metadata for selected items/folders. | `create_extract_comic_assets_job` | `backend/api/routes/jobs.py:291` |
 | `POST` | `/api/v1/jobs/comics/extract-library` | Create chunked jobs that map all synced .cbr/.cbz files in File Library. | `create_extract_library_comic_assets_job` | `backend/api/routes/jobs.py:320` |
-| `POST` | `/api/v1/jobs/comics/reindex-covers` | Create a background job that re-indexes mapped comic covers using current plugin settings. | `create_reindex_comic_covers_job` | `backend/api/routes/jobs.py:305` |
+| `POST` | `/api/v1/jobs/comics/reindex-covers` | Create a background job that re-indexes mapped comic covers using current library settings. | `create_reindex_comic_covers_job` | `backend/api/routes/jobs.py:305` |
 | `POST` | `/api/v1/jobs/metadata-undo` | Create a job that undoes metadata changes from a batch. | `create_metadata_undo_job` | `backend/api/routes/jobs.py:265` |
 | `POST` | `/api/v1/jobs/metadata-update` | Create a new job to bulk update metadata. | `create_metadata_update_job` | `backend/api/routes/jobs.py:196` |
 | `POST` | `/api/v1/jobs/move` | Create a new job to move items between accounts. | `create_move_job` | `backend/api/routes/jobs.py:88` |
@@ -113,9 +113,9 @@ Complete inventory of endpoints exposed by the backend application.
 | `GET` | `/api/v1/metadata/layouts` | - | `list_metadata_form_layouts` | `backend/api/routes/metadata.py:717` |
 | `GET` | `/api/v1/metadata/layouts/{category_id}` | - | `get_metadata_form_layout` | `backend/api/routes/metadata.py:730` |
 | `PUT` | `/api/v1/metadata/layouts/{category_id}` | - | `upsert_metadata_form_layout` | `backend/api/routes/metadata.py:752` |
-| `GET` | `/api/v1/metadata/plugins` | List metadata plugins. | `list_metadata_plugins` | `backend/api/routes/metadata.py:1596` |
-| `POST` | `/api/v1/metadata/plugins/{plugin_key}/activate` | Activate a metadata plugin and ensure managed schema exists. | `activate_metadata_plugin` | `backend/api/routes/metadata.py:1604` |
-| `POST` | `/api/v1/metadata/plugins/{plugin_key}/deactivate` | Deactivate a metadata plugin. | `deactivate_metadata_plugin` | `backend/api/routes/metadata.py:1627` |
+| `GET` | `/api/v1/metadata/libraries` | List metadata libraries. | `list_metadata_libraries` | `backend/api/routes/metadata.py:1596` |
+| `POST` | `/api/v1/metadata/libraries/{library_key}/activate` | Activate a metadata library and ensure managed schema exists. | `activate_metadata_library` | `backend/api/routes/metadata.py:1604` |
+| `POST` | `/api/v1/metadata/libraries/{library_key}/deactivate` | Deactivate a metadata library. | `deactivate_metadata_library` | `backend/api/routes/metadata.py:1627` |
 | `GET` | `/api/v1/metadata/rules` | List metadata rules by priority. | `list_metadata_rules` | `backend/api/routes/metadata.py:1462` |
 | `POST` | `/api/v1/metadata/rules` | Create a metadata rule. | `create_metadata_rule` | `backend/api/routes/metadata.py:1470` |
 | `POST` | `/api/v1/metadata/rules/preview` | Preview how many items would be changed by a rule. | `preview_metadata_rule` | `backend/api/routes/metadata.py:1539` |

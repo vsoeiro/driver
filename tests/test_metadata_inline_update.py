@@ -47,7 +47,7 @@ def test_coerce_attribute_blank_returns_none():
 
 def test_can_inline_edit_allows_non_readonly_comic_field():
     attr = _attr("text", "Series")
-    attr.plugin_key = "comicrack_core"
+    attr.plugin_key = "comics_core"
     attr.plugin_field_key = "series"
     attr.is_locked = True
     attr.managed_by_plugin = True
@@ -56,7 +56,7 @@ def test_can_inline_edit_allows_non_readonly_comic_field():
 
 def test_can_inline_edit_blocks_readonly_comic_field():
     attr = _attr("text", "Cover Item ID")
-    attr.plugin_key = "comicrack_core"
+    attr.plugin_key = "comics_core"
     attr.plugin_field_key = "cover_item_id"
     attr.is_locked = True
     attr.managed_by_plugin = True

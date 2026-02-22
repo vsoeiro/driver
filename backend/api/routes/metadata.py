@@ -32,7 +32,7 @@ from backend.schemas.metadata import (
     ItemMetadata as ItemMetadataSchema,
     ItemMetadataHistory as ItemMetadataHistorySchema,
     MetadataAttribute as MetadataAttributeSchema,
-    MetadataPlugin as MetadataPluginSchema,
+    MetadataLibrary as MetadataLibrarySchema,
     MetadataRule as MetadataRuleSchema,
     MetadataRuleCreate,
     MetadataRulePreviewRequest,
@@ -42,7 +42,7 @@ from backend.schemas.metadata import (
     MetadataFormLayoutUpdate,
     SeriesSummaryResponse,
 )
-from backend.services.metadata_plugins import COMIC_PLUGIN_KEY, MetadataPluginService
+from backend.services.metadata_plugins import COMICS_LIBRARY_KEY, MetadataPluginService
 from backend.services.metadata_versioning import apply_metadata_change, normalize_metadata_values, undo_metadata_batch
 from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
@@ -226,13 +226,13 @@ def _coerce_attribute_value(attribute: MetadataAttribute, raw_value: Any) -> Any
 
 async def _reconcile_active_comic_schema(session: AsyncSession) -> None:
     service = MetadataPluginService(session)
-    plugins = await service.list_plugins()
-    if any(plugin.key == COMIC_PLUGIN_KEY and plugin.is_active for plugin in plugins):
+    libraries = await service.list_libraries()
+    if any(library.key == COMICS_LIBRARY_KEY and library.is_active for library in libraries):
         try:
             await service.ensure_active_comic_category()
             await session.commit()
         except ValueError:
-            # Plugin flagged active but category is missing/inactive; keep request resilient.
+            # Library flagged active but category is missing/inactive; keep request resilient.
             return
 
 
@@ -608,10 +608,10 @@ def _to_form_layout_response(category_id: UUID, raw_layout: dict[str, Any]) -> M
 
 
 def _can_inline_edit_attribute(attribute: MetadataAttribute) -> bool:
-    # Comic plugin fields are editable except technical read-only keys.
-    if attribute.plugin_key == COMIC_PLUGIN_KEY:
+    # Comics library fields are editable except technical read-only keys.
+    if attribute.plugin_key == COMICS_LIBRARY_KEY:
         return (attribute.plugin_field_key or "") not in READ_ONLY_COMIC_FIELD_KEYS
-    # Non-plugin attributes follow lock rules.
+    # Non-library attributes follow lock rules.
     return not (attribute.is_locked or attribute.managed_by_plugin)
 
 
@@ -1100,7 +1100,7 @@ async def delete_category(category_id: UUID, session: AsyncSession = Depends(get
     if category.is_locked or category.managed_by_plugin:
         raise HTTPException(
             status_code=400,
-            detail="Plugin-managed category cannot be deleted. Deactivate the plugin instead.",
+            detail="Library-managed category cannot be deleted. Deactivate the metadata library instead.",
         )
 
     # Remove metadata assignments that reference this category.
@@ -1140,7 +1140,7 @@ async def delete_attribute(attribute_id: UUID, session: AsyncSession = Depends(g
     if not attribute:
         raise HTTPException(status_code=404, detail="Attribute not found")
     if attribute.is_locked or attribute.managed_by_plugin:
-        raise HTTPException(status_code=400, detail="Plugin-managed attribute cannot be deleted")
+        raise HTTPException(status_code=400, detail="Library-managed attribute cannot be deleted")
 
     await session.delete(attribute)
     await session.commit()
@@ -1157,7 +1157,7 @@ async def update_attribute(
     if not db_attribute:
         raise HTTPException(status_code=404, detail="Attribute not found")
     if db_attribute.is_locked or db_attribute.managed_by_plugin:
-        raise HTTPException(status_code=400, detail="Plugin-managed attribute cannot be edited")
+        raise HTTPException(status_code=400, detail="Library-managed attribute cannot be edited")
 
     updates = attribute.model_dump(exclude_unset=True)
     if "data_type" in updates and updates["data_type"] != "select":
@@ -1592,23 +1592,23 @@ async def preview_metadata_rule(
     )
 
 
-@router.get("/plugins", response_model=list[MetadataPluginSchema])
-async def list_metadata_plugins(session: AsyncSession = Depends(get_session)):
-    """List metadata plugins."""
+@router.get("/libraries", response_model=list[MetadataLibrarySchema])
+async def list_metadata_libraries(session: AsyncSession = Depends(get_session)):
+    """List metadata libraries."""
     service = MetadataPluginService(session)
-    plugins = await service.list_plugins()
-    return plugins
+    libraries = await service.list_libraries()
+    return libraries
 
 
-@router.post("/plugins/{plugin_key}/activate", response_model=MetadataPluginSchema)
-async def activate_metadata_plugin(plugin_key: str, session: AsyncSession = Depends(get_session)):
-    """Activate a metadata plugin and ensure managed schema exists."""
-    if plugin_key != COMIC_PLUGIN_KEY:
-        raise HTTPException(status_code=404, detail="Unknown plugin")
+@router.post("/libraries/{library_key}/activate", response_model=MetadataLibrarySchema)
+async def activate_metadata_library(library_key: str, session: AsyncSession = Depends(get_session)):
+    """Activate a metadata library and ensure managed schema exists."""
+    if library_key != COMICS_LIBRARY_KEY:
+        raise HTTPException(status_code=404, detail="Unknown metadata library")
 
     service = MetadataPluginService(session)
     try:
-        plugin = await service.activate_comic_plugin()
+        library = await service.activate_comics_library()
     except ValueError as exc:
         await session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1619,24 +1619,24 @@ async def activate_metadata_plugin(plugin_key: str, session: AsyncSession = Depe
         raise
 
     await session.commit()
-    await session.refresh(plugin)
-    return plugin
+    await session.refresh(library)
+    return library
 
 
-@router.post("/plugins/{plugin_key}/deactivate", response_model=MetadataPluginSchema)
-async def deactivate_metadata_plugin(plugin_key: str, session: AsyncSession = Depends(get_session)):
-    """Deactivate a metadata plugin."""
-    if plugin_key != COMIC_PLUGIN_KEY:
-        raise HTTPException(status_code=404, detail="Unknown plugin")
+@router.post("/libraries/{library_key}/deactivate", response_model=MetadataLibrarySchema)
+async def deactivate_metadata_library(library_key: str, session: AsyncSession = Depends(get_session)):
+    """Deactivate a metadata library."""
+    if library_key != COMICS_LIBRARY_KEY:
+        raise HTTPException(status_code=404, detail="Unknown metadata library")
 
     service = MetadataPluginService(session)
     try:
-        plugin = await service.deactivate_comic_plugin()
+        library = await service.deactivate_comics_library()
     except OperationalError as exc:
         await session.rollback()
         if "no such table: metadata_plugins" in str(exc).lower():
             raise HTTPException(status_code=409, detail="Database migration required: run alembic upgrade head") from exc
         raise
     await session.commit()
-    await session.refresh(plugin)
-    return plugin
+    await session.refresh(library)
+    return library

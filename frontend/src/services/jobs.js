@@ -145,9 +145,9 @@ export const createExtractComicAssetsJob = async (accountId, itemIds) => {
     return response.data;
 };
 
-export const createReindexComicCoversJob = async (pluginKey = 'comicrack_core') => {
+export const createReindexComicCoversJob = async (libraryKey = 'comics_core') => {
     const response = await api.post('/jobs/comics/reindex-covers', {
-        plugin_key: pluginKey,
+        library_key: libraryKey,
     });
     return response.data;
 };

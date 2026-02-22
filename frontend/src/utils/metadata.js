@@ -63,7 +63,7 @@ export function sortAttributesForCategory(category, orderedAttributeIds = null) 
             return String(a?.name || '').localeCompare(String(b?.name || ''));
         });
     }
-    const isComic = category?.plugin_key === 'comicrack_core';
+    const isComic = category?.plugin_key === 'comics_core';
     if (!isComic) {
         return attrs.sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || '')));
     }

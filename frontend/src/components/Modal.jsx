@@ -1,5 +1,5 @@
-
 import { X } from 'lucide-react';
+import { createPortal } from 'react-dom';
 
 export default function Modal({
     isOpen,
@@ -11,8 +11,10 @@ export default function Modal({
 }) {
     if (!isOpen) return null;
 
-    return (
-        <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-8 bg-background/80 backdrop-blur-sm overflow-y-auto">
+    if (typeof document === 'undefined') return null;
+
+    return createPortal(
+        <div className="fixed inset-0 z-[100] flex items-start justify-center p-4 pt-8 bg-background/80 backdrop-blur-sm overflow-y-auto">
             <div className={`bg-card border text-card-foreground rounded-lg shadow-lg w-full ${maxWidthClass} max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95 duration-200`}>
                 <div className="flex items-center justify-between p-4 border-b">
                     <h3 className="font-semibold text-lg">{title}</h3>
@@ -27,6 +29,7 @@ export default function Modal({
                     {children}
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 }

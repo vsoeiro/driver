@@ -5,7 +5,7 @@ import { jobsService } from '../services/jobs';
 import { driveService } from '../services/drive';
 import { useToast } from '../contexts/ToastContext';
 import { Loader2, AlertTriangle, ZoomIn, ZoomOut, X } from 'lucide-react';
-import { getCategoryPluginView } from '../plugins/metadataCategoryViews';
+import { getCategoryLibraryView } from '../metadataLibraries/categoryViews';
 import { buildCoverCacheKey, getCachedCoverUrl, setCachedCoverUrl } from '../utils/coverCache';
 import {
     getSelectOptions,
@@ -221,8 +221,8 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
     };
 
     const selectedCategory = categories.find(c => c.id === selectedCategoryId);
-    const pluginView = getCategoryPluginView(selectedCategory);
-    const isComicPluginCategory = selectedCategory?.plugin_key === 'comicrack_core';
+    const libraryView = getCategoryLibraryView(selectedCategory);
+    const isComicLibraryCategory = selectedCategory?.plugin_key === 'comics_core';
     const rawCategoryLayout = selectedCategory ? layoutMap[String(selectedCategory.id)] : null;
     const hasConfiguredLayout = !!(
         rawCategoryLayout
@@ -240,14 +240,14 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
     const layoutItemsForRender = categoryLayout
         ? resolveLayoutItemsForRender(categoryLayout.items || [], categoryLayout.columns)
         : [];
-    const configuredFieldGroups = pluginView?.formLayout?.groups || DEFAULT_COMIC_FORM_FIELD_GROUPS;
-    const compactFieldKeys = new Set(pluginView?.formLayout?.compactFields || Array.from(DEFAULT_COMIC_COMPACT_FIELD_KEYS));
+    const configuredFieldGroups = libraryView?.formLayout?.groups || DEFAULT_COMIC_FORM_FIELD_GROUPS;
+    const compactFieldKeys = new Set(libraryView?.formLayout?.compactFields || Array.from(DEFAULT_COMIC_COMPACT_FIELD_KEYS));
     const orderedAttributes = sortAttributesForCategory(
         selectedCategory,
         categoryLayout?.ordered_attribute_ids || null,
     );
     const orderedFieldGroups = (() => {
-        if (isComicPluginCategory) {
+        if (isComicLibraryCategory) {
             const configuredKeys = configuredFieldGroups.flat();
             const grouped = configuredFieldGroups
                 .map((group) =>
@@ -265,10 +265,10 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
         return orderedAttributes.map((attr) => [attr]);
     })();
     const coverAttr = selectedCategory?.attributes?.find(
-        (attr) => attr.plugin_field_key === pluginView?.gallery?.coverField
+        (attr) => attr.plugin_field_key === libraryView?.gallery?.coverField
     );
     const coverAccountAttr = selectedCategory?.attributes?.find(
-        (attr) => attr.plugin_field_key === pluginView?.gallery?.coverAccountField
+        (attr) => attr.plugin_field_key === libraryView?.gallery?.coverAccountField
     );
     const coverItemId = coverAttr ? formValues?.[coverAttr.id] : null;
     const coverAccountId = coverAccountAttr ? formValues?.[coverAccountAttr.id] : accountId;
@@ -314,7 +314,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
     }, [isOpen, showCoverPanel, coverItemId, coverAccountId]);
 
     const renderAttributeField = (attr, className = '', style = null) => {
-        const isReadOnlyComputed = selectedCategory?.plugin_key === 'comicrack_core'
+        const isReadOnlyComputed = selectedCategory?.plugin_key === 'comics_core'
             && READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key);
         const tagsValue = tagInputDrafts[attr.id] ?? tagsToInputValue(formValues[attr.id] || []);
 
@@ -562,14 +562,14 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                                                 })}
                                             </div>
                                         ) : (
-                                            <div className={`grid gap-3 ${isComicPluginCategory ? 'md:grid-cols-2' : 'grid-cols-1'}`}>
+                                            <div className={`grid gap-3 ${isComicLibraryCategory ? 'md:grid-cols-2' : 'grid-cols-1'}`}>
                                                 {orderedFieldGroups.map((group, groupIndex) => (
                                                     <div
                                                         key={`group-${groupIndex}`}
-                                                        className={group.length > 1 && isComicPluginCategory ? 'contents' : 'md:col-span-2'}
+                                                        className={group.length > 1 && isComicLibraryCategory ? 'contents' : 'md:col-span-2'}
                                                     >
                                                         {group.map((attr) => {
-                                                            const fieldContainerClass = isComicPluginCategory
+                                                            const fieldContainerClass = isComicLibraryCategory
                                                                 ? (
                                                                     READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key)
                                                                     || attr.plugin_field_key === 'summary'

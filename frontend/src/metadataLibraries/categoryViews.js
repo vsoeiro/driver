@@ -1,6 +1,6 @@
 export const metadataCategoryViews = {
-    comicrack_core: {
-        key: 'comicrack_core',
+    comics_core: {
+        key: 'comics_core',
         modes: ['table', 'gallery', 'series_tracker'],
         gallery: {
             coverField: 'cover_item_id',
@@ -42,7 +42,7 @@ export const metadataCategoryViews = {
     },
 };
 
-export const getCategoryPluginView = (category) => {
+export const getCategoryLibraryView = (category) => {
     if (!category?.plugin_key) return null;
     return metadataCategoryViews[category.plugin_key] || null;
 };

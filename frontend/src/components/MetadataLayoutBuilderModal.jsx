@@ -186,7 +186,7 @@ export default function MetadataLayoutBuilderModal({
 
             setSelectedCategoryId((prev) => {
                 if (prev && categories.some((cat) => String(cat.id) === String(prev))) return prev;
-                const preferred = categories.find((cat) => cat.plugin_key === 'comicrack_core') || categories[0];
+                const preferred = categories.find((cat) => cat.plugin_key === 'comics_core') || categories[0];
                 return preferred ? String(preferred.id) : '';
             });
         } catch (error) {

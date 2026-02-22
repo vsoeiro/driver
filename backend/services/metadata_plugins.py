@@ -1,4 +1,4 @@
-"""Managed metadata plugin helpers."""
+"""Managed metadata library helpers."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from backend.db.models import MetadataAttribute, MetadataCategory, MetadataPlugin
 
-COMIC_PLUGIN_KEY = "comicrack_core"
+COMICS_LIBRARY_KEY = "comics_core"
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,12 +63,12 @@ def _build_field_index() -> dict[str, PluginFieldSpec]:
 
 
 class MetadataPluginService:
-    """Service for plugin-backed metadata categories."""
+    """Service for metadata-library-backed categories."""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def list_plugins(self) -> list[MetadataPlugin]:
+    async def list_libraries(self) -> list[MetadataPlugin]:
         try:
             stmt = select(MetadataPlugin).order_by(MetadataPlugin.key.asc())
             result = await self.session.execute(stmt)
@@ -78,11 +78,14 @@ class MetadataPluginService:
                 return []
             raise
 
-    async def activate_comic_plugin(self) -> MetadataPlugin:
+    async def list_plugins(self) -> list[MetadataPlugin]:
+        return await self.list_libraries()
+
+    async def activate_comics_library(self) -> MetadataPlugin:
         plugin = await self._get_or_create_plugin_row(
-            COMIC_PLUGIN_KEY,
-            "ComicRack Core",
-            "Managed comic metadata schema with locked attributes.",
+            COMICS_LIBRARY_KEY,
+            "Comics Core",
+            "Managed comics metadata schema with locked attributes.",
         )
         category = await self._ensure_comic_category()
         plugin.is_active = True
@@ -90,15 +93,18 @@ class MetadataPluginService:
         category.is_active = True
         return plugin
 
-    async def deactivate_comic_plugin(self) -> MetadataPlugin:
-        stmt = select(MetadataPlugin).where(MetadataPlugin.key == COMIC_PLUGIN_KEY)
+    async def activate_comic_plugin(self) -> MetadataPlugin:
+        return await self.activate_comics_library()
+
+    async def deactivate_comics_library(self) -> MetadataPlugin:
+        stmt = select(MetadataPlugin).where(MetadataPlugin.key == COMICS_LIBRARY_KEY)
         result = await self.session.execute(stmt)
         plugin = result.scalar_one_or_none()
         if plugin is None:
             plugin = await self._get_or_create_plugin_row(
-                COMIC_PLUGIN_KEY,
-                "ComicRack Core",
-                "Managed comic metadata schema with locked attributes.",
+                COMICS_LIBRARY_KEY,
+                "Comics Core",
+                "Managed comics metadata schema with locked attributes.",
             )
         plugin.is_active = False
 
@@ -109,11 +115,14 @@ class MetadataPluginService:
 
         return plugin
 
+    async def deactivate_comic_plugin(self) -> MetadataPlugin:
+        return await self.deactivate_comics_library()
+
     async def get_active_comic_category(self) -> MetadataCategory | None:
         stmt = (
             select(MetadataCategory)
             .where(
-                MetadataCategory.plugin_key == COMIC_PLUGIN_KEY,
+                MetadataCategory.plugin_key == COMICS_LIBRARY_KEY,
                 MetadataCategory.managed_by_plugin.is_(True),
                 MetadataCategory.is_active.is_(True),
             )
@@ -125,7 +134,7 @@ class MetadataPluginService:
     async def ensure_active_comic_category(self) -> MetadataCategory:
         category = await self.get_active_comic_category()
         if category is None:
-            raise ValueError("Comic plugin is not active. Activate comicrack_core first.")
+            raise ValueError("Comics metadata library is not active. Activate comics_core first.")
         # Reconcile schema to guarantee newly introduced plugin fields exist
         # even for already-active installations.
         return await self._ensure_comic_category()
@@ -169,7 +178,7 @@ class MetadataPluginService:
         stmt = (
             select(MetadataCategory)
             .where(
-                MetadataCategory.plugin_key == COMIC_PLUGIN_KEY,
+                MetadataCategory.plugin_key == COMICS_LIBRARY_KEY,
                 MetadataCategory.managed_by_plugin.is_(True),
             )
             .options(selectinload(MetadataCategory.attributes))
@@ -181,14 +190,14 @@ class MetadataPluginService:
             conflict_stmt = select(MetadataCategory).where(MetadataCategory.name == "Comics")
             conflict = (await self.session.execute(conflict_stmt)).scalar_one_or_none()
             if conflict and not conflict.managed_by_plugin:
-                raise ValueError("Category name 'Comics' already exists and is not plugin-managed.")
+                raise ValueError("Category name 'Comics' already exists and is not library-managed.")
 
             category = MetadataCategory(
                 name="Comics",
-                description="Comic metadata managed by plugin comicrack_core.",
+                description="Comics metadata managed by metadata library comics_core.",
                 is_active=True,
                 managed_by_plugin=True,
-                plugin_key=COMIC_PLUGIN_KEY,
+                plugin_key=COMICS_LIBRARY_KEY,
                 is_locked=True,
             )
             self.session.add(category)
@@ -196,7 +205,7 @@ class MetadataPluginService:
 
         category.is_active = True
         category.managed_by_plugin = True
-        category.plugin_key = COMIC_PLUGIN_KEY
+        category.plugin_key = COMICS_LIBRARY_KEY
         category.is_locked = True
 
         attrs_stmt = select(MetadataAttribute).where(MetadataAttribute.category_id == category.id)
@@ -218,7 +227,7 @@ class MetadataPluginService:
                     options=spec.options,
                     is_required=spec.is_required,
                     managed_by_plugin=True,
-                    plugin_key=COMIC_PLUGIN_KEY,
+                    plugin_key=COMICS_LIBRARY_KEY,
                     plugin_field_key=field_key,
                     is_locked=True,
                 )
@@ -229,7 +238,7 @@ class MetadataPluginService:
                 db_attr.options = spec.options
                 db_attr.is_required = spec.is_required
                 db_attr.managed_by_plugin = True
-                db_attr.plugin_key = COMIC_PLUGIN_KEY
+                db_attr.plugin_key = COMICS_LIBRARY_KEY
                 db_attr.plugin_field_key = field_key
                 db_attr.is_locked = True
 
@@ -237,7 +246,7 @@ class MetadataPluginService:
         valid_keys = set(specs.keys())
         for db_attr in category_attrs:
             if (
-                db_attr.plugin_key == COMIC_PLUGIN_KEY
+                db_attr.plugin_key == COMICS_LIBRARY_KEY
                 and db_attr.managed_by_plugin
                 and db_attr.plugin_field_key
                 and db_attr.plugin_field_key not in valid_keys
@@ -254,5 +263,5 @@ class MetadataPluginService:
         refreshed = await self.session.execute(refreshed_stmt)
         category_loaded = refreshed.scalar_one_or_none()
         if category_loaded is None:
-            raise ValueError("Failed to load plugin category")
+            raise ValueError("Failed to load metadata library category")
         return category_loaded

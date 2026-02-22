@@ -4,7 +4,7 @@ from typing import Any
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class JobBase(BaseModel):
@@ -152,9 +152,11 @@ class JobExtractComicAssetsRequest(BaseModel):
 
 
 class JobReindexComicCoversRequest(BaseModel):
-    """Schema for plugin-driven comic cover reindex request."""
+    """Schema for metadata-library-driven comic cover reindex request."""
 
-    plugin_key: str = "comicrack_core"
+    library_key: str = Field(default="comics_core", alias="plugin_key")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class JobExtractLibraryComicAssetsRequest(BaseModel):

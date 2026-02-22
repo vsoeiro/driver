@@ -23,7 +23,7 @@ from backend.schemas.jobs import (
     JobReindexComicCoversRequest,
 )
 from backend.services.jobs import JobService
-from backend.services.metadata_plugins import MetadataPluginService
+from backend.services.metadata_plugins import COMICS_LIBRARY_KEY, MetadataPluginService
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 
@@ -48,11 +48,11 @@ async def _filter_unmapped_comic_items(
     if not by_account:
         return by_account
 
-    plugin_service = MetadataPluginService(db)
+    library_service = MetadataPluginService(db)
     try:
-        category = await plugin_service.ensure_active_comic_category()
+        category = await library_service.ensure_active_comic_category()
     except Exception:
-        # If plugin schema is unavailable, keep current behavior (no pre-filter).
+        # If metadata library schema is unavailable, keep current behavior (no pre-filter).
         return by_account
 
     attr_ids = {
@@ -306,9 +306,9 @@ async def create_reindex_comic_covers_job(
     request: JobReindexComicCoversRequest,
     job_service: JobServiceDep,
 ) -> Job:
-    """Create a background job that re-indexes mapped comic covers using current plugin settings."""
-    if request.plugin_key != "comicrack_core":
-        raise HTTPException(status_code=404, detail="Unknown plugin key for cover re-index")
+    """Create a background job that re-indexes mapped comic covers using current library settings."""
+    if request.library_key != COMICS_LIBRARY_KEY:
+        raise HTTPException(status_code=404, detail="Unknown metadata library key for cover re-index")
     job_in = JobCreate(
         type="reindex_comic_covers",
         payload=request.model_dump(mode="json"),

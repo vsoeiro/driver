@@ -127,18 +127,18 @@ export const getSeriesSummary = async (categoryId, params = {}) => {
     return response.data;
 };
 
-export const listPlugins = async () => {
-    const response = await api.get('/metadata/plugins');
+export const listMetadataLibraries = async () => {
+    const response = await api.get('/metadata/libraries');
     return response.data;
 };
 
-export const activatePlugin = async (pluginKey) => {
-    const response = await api.post(`/metadata/plugins/${pluginKey}/activate`);
+export const activateMetadataLibrary = async (libraryKey) => {
+    const response = await api.post(`/metadata/libraries/${libraryKey}/activate`);
     return response.data;
 };
 
-export const deactivatePlugin = async (pluginKey) => {
-    const response = await api.post(`/metadata/plugins/${pluginKey}/deactivate`);
+export const deactivateMetadataLibrary = async (libraryKey) => {
+    const response = await api.post(`/metadata/libraries/${libraryKey}/deactivate`);
     return response.data;
 };
 
@@ -150,9 +150,9 @@ export const metadataService = {
     getFormLayout,
     saveFormLayout,
     getSeriesSummary,
-    listPlugins,
-    activatePlugin,
-    deactivatePlugin,
+    listMetadataLibraries,
+    activateMetadataLibrary,
+    deactivateMetadataLibrary,
     createCategory,
     deleteCategory,
     createAttribute,

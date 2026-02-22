@@ -17,7 +17,6 @@ import {
     Settings,
     Menu,
     ChevronDown,
-    Plug,
     PanelLeftClose,
     PanelLeftOpen,
 } from 'lucide-react';
@@ -64,7 +63,6 @@ export default function Sidebar({ collapsed = false, onToggleCollapse }) {
     const quickLinks = [
         { to: '/jobs', label: 'Jobs', icon: Activity },
         { to: '/metadata', label: 'Metadata', icon: Database },
-        { to: '/plugins', label: 'Plugins', icon: Plug },
         { to: '/all-files', label: 'File Library', icon: FileText },
         { to: '/rules', label: 'Rules', icon: Wand2 },
         { to: '/admin', label: 'Admin', icon: Settings },

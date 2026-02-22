@@ -3,7 +3,7 @@ import { metadataService } from '../services/metadata';
 import { itemsService } from '../services/items';
 import { jobsService } from '../services/jobs';
 import { driveService } from '../services/drive';
-import { getCategoryPluginView } from '../plugins/metadataCategoryViews';
+import { getCategoryLibraryView } from '../metadataLibraries/categoryViews';
 import { buildCoverCacheKey, getCachedCoverUrl, setCachedCoverUrl } from '../utils/coverCache';
 import {
     getSelectOptions,
@@ -208,12 +208,12 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
     const layoutItemsForRender = categoryLayout
         ? resolveLayoutItemsForRender(categoryLayout.items || [], categoryLayout.columns)
         : [];
-    const pluginView = getCategoryPluginView(currentCategory);
+    const libraryView = getCategoryLibraryView(currentCategory);
     const coverAttr = currentCategory?.attributes?.find(
-        (attr) => attr.plugin_field_key === pluginView?.gallery?.coverField
+        (attr) => attr.plugin_field_key === libraryView?.gallery?.coverField
     );
     const coverAccountAttr = currentCategory?.attributes?.find(
-        (attr) => attr.plugin_field_key === pluginView?.gallery?.coverAccountField
+        (attr) => attr.plugin_field_key === libraryView?.gallery?.coverAccountField
     );
     const singleItem = selectedItems.length === 1 ? selectedItems[0] : null;
     const coverItemId = coverAttr ? attributeValues?.[coverAttr.id] : null;
@@ -268,7 +268,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
     }, [isOpen, showCoverPanel, coverAccountId, coverItemId]);
 
     const renderAttributeInput = (attr, className = '', style = null) => {
-        const isReadOnlyComputed = currentCategory?.plugin_key === 'comicrack_core'
+        const isReadOnlyComputed = currentCategory?.plugin_key === 'comics_core'
             && READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key);
         const rawValue = attributeValues[attr.id];
         const value = rawValue ?? '';

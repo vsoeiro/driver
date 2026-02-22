@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.models import Item
 from backend.services.comics import ComicMetadataService, IndexedComicItem
+from backend.services.metadata_plugins import COMICS_LIBRARY_KEY
 from backend.workers.dispatcher import register_handler
 from backend.workers.job_progress import JobProgressReporter
 
@@ -122,8 +123,9 @@ async def extract_comic_assets_handler(payload: dict, session: AsyncSession) -> 
 
 @register_handler("reindex_comic_covers")
 async def reindex_comic_covers_handler(payload: dict, session: AsyncSession) -> dict:
-    if payload.get("plugin_key", "comicrack_core") != "comicrack_core":
-        raise ValueError("Unsupported plugin key for cover reindex")
+    library_key = payload.get("library_key") or payload.get("plugin_key") or COMICS_LIBRARY_KEY
+    if library_key != COMICS_LIBRARY_KEY:
+        raise ValueError("Unsupported metadata library key for cover reindex")
 
     progress = JobProgressReporter.from_payload(session, payload)
     await progress.set_total(1)

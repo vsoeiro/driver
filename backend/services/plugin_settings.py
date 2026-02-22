@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.config import get_settings
 from backend.db.models import AppSetting, MetadataPlugin
-from backend.services.metadata_plugins import COMIC_PLUGIN_KEY
+from backend.services.metadata_plugins import COMICS_LIBRARY_KEY
 
 PLUGIN_PREFIX = "plugin:"
 
@@ -54,8 +54,8 @@ class ComicRuntimeSettings:
 def _comic_plugin_spec() -> PluginSettingSpec:
     cfg = get_settings()
     return PluginSettingSpec(
-        plugin_key=COMIC_PLUGIN_KEY,
-        plugin_name="ComicRack Core",
+        plugin_key=COMICS_LIBRARY_KEY,
+        plugin_name="Comics Core",
         description="Storage and optimization settings for comic cover extraction.",
         schema_version=1,
         fields=(
@@ -118,7 +118,7 @@ def _comic_plugin_spec() -> PluginSettingSpec:
 
 
 PLUGIN_SETTINGS_REGISTRY: dict[str, PluginSettingSpec] = {
-    COMIC_PLUGIN_KEY: _comic_plugin_spec(),
+    COMICS_LIBRARY_KEY: _comic_plugin_spec(),
 }
 
 
@@ -166,7 +166,7 @@ class PluginSettingsService:
                     "capabilities": {
                         "schema_version": spec.schema_version,
                         "supported_input_types": sorted({field.input_type for field in spec.fields}),
-                        "actions": ["reindex_covers"] if spec.plugin_key == COMIC_PLUGIN_KEY else [],
+                        "actions": ["reindex_covers"] if spec.plugin_key == COMICS_LIBRARY_KEY else [],
                     },
                     "fields": fields,
                 }
@@ -181,15 +181,15 @@ class PluginSettingsService:
         for plugin_key, values in payload.items():
             spec = PLUGIN_SETTINGS_REGISTRY.get(plugin_key)
             if spec is None:
-                raise ValueError(f"Unknown plugin settings key: {plugin_key}")
+                raise ValueError(f"Unknown metadata library settings key: {plugin_key}")
             if plugin_key not in active_keys:
-                raise ValueError(f"Plugin '{plugin_key}' must be active before updating settings.")
+                raise ValueError(f"Metadata library '{plugin_key}' must be active before updating settings.")
 
             rows = await self._ensure_plugin_defaults(spec)
             for field_key, raw_value in values.items():
                 field_spec = next((field for field in spec.fields if field.key == field_key), None)
                 if field_spec is None:
-                    raise ValueError(f"Unknown setting '{field_key}' for plugin '{plugin_key}'.")
+                    raise ValueError(f"Unknown setting '{field_key}' for metadata library '{plugin_key}'.")
                 validated = self._validate_value(field_spec, raw_value)
                 row = rows[setting_db_key(plugin_key, field_key)]
                 row.value = self._serialize_value(field_spec, validated)
@@ -198,11 +198,11 @@ class PluginSettingsService:
             await self.session.commit()
 
     async def get_comic_runtime_settings(self) -> ComicRuntimeSettings:
-        spec = PLUGIN_SETTINGS_REGISTRY[COMIC_PLUGIN_KEY]
+        spec = PLUGIN_SETTINGS_REGISTRY[COMICS_LIBRARY_KEY]
         rows = await self._ensure_plugin_defaults(spec)
         values: dict[str, Any] = {}
         for field in spec.fields:
-            row = rows[setting_db_key(COMIC_PLUGIN_KEY, field.key)]
+            row = rows[setting_db_key(COMICS_LIBRARY_KEY, field.key)]
             values[field.key] = self._parse_value(field, row.value)
 
         target = values["cover_storage_target"] or {}

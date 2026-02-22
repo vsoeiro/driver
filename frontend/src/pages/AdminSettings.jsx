@@ -136,7 +136,7 @@ export default function AdminSettings() {
             ...form.plugin_settings.map((group) => ({
                 id: `plugin:${group.plugin_key}`,
                 title: group.plugin_name,
-                description: group.plugin_description || 'Plugin runtime settings.',
+                description: group.plugin_description || 'Metadata library runtime settings.',
                 type: 'plugin',
                 pluginKey: group.plugin_key,
             })),
@@ -311,14 +311,14 @@ export default function AdminSettings() {
         const pluginKey = selectedGroup.pluginKey;
         const group = form.plugin_settings.find((item) => item.plugin_key === pluginKey);
         if (!group) {
-            return <p className="text-sm text-muted-foreground">Plugin group not found.</p>;
+            return <p className="text-sm text-muted-foreground">Metadata library group not found.</p>;
         }
 
         return (
             <div className="space-y-4">
                 <div>
                     <h2 className="font-medium">{group.plugin_name}</h2>
-                    <p className="text-sm text-muted-foreground">{group.plugin_description || 'Plugin-specific runtime settings.'}</p>
+                    <p className="text-sm text-muted-foreground">{group.plugin_description || 'Metadata-library-specific runtime settings.'}</p>
                     {group.capabilities?.supported_input_types?.length > 0 && (
                         <p className="text-xs text-muted-foreground mt-1">
                             Supported field types: {group.capabilities.supported_input_types.join(', ')}

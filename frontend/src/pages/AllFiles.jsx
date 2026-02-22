@@ -339,7 +339,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                                 {orderedAttributes.map(attr => (
                                     <div key={attr.id}>
                                         {(() => {
-                                            const isReadOnlyComputed = currentCategory?.plugin_key === 'comicrack_core'
+                                            const isReadOnlyComputed = currentCategory?.plugin_key === 'comics_core'
                                                 && READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key);
                                             return (
                                                 <>

@@ -3,7 +3,7 @@ import { metadataService } from '../services/metadata';
 import { itemsService } from '../services/items';
 import { accountsService } from '../services/accounts';
 import { driveService } from '../services/drive';
-import { getCategoryPluginView } from '../plugins/metadataCategoryViews';
+import { getCategoryLibraryView } from '../metadataLibraries/categoryViews';
 import { buildCoverCacheKey, getCachedCoverUrl, setCachedCoverUrl } from '../utils/coverCache';
 import {
     getSelectOptions,
@@ -16,7 +16,7 @@ import {
     Plus, Trash2, ChevronRight, ChevronDown, ChevronLeft,
     Database, Loader2, Tag, Hash, ArrowLeft,
     File, Folder, ArrowUpDown, ArrowUp, ArrowDown,
-    CheckSquare, Square, Eye, Search, Filter, User, Pencil,
+    CheckSquare, Square, Eye, Search, Filter, User, Pencil, BookOpen, Power,
     Download, ArrowRightLeft, XCircle, Check, X
 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -73,9 +73,9 @@ const CategoryItemsTable = ({ category, onBack }) => {
         item_type: '',
         attributes: {}
     });
-    const pluginView = getCategoryPluginView(category);
-    const supportsGallery = !!pluginView?.modes?.includes('gallery');
-    const supportsSeriesTracker = !!pluginView?.modes?.includes('series_tracker');
+    const libraryView = getCategoryLibraryView(category);
+    const supportsGallery = !!libraryView?.modes?.includes('gallery');
+    const supportsSeriesTracker = !!libraryView?.modes?.includes('series_tracker');
     const metadataSortOptions = useMemo(
         () =>
             (category.attributes || []).map((attr) => ({
@@ -442,10 +442,10 @@ const CategoryItemsTable = ({ category, onBack }) => {
         }
 
         const coverAttr = (category.attributes || []).find(
-            (attr) => attr.plugin_field_key === pluginView?.gallery?.coverField
+            (attr) => attr.plugin_field_key === libraryView?.gallery?.coverField
         );
         const coverAccountAttr = (category.attributes || []).find(
-            (attr) => attr.plugin_field_key === pluginView?.gallery?.coverAccountField
+            (attr) => attr.plugin_field_key === libraryView?.gallery?.coverAccountField
         );
         if (!coverAttr) {
             setCoverUrlsByItemId({});
@@ -505,7 +505,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
         return () => {
             cancelled = true;
         };
-    }, [supportsGallery, viewMode, items, category.attributes, pluginView]);
+    }, [supportsGallery, viewMode, items, category.attributes, libraryView]);
 
     const handleSort = (column) => {
         if (sort.by === column) {
@@ -554,7 +554,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
 
     const isReadOnlyAttribute = (attr) => {
         if (!attr) return true;
-        if (attr.plugin_key === 'comicrack_core') {
+        if (attr.plugin_key === 'comics_core') {
             return READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key);
         }
         return Boolean(attr.is_locked || attr.managed_by_plugin);
@@ -648,11 +648,11 @@ const CategoryItemsTable = ({ category, onBack }) => {
         return attributes.find((attr) => String(attr.name || '').trim().toLowerCase() === normalizedFallback) || null;
     };
 
-    const titleAttr = findAttr(pluginView?.gallery?.titleField, 'Title');
-    const subtitleAttr = findAttr(pluginView?.gallery?.subtitleField, 'Series');
-    const pageCountAttr = findAttr(pluginView?.gallery?.pageCountField, 'Page Count');
-    const volumeAttr = findAttr(pluginView?.gallery?.volumeField, 'Volume');
-    const issueNumberAttr = findAttr(pluginView?.gallery?.issueNumberField, 'Issue Number');
+    const titleAttr = findAttr(libraryView?.gallery?.titleField, 'Title');
+    const subtitleAttr = findAttr(libraryView?.gallery?.subtitleField, 'Series');
+    const pageCountAttr = findAttr(libraryView?.gallery?.pageCountField, 'Page Count');
+    const volumeAttr = findAttr(libraryView?.gallery?.volumeField, 'Volume');
+    const issueNumberAttr = findAttr(libraryView?.gallery?.issueNumberField, 'Issue Number');
     const statusLabel = {
         ongoing: 'Ongoing',
         completed: 'Completed',
@@ -1492,9 +1492,13 @@ const CategoryItemsTable = ({ category, onBack }) => {
 // -- Main Page --
 export default function MetadataManager() {
     const [categories, setCategories] = useState([]);
+    const [libraries, setLibraries] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [librariesLoading, setLibrariesLoading] = useState(true);
+    const [activeView, setActiveView] = useState('metadata');
     const [expandedCategory, setExpandedCategory] = useState(null);
     const [viewingCategory, setViewingCategory] = useState(null);
+    const [togglingLibraryKey, setTogglingLibraryKey] = useState(null);
     const { showToast } = useToast();
 
     // Create Category State
@@ -1518,6 +1522,19 @@ export default function MetadataManager() {
     const [deletingCategory, setDeletingCategory] = useState(false);
     const [layoutBuilderOpen, setLayoutBuilderOpen] = useState(false);
 
+    const loadLibraries = useCallback(async () => {
+        try {
+            setLibrariesLoading(true);
+            const rows = await metadataService.listMetadataLibraries();
+            setLibraries(rows || []);
+        } catch (error) {
+            console.error(error);
+            showToast('Failed to load metadata libraries', 'error');
+        } finally {
+            setLibrariesLoading(false);
+        }
+    }, [showToast]);
+
     const loadCategories = useCallback(async () => {
         try {
             setLoading(true);
@@ -1534,6 +1551,38 @@ export default function MetadataManager() {
     useEffect(() => {
         loadCategories();
     }, [loadCategories]);
+
+    useEffect(() => {
+        loadLibraries();
+    }, [loadLibraries]);
+
+    const knownLibraries = useMemo(
+        () => (
+            libraries.length > 0
+                ? libraries
+                : [{ key: 'comics_core', name: 'Comics Core', description: 'Managed comics metadata schema.', is_active: false }]
+        ),
+        [libraries]
+    );
+
+    const toggleLibrary = async (library) => {
+        try {
+            setTogglingLibraryKey(library.key);
+            if (library.is_active) {
+                await metadataService.deactivateMetadataLibrary(library.key);
+                showToast(`${library.name} disabled`, 'success');
+            } else {
+                await metadataService.activateMetadataLibrary(library.key);
+                showToast(`${library.name} enabled`, 'success');
+            }
+            await Promise.all([loadLibraries(), loadCategories()]);
+        } catch (error) {
+            const message = error?.response?.data?.detail || 'Failed to update metadata library';
+            showToast(message, 'error');
+        } finally {
+            setTogglingLibraryKey(null);
+        }
+    };
 
     const handleCreateCategory = async (e) => {
         e.preventDefault();
@@ -1552,7 +1601,7 @@ export default function MetadataManager() {
     const openDeleteCategoryModal = (category, e) => {
         e.stopPropagation();
         if (category.is_locked || category.managed_by_plugin) {
-            showToast('Plugin-managed categories cannot be deleted. Deactivate the plugin instead.', 'error');
+            showToast('Library-managed categories cannot be deleted. Deactivate the metadata library instead.', 'error');
             return;
         }
         setDeleteCategoryTarget(category);
@@ -1602,7 +1651,7 @@ export default function MetadataManager() {
 
     const handleDeleteAttribute = async (attr) => {
         if (attr.is_locked || attr.managed_by_plugin) {
-            showToast('Plugin-managed attributes cannot be deleted', 'error');
+            showToast('Library-managed attributes cannot be deleted', 'error');
             return;
         }
         if (!window.confirm('Delete this attribute?')) return;
@@ -1617,7 +1666,7 @@ export default function MetadataManager() {
 
     const openEditAttributeModal = (attr) => {
         if (attr.is_locked || attr.managed_by_plugin) {
-            showToast('Plugin-managed attributes cannot be edited', 'error');
+            showToast('Library-managed attributes cannot be edited', 'error');
             return;
         }
         setEditAttributeTarget(attr);
@@ -1679,150 +1728,232 @@ export default function MetadataManager() {
         <div className="flex flex-col h-screen">
             {/* Header */}
             <div className="p-4 border-b flex items-center justify-between bg-background sticky top-0 z-10">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
                     <h1 className="text-lg font-semibold text-foreground">Metadata Manager</h1>
                     <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-0.5 rounded-full">
-                        {categories.length} categories
+                        {activeView === 'metadata'
+                            ? `${categories.length} categories`
+                            : `${knownLibraries.length} libraries`}
                     </span>
+                    <div className="inline-flex items-center gap-1 border rounded-md p-1 bg-muted/20">
+                        <button
+                            type="button"
+                            onClick={() => setActiveView('metadata')}
+                            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                                activeView === 'metadata'
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                            }`}
+                        >
+                            Metadata
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setActiveView('libraries')}
+                            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                                activeView === 'libraries'
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                            }`}
+                        >
+                            Libraries
+                        </button>
+                    </div>
                 </div>
                 <div className="flex items-center gap-2">
-                    <button
-                        onClick={() => setLayoutBuilderOpen(true)}
-                        disabled={categories.length === 0}
-                        className="flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-accent text-sm font-medium transition-colors disabled:opacity-40"
-                    >
-                        Form Layout
-                    </button>
-                    <button
-                        onClick={() => setCreateModalOpen(true)}
-                        className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 text-sm font-medium transition-colors"
-                    >
-                        <Plus size={16} /> New Category
-                    </button>
+                    {activeView === 'metadata' && (
+                        <>
+                            <button
+                                onClick={() => setLayoutBuilderOpen(true)}
+                                disabled={categories.length === 0}
+                                className="flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-accent text-sm font-medium transition-colors disabled:opacity-40"
+                            >
+                                Form Layout
+                            </button>
+                            <button
+                                onClick={() => setCreateModalOpen(true)}
+                                className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 text-sm font-medium transition-colors"
+                            >
+                                <Plus size={16} /> New Category
+                            </button>
+                        </>
+                    )}
                 </div>
             </div>
 
             {/* Content */}
             <main className="flex-1 overflow-auto p-4">
-                {loading ? (
-                    <div className="flex justify-center p-12">
-                        <Loader2 className="animate-spin text-primary" size={32} />
-                    </div>
-                ) : categories.length === 0 ? (
-                    <div className="text-center p-12 text-muted-foreground border border-dashed rounded-lg bg-muted/50">
-                        <Database className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                        <h3 className="text-lg font-medium mb-1">No categories defined</h3>
-                        <p className="text-sm">Create a category to start organizing your file metadata.</p>
-                    </div>
+                {activeView === 'libraries' ? (
+                    <section className="border rounded-lg bg-card p-4">
+                        <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                                <h2 className="text-base font-semibold text-foreground">Metadata Libraries</h2>
+                                <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-0.5 rounded-full">
+                                    {knownLibraries.length} available
+                                </span>
+                            </div>
+                        </div>
+
+                        {librariesLoading ? (
+                            <div className="flex justify-center py-6">
+                                <Loader2 className="animate-spin text-primary" size={22} />
+                            </div>
+                        ) : (
+                            <div className="grid gap-3">
+                                {knownLibraries.map((library) => (
+                                    <div key={library.key} className="border rounded-md bg-background p-3 flex items-center justify-between gap-3">
+                                        <div className="flex items-start gap-3 min-w-0">
+                                            <div className="p-2 rounded-md bg-primary/10 text-primary">
+                                                <BookOpen size={16} />
+                                            </div>
+                                            <div className="min-w-0">
+                                                <div className="font-semibold">{library.name}</div>
+                                                <div className="text-xs text-muted-foreground">{library.key}</div>
+                                                {library.description && (
+                                                    <p className="text-sm text-muted-foreground mt-1">{library.description}</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={() => toggleLibrary(library)}
+                                            disabled={togglingLibraryKey === library.key}
+                                            className={`inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors disabled:opacity-60 ${
+                                                library.is_active
+                                                    ? 'bg-destructive/10 text-destructive hover:bg-destructive/20'
+                                                    : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                                            }`}
+                                        >
+                                            {togglingLibraryKey === library.key
+                                                ? <Loader2 size={14} className="animate-spin" />
+                                                : <Power size={14} />}
+                                            {library.is_active ? 'Disable' : 'Enable'}
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </section>
                 ) : (
-                    <div className="space-y-3">
-                        {categories.map(cat => (
-                            <div key={cat.id} className="border rounded-lg bg-card overflow-hidden">
-                                {/* Category Header */}
-                                <div
-                                    className="p-4 flex items-center justify-between cursor-pointer hover:bg-accent/50 transition-colors"
-                                    onClick={() => toggleExpand(cat.id)}
-                                >
-                                    <div className="flex items-center gap-3 min-w-0">
-                                        {expandedCategory === cat.id
-                                            ? <ChevronDown size={18} className="text-muted-foreground shrink-0" />
-                                            : <ChevronRight size={18} className="text-muted-foreground shrink-0" />
-                                        }
-                                        <div className="min-w-0">
-                                            <h3 className="font-semibold">{cat.name}</h3>
-                                            {cat.description && <p className="text-sm text-muted-foreground truncate">{cat.description}</p>}
+                    loading ? (
+                        <div className="flex justify-center p-12">
+                            <Loader2 className="animate-spin text-primary" size={32} />
+                        </div>
+                    ) : categories.length === 0 ? (
+                        <div className="text-center p-12 text-muted-foreground border border-dashed rounded-lg bg-muted/50">
+                            <Database className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                            <h3 className="text-lg font-medium mb-1">No categories defined</h3>
+                            <p className="text-sm">Create a category to start organizing your file metadata.</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            {categories.map(cat => (
+                                <div key={cat.id} className="border rounded-lg bg-card overflow-hidden">
+                                    {/* Category Header */}
+                                    <div
+                                        className="p-4 flex items-center justify-between cursor-pointer hover:bg-accent/50 transition-colors"
+                                        onClick={() => toggleExpand(cat.id)}
+                                    >
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            {expandedCategory === cat.id
+                                                ? <ChevronDown size={18} className="text-muted-foreground shrink-0" />
+                                                : <ChevronRight size={18} className="text-muted-foreground shrink-0" />
+                                            }
+                                            <div className="min-w-0">
+                                                <h3 className="font-semibold">{cat.name}</h3>
+                                                {cat.description && <p className="text-sm text-muted-foreground truncate">{cat.description}</p>}
+                                            </div>
                                         </div>
-                                    </div>
 
-                                    <div className="flex items-center gap-3 shrink-0">
-                                        <div className="flex items-center gap-2 text-sm">
-                                            <span className="bg-primary/10 text-primary px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-1.5">
-                                                <Hash size={12} />
-                                                {cat.item_count} items
-                                            </span>
-                                            <span className="bg-secondary text-secondary-foreground px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-1.5">
-                                                <Tag size={12} />
-                                                {cat.attributes.length} attrs
-                                            </span>
-                                        </div>
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); setViewingCategory(cat); }}
-                                            className="p-2 hover:bg-primary/10 text-muted-foreground hover:text-primary rounded-md transition-colors"
-                                            title="View items in this category"
-                                        >
-                                            <Eye size={18} />
-                                        </button>
-                                        <button
-                                            onClick={(e) => openDeleteCategoryModal(cat, e)}
-                                            disabled={cat.is_locked || cat.managed_by_plugin}
-                                            className="p-2 hover:bg-destructive/10 text-muted-foreground hover:text-destructive rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                                            title="Delete category"
-                                        >
-                                            <Trash2 size={18} />
-                                        </button>
-                                    </div>
-                                </div>
-
-                                {/* Expanded Attributes */}
-                                {expandedCategory === cat.id && (
-                                    <div className="p-4 border-t bg-muted/20">
-                                        <div className="flex justify-between items-center mb-4">
-                                            <h4 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Attributes</h4>
+                                        <div className="flex items-center gap-3 shrink-0">
+                                            <div className="flex items-center gap-2 text-sm">
+                                                <span className="bg-primary/10 text-primary px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-1.5">
+                                                    <Hash size={12} />
+                                                    {cat.item_count} items
+                                                </span>
+                                                <span className="bg-secondary text-secondary-foreground px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-1.5">
+                                                    <Tag size={12} />
+                                                    {cat.attributes.length} attrs
+                                                </span>
+                                            </div>
                                             <button
-                                                onClick={() => setAddAttributeCategory(cat)}
-                                                className="text-sm text-primary hover:underline flex items-center gap-1"
+                                                onClick={(e) => { e.stopPropagation(); setViewingCategory(cat); }}
+                                                className="p-2 hover:bg-primary/10 text-muted-foreground hover:text-primary rounded-md transition-colors"
+                                                title="View items in this category"
                                             >
-                                                <Plus size={14} /> Add Attribute
+                                                <Eye size={18} />
+                                            </button>
+                                            <button
+                                                onClick={(e) => openDeleteCategoryModal(cat, e)}
+                                                disabled={cat.is_locked || cat.managed_by_plugin}
+                                                className="p-2 hover:bg-destructive/10 text-muted-foreground hover:text-destructive rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                                title="Delete category"
+                                            >
+                                                <Trash2 size={18} />
                                             </button>
                                         </div>
-
-                                        {cat.attributes.length === 0 ? (
-                                            <p className="text-sm text-muted-foreground italic">No attributes defined yet.</p>
-                                        ) : (
-                                            <div className="grid gap-2">
-                                                {cat.attributes.map(attr => (
-                                                    <div key={attr.id} className="flex items-center justify-between p-3 bg-background border rounded-md">
-                                                        <div className="flex items-center gap-4">
-                                                            <div className="font-medium">{attr.name}</div>
-                                                            <div className="text-xs px-2 py-0.5 bg-secondary rounded-full text-secondary-foreground">
-                                                                {attr.data_type}
-                                                            </div>
-                                                            {attr.is_required && (
-                                                                <div className="text-xs text-amber-600 font-medium">Required</div>
-                                                            )}
-                                                            {attr.data_type === 'select' && attr.options?.options && (
-                                                                <div className="text-xs text-muted-foreground">
-                                                                    Options: {getSelectOptions(attr.options).join(', ')}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                        <div className="flex items-center gap-1">
-                                                            <button
-                                                                onClick={() => openEditAttributeModal(attr)}
-                                                                disabled={attr.is_locked || attr.managed_by_plugin}
-                                                                className="text-muted-foreground hover:text-primary p-1 rounded disabled:opacity-40 disabled:cursor-not-allowed"
-                                                                title="Edit attribute"
-                                                            >
-                                                                <Pencil size={16} />
-                                                            </button>
-                                                            <button
-                                                                onClick={() => handleDeleteAttribute(attr)}
-                                                                disabled={attr.is_locked || attr.managed_by_plugin}
-                                                                className="text-muted-foreground hover:text-destructive p-1 rounded disabled:opacity-40 disabled:cursor-not-allowed"
-                                                                title="Delete attribute"
-                                                            >
-                                                                <Trash2 size={16} />
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
                                     </div>
-                                )}
-                            </div>
-                        ))}
-                    </div>
+
+                                    {/* Expanded Attributes */}
+                                    {expandedCategory === cat.id && (
+                                        <div className="p-4 border-t bg-muted/20">
+                                            <div className="flex justify-between items-center mb-4">
+                                                <h4 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Attributes</h4>
+                                                <button
+                                                    onClick={() => setAddAttributeCategory(cat)}
+                                                    className="text-sm text-primary hover:underline flex items-center gap-1"
+                                                >
+                                                    <Plus size={14} /> Add Attribute
+                                                </button>
+                                            </div>
+
+                                            {cat.attributes.length === 0 ? (
+                                                <p className="text-sm text-muted-foreground italic">No attributes defined yet.</p>
+                                            ) : (
+                                                <div className="grid gap-2">
+                                                    {cat.attributes.map(attr => (
+                                                        <div key={attr.id} className="flex items-center justify-between p-3 bg-background border rounded-md">
+                                                            <div className="flex items-center gap-4">
+                                                                <div className="font-medium">{attr.name}</div>
+                                                                <div className="text-xs px-2 py-0.5 bg-secondary rounded-full text-secondary-foreground">
+                                                                    {attr.data_type}
+                                                                </div>
+                                                                {attr.is_required && (
+                                                                    <div className="text-xs text-amber-600 font-medium">Required</div>
+                                                                )}
+                                                                {attr.data_type === 'select' && attr.options?.options && (
+                                                                    <div className="text-xs text-muted-foreground">
+                                                                        Options: {getSelectOptions(attr.options).join(', ')}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                            <div className="flex items-center gap-1">
+                                                                <button
+                                                                    onClick={() => openEditAttributeModal(attr)}
+                                                                    disabled={attr.is_locked || attr.managed_by_plugin}
+                                                                    className="text-muted-foreground hover:text-primary p-1 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                                                                    title="Edit attribute"
+                                                                >
+                                                                    <Pencil size={16} />
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleDeleteAttribute(attr)}
+                                                                    disabled={attr.is_locked || attr.managed_by_plugin}
+                                                                    className="text-muted-foreground hover:text-destructive p-1 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                                                                    title="Delete attribute"
+                                                                >
+                                                                    <Trash2 size={16} />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )
                 )}
             </main>
 
