@@ -4,8 +4,10 @@ This module provides an async client for interacting with Microsoft Graph API
 to access OneDrive files and user information.
 """
 
+import asyncio
 import logging
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -20,11 +22,19 @@ GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 GRAPH_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
 
+def _encode_drive_path_component(value: str) -> str:
+    """Encode a single OneDrive path component for Graph path-style endpoints."""
+    return quote(value, safe="")
+
+
 class GraphClient:
     """Async client for Microsoft Graph API.
 
     Provides methods to access OneDrive files and user information.
     """
+
+    _shared_client: httpx.AsyncClient | None = None
+    _shared_client_lock: asyncio.Lock | None = None
 
     def __init__(self, token_manager: TokenManager) -> None:
         """Initialize the Graph client.
@@ -35,6 +45,28 @@ class GraphClient:
             Token manager for obtaining valid access tokens.
         """
         self._token_manager = token_manager
+
+    @classmethod
+    async def _get_http_client(cls) -> httpx.AsyncClient:
+        if cls._shared_client is not None:
+            return cls._shared_client
+        if cls._shared_client_lock is None:
+            cls._shared_client_lock = asyncio.Lock()
+        async with cls._shared_client_lock:
+            if cls._shared_client is None:
+                cls._shared_client = httpx.AsyncClient(timeout=GRAPH_TIMEOUT)
+        return cls._shared_client
+
+    @classmethod
+    async def close_http_client(cls) -> None:
+        if cls._shared_client is None:
+            return
+        if cls._shared_client_lock is None:
+            cls._shared_client_lock = asyncio.Lock()
+        async with cls._shared_client_lock:
+            if cls._shared_client is not None:
+                await cls._shared_client.aclose()
+                cls._shared_client = None
 
     async def _request(
         self,
@@ -70,19 +102,21 @@ class GraphClient:
             url = endpoint
         else:
             url = f"{GRAPH_BASE_URL}{endpoint}"
+        request_timeout = kwargs.pop("timeout", GRAPH_TIMEOUT)
 
         async def _send_request(access_token: str) -> httpx.Response:
+            client = await self._get_http_client()
             headers = {
                 "Authorization": f"Bearer {access_token}",
                 "Content-Type": "application/json",
             }
-            async with httpx.AsyncClient(timeout=GRAPH_TIMEOUT) as client:
-                return await client.request(
-                    method=method,
-                    url=url,
-                    headers=headers,
-                    **kwargs,
-                )
+            return await client.request(
+                method=method,
+                url=url,
+                headers=headers,
+                timeout=request_timeout,
+                **kwargs,
+            )
 
         try:
             access_token = await self._token_manager.get_valid_access_token(account)
@@ -276,8 +310,8 @@ class GraphClient:
         download_timeout = httpx.Timeout(timeout_seconds, connect=10.0) if timeout_seconds else GRAPH_TIMEOUT
 
         try:
-            async with httpx.AsyncClient(timeout=download_timeout) as client:
-                response = await client.get(download_url)
+            client = await self._get_http_client()
+            response = await client.get(download_url, timeout=download_timeout)
         except httpx.TimeoutException as exc:
             raise GraphAPIError(
                 f"Timed out downloading file {filename}",
@@ -331,16 +365,16 @@ class GraphClient:
         download_timeout = httpx.Timeout(timeout_seconds, connect=10.0) if timeout_seconds else GRAPH_TIMEOUT
 
         try:
-            async with httpx.AsyncClient(timeout=download_timeout) as client:
-                async with client.stream("GET", download_url) as response:
-                    if response.status_code >= 400:
-                         await response.read() # Read error
-                         raise GraphAPIError(f"Download failed: {response.status_code}", status_code=response.status_code)
-                    
-                    with open(target_path, "wb") as f:
-                        async for chunk in response.aiter_bytes():
-                            f.write(chunk)
-                            
+            client = await self._get_http_client()
+            async with client.stream("GET", download_url, timeout=download_timeout) as response:
+                if response.status_code >= 400:
+                    await response.read()  # Read error body.
+                    raise GraphAPIError(f"Download failed: {response.status_code}", status_code=response.status_code)
+
+                with open(target_path, "wb") as f:
+                    async for chunk in response.aiter_bytes():
+                        f.write(chunk)
+
         except httpx.TimeoutException as exc:
             raise GraphAPIError(
                 f"Timed out downloading file {filename}",
@@ -572,10 +606,11 @@ class GraphClient:
         """
         access_token = await self._token_manager.get_valid_access_token(account)
 
+        encoded_filename = _encode_drive_path_component(filename)
         if folder_id == "root":
-            endpoint = f"/me/drive/root:/{filename}:/content"
+            endpoint = f"/me/drive/root:/{encoded_filename}:/content"
         else:
-            endpoint = f"/me/drive/items/{folder_id}:/{filename}:/content"
+            endpoint = f"/me/drive/items/{folder_id}:/{encoded_filename}:/content"
 
         url = f"{GRAPH_BASE_URL}{endpoint}"
         
@@ -595,15 +630,16 @@ class GraphClient:
                      yield data
              request_content = file_iterator()
         
-        async with httpx.AsyncClient() as client:
-            response = await client.put(
-                url,
-                content=request_content,
-                headers={
-                    "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "application/octet-stream",
-                },
-            )
+        client = await self._get_http_client()
+        response = await client.put(
+            url,
+            content=request_content,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/octet-stream",
+            },
+            timeout=GRAPH_TIMEOUT,
+        )
 
         if response.status_code >= 400:
             error_data = response.json() if response.content else {}
@@ -637,10 +673,11 @@ class GraphClient:
         dict
             Upload session info with uploadUrl and expiration.
         """
+        encoded_filename = _encode_drive_path_component(filename)
         if folder_id == "root":
-            endpoint = f"/me/drive/root:/{filename}:/createUploadSession"
+            endpoint = f"/me/drive/root:/{encoded_filename}:/createUploadSession"
         else:
-            endpoint = f"/me/drive/items/{folder_id}:/{filename}:/createUploadSession"
+            endpoint = f"/me/drive/items/{folder_id}:/{encoded_filename}:/createUploadSession"
 
         body = {
             "item": {
@@ -684,15 +721,16 @@ class GraphClient:
         dict
             Upload progress or completed item.
         """
-        async with httpx.AsyncClient(timeout=GRAPH_TIMEOUT) as client:
-            response = await client.put(
-                upload_url,
-                content=chunk,
-                headers={
-                    "Content-Length": str(len(chunk)),
-                    "Content-Range": f"bytes {start_byte}-{end_byte}/{total_size}",
-                },
-            )
+        client = await self._get_http_client()
+        response = await client.put(
+            upload_url,
+            content=chunk,
+            headers={
+                "Content-Length": str(len(chunk)),
+                "Content-Range": f"bytes {start_byte}-{end_byte}/{total_size}",
+            },
+            timeout=GRAPH_TIMEOUT,
+        )
 
         if response.status_code >= 400:
             error_data = response.json() if response.content else {}
@@ -868,15 +906,16 @@ class GraphClient:
         access_token = await self._token_manager.get_valid_access_token(account)
         url = f"{GRAPH_BASE_URL}/me/drive/items/{item_id}/copy"
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                json=body,
-                headers={
-                    "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "application/json",
-                },
-            )
+        client = await self._get_http_client()
+        response = await client.post(
+            url,
+            json=body,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+            timeout=GRAPH_TIMEOUT,
+        )
 
         if response.status_code != 202:
             error_data = response.json() if response.content else {}
@@ -888,3 +927,8 @@ class GraphClient:
             raise GraphAPIError("Copy accepted but no monitor URL returned")
 
         return location
+
+
+async def close_graph_http_client() -> None:
+    """Close shared Graph HTTP client used across request scopes."""
+    await GraphClient.close_http_client()

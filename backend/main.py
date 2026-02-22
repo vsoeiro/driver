@@ -17,6 +17,8 @@ from backend.api.routes import accounts, admin, auth, drive, jobs, metadata, ite
 from backend.core.config import get_settings
 from backend.core.exceptions import DriveOrganizerError
 from backend.db.session import async_session_maker
+from backend.services.google_drive_client import close_google_drive_http_client
+from backend.services.graph_client import close_graph_http_client
 from backend.services.job_queue import close_job_queue
 from backend.services.sync_scheduler import DailySyncScheduler
 
@@ -60,6 +62,8 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         pass
 
+    await close_graph_http_client()
+    await close_google_drive_http_client()
     await close_job_queue()
         
     logger.info("Shutting down Drive Organizer API")

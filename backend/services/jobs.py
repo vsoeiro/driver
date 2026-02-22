@@ -167,24 +167,29 @@ class JobService:
         return job
 
     async def _build_avg_duration_by_type(self) -> tuple[dict[str, float], float]:
-        stmt = select(Job).where(
-            Job.status == "COMPLETED",
-            Job.started_at.is_not(None),
-            Job.completed_at.is_not(None),
-        ).order_by(Job.completed_at.desc()).limit(500)
+        stmt = (
+            select(Job.type, Job.started_at, Job.completed_at)
+            .where(
+                Job.status == "COMPLETED",
+                Job.started_at.is_not(None),
+                Job.completed_at.is_not(None),
+            )
+            .order_by(Job.completed_at.desc())
+            .limit(500)
+        )
         result = await self.session.execute(stmt)
-        rows = result.scalars().all()
+        rows = result.all()
         max_per_type = 10
         max_global = 10
         durations_by_type: dict[str, list[float]] = {}
         all_durations: list[float] = []
-        for row in rows:
-            if not row.started_at or not row.completed_at:
+        for job_type, started_at, completed_at in rows:
+            if not started_at or not completed_at:
                 continue
-            duration = max(1.0, (row.completed_at - row.started_at).total_seconds())
+            duration = max(1.0, (completed_at - started_at).total_seconds())
             if len(all_durations) < max_global:
                 all_durations.append(duration)
-            bucket = durations_by_type.setdefault(row.type, [])
+            bucket = durations_by_type.setdefault(str(job_type), [])
             if len(bucket) < max_per_type:
                 bucket.append(duration)
 
@@ -199,52 +204,61 @@ class JobService:
             global_avg = 60.0
         return avg_by_type, max(1.0, global_avg)
 
-    async def _build_pending_job_estimates(self) -> dict[UUID, dict[str, Any]]:
+    async def _build_pending_job_estimates(
+        self,
+        *,
+        target_job_ids: set[UUID] | None = None,
+    ) -> dict[UUID, dict[str, Any]]:
         settings = get_settings()
         worker_slots = max(1, int(settings.worker_concurrency))
         now = datetime.now(UTC)
         avg_by_type, global_avg = await self._build_avg_duration_by_type()
+        pending_targets = set(target_job_ids or set())
 
         running_stmt = (
-            select(Job)
+            select(Job.type, Job.started_at, Job.created_at)
             .where(Job.status == "RUNNING")
             .order_by(Job.started_at.asc().nullslast(), Job.created_at.asc())
         )
-        running_rows = (await self.session.execute(running_stmt)).scalars().all()
+        running_rows = (await self.session.execute(running_stmt)).all()
         slot_available_at = [0.0 for _ in range(worker_slots)]
-        for row in running_rows:
-            avg_duration = avg_by_type.get(row.type, global_avg)
+        for job_type, started_at, _created_at in running_rows:
+            avg_duration = avg_by_type.get(str(job_type), global_avg)
             elapsed = max(
                 0.0,
-                (now - row.started_at).total_seconds() if row.started_at else 0.0,
+                (now - started_at).total_seconds() if started_at else 0.0,
             )
             remaining = max(1.0, avg_duration - elapsed)
             slot_index = min(range(worker_slots), key=lambda i: slot_available_at[i])
             slot_available_at[slot_index] += remaining
 
         queued_stmt = (
-            select(Job)
+            select(Job.id, Job.type, Job.status, Job.next_retry_at, Job.created_at)
             .where(Job.status.in_(tuple(QUEUE_PENDING_STATUSES)))
             .order_by(Job.created_at.asc())
         )
-        queued_rows = (await self.session.execute(queued_stmt)).scalars().all()
+        queued_rows = (await self.session.execute(queued_stmt)).all()
 
         estimates: dict[UUID, dict[str, Any]] = {}
         queue_position = 0
-        for row in queued_rows:
+        for row_id, row_type, row_status, row_next_retry_at, row_created_at in queued_rows:
             queue_position += 1
-            avg_duration = avg_by_type.get(row.type, global_avg)
-            ready_at = row.next_retry_at if row.status == "RETRY_SCHEDULED" and row.next_retry_at else row.created_at
+            avg_duration = avg_by_type.get(str(row_type), global_avg)
+            ready_at = row_next_retry_at if row_status == "RETRY_SCHEDULED" and row_next_retry_at else row_created_at
             ready_delay = max(0.0, (ready_at - now).total_seconds()) if ready_at else 0.0
             slot_index = min(range(worker_slots), key=lambda i: slot_available_at[i])
             estimated_wait = max(slot_available_at[slot_index], ready_delay)
             slot_available_at[slot_index] = estimated_wait + avg_duration
-            estimates[row.id] = {
+            estimates[row_id] = {
                 "queue_position": queue_position,
                 "estimated_wait_seconds": int(round(estimated_wait)),
                 "estimated_duration_seconds": int(round(avg_duration)),
                 "estimated_start_at": now + timedelta(seconds=int(round(estimated_wait))),
             }
+            if pending_targets:
+                pending_targets.discard(row_id)
+                if not pending_targets:
+                    break
         return estimates
 
     async def create_job(self, job_in: JobCreate, *, reprocessed_from_job_id: UUID | None = None) -> Job:
@@ -539,6 +553,7 @@ class JobService:
         statuses: Sequence[str] | None = None,
         job_types: Sequence[str] | None = None,
         created_after: datetime | None = None,
+        include_estimates: bool = True,
     ) -> Sequence[Job]:
         """Get a list of jobs ordered by creation date (newest first).
 
@@ -554,7 +569,6 @@ class JobService:
         Sequence[Job]
             List of jobs.
         """
-        await self.recover_stale_running_jobs()
         stmt = (
             select(Job)
             .order_by(Job.created_at.desc())
@@ -577,10 +591,19 @@ class JobService:
             try:
                 result = await self.session.execute(stmt)
                 jobs = result.scalars().all()
-                estimates = await self._build_pending_job_estimates()
+                pending_job_ids = {
+                    job.id
+                    for job in jobs
+                    if job.status in QUEUE_PENDING_STATUSES
+                }
+                estimates: dict[UUID, dict[str, Any]] = {}
+                if include_estimates and pending_job_ids:
+                    estimates = await self._build_pending_job_estimates(
+                        target_job_ids=pending_job_ids,
+                    )
                 for job in jobs:
                     self._normalize_job_json_fields(job)
-                    estimate = estimates.get(job.id)
+                    estimate = estimates.get(job.id) if include_estimates else None
                     if estimate and job.status in QUEUE_PENDING_STATUSES:
                         job.queue_position = estimate["queue_position"]
                         job.estimated_wait_seconds = estimate["estimated_wait_seconds"]

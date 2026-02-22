@@ -230,13 +230,13 @@ export default function RulesManager() {
     };
 
     return (
-        <div className="flex flex-col h-screen">
-            <div className="p-4 border-b bg-background">
-                <h1 className="text-lg font-semibold text-foreground">Automatic Rules</h1>
-                <p className="text-sm text-muted-foreground">Preview before apply, then run in background.</p>
+        <div className="app-page">
+            <div className="page-header">
+                <h1 className="page-title">Automatic Rules</h1>
+                <p className="page-subtitle">Preview before apply, then run in background.</p>
             </div>
 
-            <div className="p-4 border-b bg-muted/20">
+            <div className="surface-card mb-4 p-4">
                 <form onSubmit={handleCreateRule} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                     <input
                         className="border rounded-md p-2 bg-background text-sm"
@@ -285,7 +285,7 @@ export default function RulesManager() {
                         onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
                     />
 
-                    <div className="md:col-span-2 lg:col-span-3 border rounded-md p-3 bg-background">
+                    <div className="md:col-span-2 lg:col-span-3 rounded-lg border border-border/70 p-3 bg-background">
                         <div className="text-sm font-medium mb-3">Actions</div>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                             <label className="flex items-center gap-2 text-sm">
@@ -390,7 +390,7 @@ export default function RulesManager() {
                             type="button"
                             onClick={handlePreview}
                             disabled={previewing || !form.target_category_id}
-                            className="px-3 py-2 rounded-md border text-sm hover:bg-accent disabled:opacity-50 inline-flex items-center gap-2"
+                            className="btn-refresh disabled:opacity-50"
                         >
                             {previewing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
                             Preview
@@ -398,7 +398,7 @@ export default function RulesManager() {
                         <button
                             type="submit"
                             disabled={saving || !form.target_category_id}
-                            className="px-3 py-2 rounded-md bg-primary text-primary-foreground text-sm hover:bg-primary/90 disabled:opacity-50 inline-flex items-center gap-2"
+                            className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-lg shadow-primary/20 transition-transform hover:-translate-y-[1px] hover:bg-primary/92 disabled:opacity-50"
                         >
                             <Plus className="w-4 h-4" />
                             Create Rule
@@ -406,7 +406,7 @@ export default function RulesManager() {
                     </div>
                 </form>
                 {preview && (
-                    <div className="mt-3 text-sm border rounded-md p-3 bg-background">
+                    <div className="mt-3 text-sm rounded-lg border border-border/70 p-3 bg-background">
                         <div className="font-medium mb-1">Preview</div>
                         <div className="text-muted-foreground">
                             Matches: {preview.total_matches} | Change: {preview.to_change} | Already compliant: {preview.already_compliant}
@@ -415,16 +415,19 @@ export default function RulesManager() {
                 )}
             </div>
 
-            <div className="flex-1 overflow-auto p-4">
+            <div className="flex-1 overflow-auto">
                 {loading ? (
                     <div className="flex justify-center p-8">
                         <Loader2 className="animate-spin" />
                     </div>
                 ) : rules.length === 0 ? (
-                    <div className="text-center text-muted-foreground p-8">No rules created yet.</div>
+                    <div className="empty-state">
+                        <div className="empty-state-title">No rules created yet</div>
+                        <p className="empty-state-text">Create your first automation rule above to process files in bulk.</p>
+                    </div>
                 ) : (
-                    <div className="border rounded-lg overflow-hidden bg-card">
-                        <div className="grid grid-cols-[1fr_150px_240px_200px_160px] gap-3 p-3 border-b bg-muted/50 text-xs font-medium uppercase text-muted-foreground">
+                    <div className="surface-card overflow-hidden">
+                        <div className="grid grid-cols-[1fr_150px_240px_200px_160px] gap-3 p-3 border-b border-border/70 bg-muted/45 text-xs font-medium uppercase text-muted-foreground">
                             <div>Rule</div>
                             <div>Category</div>
                             <div>Actions</div>

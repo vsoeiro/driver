@@ -319,14 +319,15 @@ export default function Jobs() {
     const selectedErrorItemsTruncated = selectedJob ? getErrorItemsTruncated(selectedJob) : 0;
 
     return (
-        <div className="flex flex-col h-screen">
-            <div className="p-4 border-b flex items-center justify-between bg-background z-10 sticky top-0 h-16">
+        <div className="app-page">
+            <div className="page-header flex flex-wrap items-start justify-between gap-3">
                 <div>
-                    <h1 className="text-lg font-semibold text-foreground">Background Jobs</h1>
+                    <h1 className="page-title">Background Jobs</h1>
+                    <p className="page-subtitle">Queue status, progress and troubleshooting details.</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                     <select
-                        className="border rounded-md px-2 py-1.5 text-sm bg-background"
+                        className="input-shell px-2 py-1.5 text-sm"
                         value={statusFilter}
                         onChange={(event) => {
                             const nextStatus = event.target.value;
@@ -345,7 +346,7 @@ export default function Jobs() {
                         <option value="CANCELLED">Cancelled</option>
                     </select>
                     <select
-                        className="border rounded-md px-2 py-1.5 text-sm bg-background"
+                        className="input-shell px-2 py-1.5 text-sm"
                         value={typeFilter}
                         onChange={(event) => {
                             const nextType = event.target.value;
@@ -359,7 +360,7 @@ export default function Jobs() {
                         ))}
                     </select>
                     <select
-                        className="border rounded-md px-2 py-1.5 text-sm bg-background"
+                        className="input-shell px-2 py-1.5 text-sm"
                         value={dateRangeFilter}
                         onChange={(event) => {
                             const nextRange = event.target.value;
@@ -372,12 +373,12 @@ export default function Jobs() {
                             <option key={option.value} value={option.value}>{option.label}</option>
                         ))}
                     </select>
-                    <span className="text-sm text-muted-foreground">Page {page}</span>
+                    <span className="status-chip">Page {page}</span>
                     <div className="flex gap-1">
                         <button
                             onClick={goToPreviousPage}
                             disabled={page <= 1 || loading}
-                            className="p-1 hover:bg-accent rounded disabled:opacity-50"
+                            className="ghost-icon-button p-1 disabled:opacity-50"
                             title="Previous page"
                         >
                             <ChevronLeft size={16} />
@@ -385,7 +386,7 @@ export default function Jobs() {
                         <button
                             onClick={goToNextPage}
                             disabled={!hasNextPage || loading}
-                            className="p-1 hover:bg-accent rounded disabled:opacity-50"
+                            className="ghost-icon-button p-1 disabled:opacity-50"
                             title="Next page"
                         >
                             <ChevronRight size={16} />
@@ -393,7 +394,7 @@ export default function Jobs() {
                     </div>
                     <button
                         onClick={() => fetchJobs()}
-                        className="p-2 hover:bg-accent rounded-md text-muted-foreground hover:text-foreground transition-colors"
+                        className="btn-refresh px-2.5"
                         title="Refresh"
                     >
                         <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -401,15 +402,16 @@ export default function Jobs() {
                 </div>
             </div>
 
-            <div className="flex-1 overflow-auto p-4">
+            <div className="flex-1 overflow-auto">
                 {jobs.length === 0 && !loading ? (
-                    <div className="text-center p-12 text-muted-foreground">
-                        No jobs found.
+                    <div className="empty-state">
+                        <div className="empty-state-title">No jobs found</div>
+                        <p className="empty-state-text">Try changing the filters or wait for new background activity.</p>
                     </div>
                 ) : (
-                    <div className="border rounded-lg bg-card overflow-x-auto">
+                    <div className="surface-card overflow-x-auto">
                         <div className="min-w-[1660px]">
-                            <div className="grid grid-cols-[120px_120px_1fr_140px_140px_140px_100px_150px_120px_72px_72px_72px_72px_78px] gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
+                            <div className="grid grid-cols-[120px_120px_1fr_140px_140px_140px_100px_150px_120px_72px_72px_72px_72px_78px] gap-4 p-3 border-b border-border/70 bg-muted/45 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
                                 <div>Status</div>
                                 <div>Job ID</div>
                                 <div>Type</div>
@@ -447,7 +449,7 @@ export default function Jobs() {
                                     return (
                                         <div
                                             key={job.id}
-                                            className="grid grid-cols-[120px_120px_1fr_140px_140px_140px_100px_150px_120px_72px_72px_72px_72px_78px] gap-4 p-3 items-center hover:bg-muted/30 transition-colors pointer-events-none"
+                                            className="grid grid-cols-[120px_120px_1fr_140px_140px_140px_100px_150px_120px_72px_72px_72px_72px_78px] gap-4 p-3 items-center hover:bg-accent/35 transition-colors pointer-events-none"
                                         >
                                         <div className="pointer-events-auto">
                                             <div className={`inline-flex items-center gap-2 font-medium ${job.status === 'COMPLETED' ? 'text-green-600' :

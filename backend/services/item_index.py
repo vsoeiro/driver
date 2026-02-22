@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Sequence
 from uuid import UUID
 
 from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.models import Item
@@ -64,6 +66,197 @@ def _item_signature(
     )
 
 
+def build_item_signature(
+    *,
+    parent_id: str | None,
+    path: str | None,
+    name: str,
+    item_type: str,
+    size: int,
+    modified_at: datetime | None,
+    mime_type: str | None,
+    extension: str | None,
+) -> tuple[Any, ...]:
+    """Public helper for signature comparisons in bulk reconcile flows."""
+    return _item_signature(
+        parent_id=parent_id,
+        path=path,
+        name=name,
+        item_type=item_type,
+        size=size,
+        modified_at=modified_at,
+        mime_type=mime_type,
+        extension=extension,
+    )
+
+
+def build_item_payload(
+    *,
+    account_id: UUID,
+    item_data: Any,
+    parent_id: str | None,
+    path: str | None,
+    last_synced_at: datetime | None = None,
+) -> dict[str, Any]:
+    """Build a normalized Item payload used by bulk upsert paths."""
+    extension = _compute_extension(item_data)
+    synced_at = last_synced_at or datetime.now(UTC)
+    return {
+        "account_id": account_id,
+        "item_id": item_data.id,
+        "parent_id": parent_id,
+        "name": item_data.name,
+        "path": path,
+        "item_type": item_data.item_type,
+        "mime_type": item_data.mime_type,
+        "extension": extension,
+        "size": item_data.size,
+        "created_at": item_data.created_at,
+        "modified_at": item_data.modified_at,
+        "last_synced_at": synced_at,
+    }
+
+
+def build_item_signature_from_payload(payload: dict[str, Any]) -> tuple[Any, ...]:
+    """Create a compare signature from a normalized item payload."""
+    return _item_signature(
+        parent_id=payload.get("parent_id"),
+        path=payload.get("path"),
+        name=str(payload.get("name") or ""),
+        item_type=str(payload.get("item_type") or "file"),
+        size=int(payload.get("size") or 0),
+        modified_at=payload.get("modified_at"),
+        mime_type=payload.get("mime_type"),
+        extension=payload.get("extension"),
+    )
+
+
+def build_item_signature_from_db_row(
+    *,
+    parent_id: str | None,
+    path: str | None,
+    name: str,
+    item_type: str,
+    size: int,
+    modified_at: datetime | None,
+    mime_type: str | None,
+    extension: str | None,
+) -> tuple[Any, ...]:
+    """Create a compare signature from a row returned by DB queries."""
+    return _item_signature(
+        parent_id=parent_id,
+        path=path,
+        name=name,
+        item_type=item_type,
+        size=size,
+        modified_at=modified_at,
+        mime_type=mime_type,
+        extension=extension,
+    )
+
+
+async def fetch_item_signatures_by_item_id(
+    session: AsyncSession,
+    *,
+    account_id: UUID,
+) -> dict[str, tuple[Any, ...]]:
+    """Fetch signatures for all indexed items of an account."""
+    stmt = select(
+        Item.item_id,
+        Item.parent_id,
+        Item.path,
+        Item.name,
+        Item.item_type,
+        Item.size,
+        Item.modified_at,
+        Item.mime_type,
+        Item.extension,
+    ).where(Item.account_id == account_id)
+    rows = (await session.execute(stmt)).all()
+    signatures: dict[str, tuple[Any, ...]] = {}
+    for (
+        item_id,
+        parent_id,
+        path,
+        name,
+        item_type,
+        size,
+        modified_at,
+        mime_type,
+        extension,
+    ) in rows:
+        signatures[str(item_id)] = build_item_signature_from_db_row(
+            parent_id=parent_id,
+            path=path,
+            name=name,
+            item_type=item_type,
+            size=size,
+            modified_at=modified_at,
+            mime_type=mime_type,
+            extension=extension,
+        )
+    return signatures
+
+
+async def bulk_upsert_item_payloads(
+    session: AsyncSession,
+    *,
+    payloads: Sequence[dict[str, Any]],
+    chunk_size: int = 500,
+) -> None:
+    """Bulk upsert item payloads using native conflict handling per dialect."""
+    if not payloads:
+        return
+
+    bind = session.get_bind()
+    dialect_name = bind.dialect.name if bind is not None else ""
+
+    updatable_columns = {
+        "parent_id",
+        "name",
+        "path",
+        "item_type",
+        "mime_type",
+        "extension",
+        "size",
+        "modified_at",
+        "last_synced_at",
+    }
+
+    for i in range(0, len(payloads), chunk_size):
+        chunk = list(payloads[i : i + chunk_size])
+        if dialect_name == "postgresql":
+            stmt = pg_insert(Item).values(chunk)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[Item.account_id, Item.item_id],
+                set_={column: getattr(stmt.excluded, column) for column in updatable_columns},
+            )
+            await session.execute(stmt)
+            continue
+
+        if dialect_name == "sqlite":
+            stmt = sqlite_insert(Item).values(chunk)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["account_id", "item_id"],
+                set_={column: getattr(stmt.excluded, column) for column in updatable_columns},
+            )
+            await session.execute(stmt)
+            continue
+
+        # Fallback for unexpected dialects.
+        for payload in chunk:
+            updated = await session.execute(
+                update(Item)
+                .where(
+                    Item.account_id == payload["account_id"],
+                    Item.item_id == payload["item_id"],
+                )
+                .values(**{column: payload.get(column) for column in updatable_columns})
+            )
+            if int(updated.rowcount or 0) == 0:
+                session.add(Item(**payload))
+
+
 async def upsert_item_record(
     session: AsyncSession,
     *,
@@ -73,46 +266,27 @@ async def upsert_item_record(
     path: str | None,
 ) -> str:
     """Upsert one item record and return created/updated/unchanged."""
+    payload = build_item_payload(
+        account_id=account_id,
+        item_data=item_data,
+        parent_id=parent_id,
+        path=path,
+    )
     result = await session.execute(
         select(Item).where(
             Item.account_id == account_id,
-            Item.item_id == item_data.id,
+            Item.item_id == payload["item_id"],
         )
     )
     db_item = result.scalar_one_or_none()
 
-    extension = _compute_extension(item_data)
-    new_sig = _item_signature(
-        parent_id=parent_id,
-        path=path,
-        name=item_data.name,
-        item_type=item_data.item_type,
-        size=item_data.size,
-        modified_at=item_data.modified_at,
-        mime_type=item_data.mime_type,
-        extension=extension,
-    )
+    new_sig = build_item_signature_from_payload(payload)
 
     if db_item is None:
-        session.add(
-            Item(
-                account_id=account_id,
-                item_id=item_data.id,
-                parent_id=parent_id,
-                name=item_data.name,
-                path=path,
-                item_type=item_data.item_type,
-                mime_type=item_data.mime_type,
-                extension=extension,
-                size=item_data.size,
-                created_at=item_data.created_at,
-                modified_at=item_data.modified_at,
-                last_synced_at=datetime.now(UTC),
-            )
-        )
+        session.add(Item(**payload))
         return "created"
 
-    old_sig = _item_signature(
+    old_sig = build_item_signature(
         parent_id=db_item.parent_id,
         path=db_item.path,
         name=db_item.name,
@@ -125,15 +299,15 @@ async def upsert_item_record(
     if old_sig == new_sig:
         return "unchanged"
 
-    db_item.name = item_data.name
-    db_item.parent_id = parent_id
-    db_item.path = path
-    db_item.item_type = item_data.item_type
-    db_item.size = item_data.size
-    db_item.modified_at = item_data.modified_at
-    db_item.last_synced_at = datetime.now(UTC)
-    db_item.mime_type = item_data.mime_type
-    db_item.extension = extension
+    db_item.name = payload["name"]
+    db_item.parent_id = payload["parent_id"]
+    db_item.path = payload["path"]
+    db_item.item_type = payload["item_type"]
+    db_item.size = payload["size"]
+    db_item.modified_at = payload["modified_at"]
+    db_item.last_synced_at = payload["last_synced_at"]
+    db_item.mime_type = payload["mime_type"]
+    db_item.extension = payload["extension"]
     return "updated"
 
 

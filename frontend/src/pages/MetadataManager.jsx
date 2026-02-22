@@ -799,11 +799,11 @@ const CategoryItemsTable = ({ category, onBack }) => {
     return (
         <>
             {/* Header */}
-            <div className="p-4 border-b flex items-center justify-between bg-background">
+            <div className="page-header flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                     <button
                         onClick={onBack}
-                        className="p-2 hover:bg-accent rounded-md text-muted-foreground hover:text-foreground transition-colors"
+                        className="ghost-icon-button"
                         title="Back to categories"
                     >
                         <ArrowLeft size={18} />
@@ -815,7 +815,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                 </div>
                 <div className="flex items-center gap-2">
                     {(supportsGallery || supportsSeriesTracker) && (
-                        <div className="inline-flex items-center border rounded-md overflow-hidden">
+                        <div className="inline-flex items-center rounded-lg border border-border/70 overflow-hidden bg-muted/35">
                             <button
                                 onClick={() => setViewMode('table')}
                                 className={`px-3 py-1.5 text-sm ${viewMode === 'table' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}
@@ -839,7 +839,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                         </div>
                     )}
                     <select
-                        className="border rounded-md px-2 py-1.5 text-sm bg-background"
+                        className="input-shell px-2 py-1.5 text-sm"
                         value={searchScope}
                         onChange={(e) => setSearchScope(e.target.value)}
                     >
@@ -848,7 +848,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                         <option value="path">Path</option>
                     </select>
                     <select
-                        className="border rounded-md px-2 py-1.5 text-sm bg-background"
+                        className="input-shell px-2 py-1.5 text-sm"
                         value={sort.by}
                         onChange={(e) => {
                             setSort((prev) => ({ ...prev, by: e.target.value }));
@@ -862,7 +862,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                         ))}
                     </select>
                     <select
-                        className="border rounded-md px-2 py-1.5 text-sm bg-background"
+                        className="input-shell px-2 py-1.5 text-sm"
                         value={sort.order}
                         onChange={(e) => {
                             setSort((prev) => ({ ...prev, order: e.target.value }));
@@ -877,7 +877,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                         <input
                             type="text"
                             placeholder={searchPlaceholders[searchScope]}
-                            className="pl-8 pr-4 py-1.5 text-sm border rounded-md w-72 focus:outline-none focus:ring-1 focus:ring-primary"
+                            className="input-shell pl-8 pr-4 py-1.5 text-sm w-72"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             onKeyDown={(e) => { if (e.key === 'Enter') applySearch(); }}
@@ -894,7 +894,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
             </div>
 
             {/* Toolbar */}
-            <div className="bg-muted/50 border-b px-4 py-2 flex items-center justify-between gap-2 text-sm h-14">
+            <div className="toolbar-surface relative z-40 mb-4 px-4 py-2 flex items-center justify-between gap-2 text-sm">
                 <div className="flex items-center gap-2">
                     <span className="font-medium mr-2 whitespace-nowrap w-24 text-right tabular-nums">{selectedItems.size} selected</span>
                     <div className="h-4 w-px bg-border mx-2" />
@@ -931,7 +931,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                             <ChevronDown size={14} className={`transition-transform ${metadataMenuOpen ? 'rotate-180' : ''}`} />
                         </button>
                         {metadataMenuOpen && (
-                            <div className="absolute top-full left-0 w-52 pt-1 z-50">
+                            <div className="absolute top-full left-0 w-52 pt-1 z-[90]">
                                 <div className="bg-popover border rounded-md shadow-md py-1">
                                     <button
                                         onClick={() => {
@@ -1002,20 +1002,21 @@ const CategoryItemsTable = ({ category, onBack }) => {
             </div>
 
             {/* Content */}
-            <main className="flex-1 overflow-auto p-4">
+            <main className="flex-1 overflow-auto">
                 {loading ? (
                     <div className="flex justify-center p-12">
                         <Loader2 className="animate-spin text-primary" size={32} />
                     </div>
                 ) : (viewMode === 'series_tracker' && supportsSeriesTracker ? seriesRows.length === 0 : items.length === 0) ? (
-                    <div className="text-center p-12 text-muted-foreground">
-                        No items found in this category.
+                    <div className="empty-state">
+                        <div className="empty-state-title">No items found in this category</div>
+                        <p className="empty-state-text">Try changing filters or add metadata to new files first.</p>
                     </div>
                 ) : (
                     viewMode === 'series_tracker' && supportsSeriesTracker ? (
                         <div className="space-y-4">
                             {seriesRows.length === 0 ? (
-                                <div className="border rounded-lg bg-card p-6 text-sm text-muted-foreground">
+                                <div className="surface-card p-6 text-sm text-muted-foreground">
                                     Series tracker needs at least one item with the &quot;Series&quot; field filled.
                                 </div>
                             ) : (
@@ -1030,7 +1031,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                     const issuesByVolume = seriesRow.issues_by_volume || {};
 
                                     return (
-                                        <div key={seriesRow.series_name} className="border rounded-lg bg-card p-4">
+                                        <div key={seriesRow.series_name} className="surface-card p-4">
                                             <div className="flex items-center justify-between gap-3 mb-3">
                                                 <div className="min-w-0">
                                                     <h3 className="font-semibold truncate">{seriesRow.series_name}</h3>
@@ -1113,7 +1114,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                             )}
                         </div>
                     ) : viewMode === 'gallery' && supportsGallery ? (
-                        <div className="border rounded-lg bg-card p-4">
+                        <div className="surface-card p-4">
                             <div className="grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-4">
                                 {items.map((item, index) => {
                                     const isSelected = selectedItems.has(item.id);
@@ -1135,7 +1136,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                             key={item.id}
                                             onClick={(e) => toggleSelection(item.id, index, !e.altKey, e.shiftKey)}
                                             className={`text-left border rounded-md bg-background overflow-hidden transition-colors ${
-                                                isSelected ? 'ring-2 ring-primary border-primary/40' : 'hover:border-primary/40'
+                                                isSelected ? 'ring-2 ring-primary border-primary/40' : 'hover:border-primary/40 hover:-translate-y-[1px]'
                                             }`}
                                         >
                                             <div className="aspect-[3/4] bg-muted/40">
@@ -1177,12 +1178,12 @@ const CategoryItemsTable = ({ category, onBack }) => {
                             </div>
                         </div>
                     ) : (
-                        <div className="border rounded-lg bg-card select-none overflow-hidden">
+                        <div className="surface-card select-none overflow-hidden">
                             <div className="overflow-x-auto">
                                 <div style={{ minWidth: `${tableMinWidth}px` }}>
                                     {/* Table Header */}
                                     <div
-                                        className="gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center sticky top-0"
+                                        className="gap-4 p-3 border-b border-border/70 bg-muted/45 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center sticky top-0 z-10"
                                         style={{ display: 'grid', gridTemplateColumns: gridTemplate }}
                                     >
                                         <div className="flex justify-center">
@@ -1219,7 +1220,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                             return (
                                                 <div
                                                     key={item.id}
-                                                    className={`gap-4 p-3 items-center hover:bg-muted/30 transition-colors ${isSelected ? 'bg-muted/40' : ''}`}
+                                                    className={`gap-4 p-3 items-center hover:bg-accent/35 transition-colors ${isSelected ? 'bg-muted/45' : ''}`}
                                                     style={{ display: 'grid', gridTemplateColumns: gridTemplate }}
                                                     onClick={(e) => toggleSelection(item.id, index, !e.altKey, e.shiftKey)}
                                                 >
@@ -1715,7 +1716,7 @@ export default function MetadataManager() {
     // If viewing a specific category's items
     if (viewingCategory) {
         return (
-            <div className="flex flex-col h-screen">
+            <div className="app-page">
                 <CategoryItemsTable
                     category={viewingCategory}
                     onBack={() => { setViewingCategory(null); loadCategories(); }}
@@ -1725,21 +1726,21 @@ export default function MetadataManager() {
     }
 
     return (
-        <div className="flex flex-col h-screen">
+        <div className="app-page">
             {/* Header */}
-            <div className="p-4 border-b flex items-center justify-between bg-background sticky top-0 z-10">
+            <div className="page-header flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                    <h1 className="text-lg font-semibold text-foreground">Metadata Manager</h1>
-                    <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-0.5 rounded-full">
+                    <h1 className="page-title">Metadata Manager</h1>
+                    <span className="status-chip">
                         {activeView === 'metadata'
                             ? `${categories.length} categories`
                             : `${knownLibraries.length} libraries`}
                     </span>
-                    <div className="inline-flex items-center gap-1 border rounded-md p-1 bg-muted/20">
+                    <div className="inline-flex items-center gap-1 rounded-lg border border-border/70 p-1 bg-muted/35">
                         <button
                             type="button"
                             onClick={() => setActiveView('metadata')}
-                            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                                 activeView === 'metadata'
                                     ? 'bg-primary text-primary-foreground'
                                     : 'text-muted-foreground hover:bg-accent hover:text-foreground'
@@ -1766,13 +1767,13 @@ export default function MetadataManager() {
                             <button
                                 onClick={() => setLayoutBuilderOpen(true)}
                                 disabled={categories.length === 0}
-                                className="flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-accent text-sm font-medium transition-colors disabled:opacity-40"
+                                className="btn-refresh disabled:opacity-40"
                             >
                                 Form Layout
                             </button>
                             <button
                                 onClick={() => setCreateModalOpen(true)}
-                                className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 text-sm font-medium transition-colors"
+                                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-lg shadow-primary/20 transition-transform hover:-translate-y-[1px] hover:bg-primary/92"
                             >
                                 <Plus size={16} /> New Category
                             </button>
@@ -1782,13 +1783,13 @@ export default function MetadataManager() {
             </div>
 
             {/* Content */}
-            <main className="flex-1 overflow-auto p-4">
+            <main className="flex-1 overflow-auto">
                 {activeView === 'libraries' ? (
-                    <section className="border rounded-lg bg-card p-4">
+                    <section className="surface-card p-4">
                         <div className="flex items-center justify-between mb-3">
                             <div className="flex items-center gap-2">
                                 <h2 className="text-base font-semibold text-foreground">Metadata Libraries</h2>
-                                <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-0.5 rounded-full">
+                                <span className="status-chip">
                                     {knownLibraries.length} available
                                 </span>
                             </div>
@@ -1801,7 +1802,7 @@ export default function MetadataManager() {
                         ) : (
                             <div className="grid gap-3">
                                 {knownLibraries.map((library) => (
-                                    <div key={library.key} className="border rounded-md bg-background p-3 flex items-center justify-between gap-3">
+                                    <div key={library.key} className="rounded-xl border border-border/70 bg-background p-3 flex items-center justify-between gap-3">
                                         <div className="flex items-start gap-3 min-w-0">
                                             <div className="p-2 rounded-md bg-primary/10 text-primary">
                                                 <BookOpen size={16} />
@@ -1839,18 +1840,20 @@ export default function MetadataManager() {
                             <Loader2 className="animate-spin text-primary" size={32} />
                         </div>
                     ) : categories.length === 0 ? (
-                        <div className="text-center p-12 text-muted-foreground border border-dashed rounded-lg bg-muted/50">
-                            <Database className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                            <h3 className="text-lg font-medium mb-1">No categories defined</h3>
-                            <p className="text-sm">Create a category to start organizing your file metadata.</p>
+                        <div className="empty-state">
+                            <div className="empty-state-icon">
+                                <Database className="h-6 w-6" />
+                            </div>
+                            <h3 className="empty-state-title">No categories defined</h3>
+                            <p className="empty-state-text">Create a category to start organizing your file metadata.</p>
                         </div>
                     ) : (
                         <div className="space-y-3">
                             {categories.map(cat => (
-                                <div key={cat.id} className="border rounded-lg bg-card overflow-hidden">
+                                <div key={cat.id} className="surface-card overflow-hidden">
                                     {/* Category Header */}
                                     <div
-                                        className="p-4 flex items-center justify-between cursor-pointer hover:bg-accent/50 transition-colors"
+                                        className="p-4 flex items-center justify-between cursor-pointer hover:bg-accent/40 transition-colors"
                                         onClick={() => toggleExpand(cat.id)}
                                     >
                                         <div className="flex items-center gap-3 min-w-0">

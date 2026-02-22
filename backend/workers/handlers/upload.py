@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.exceptions import DriveOrganizerError
-from backend.db.models import LinkedAccount
+from backend.db.models import Job, LinkedAccount
 from backend.services.item_index import parent_id_from_breadcrumb, path_from_breadcrumb, upsert_item_record
 from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
@@ -15,6 +15,23 @@ from backend.workers.dispatcher import register_handler
 from backend.workers.job_progress import JobProgressReporter
 
 logger = logging.getLogger(__name__)
+
+
+async def _job_will_retry(session: AsyncSession, raw_job_id: str | None) -> bool:
+    """Return True when the next failure for this job will schedule a retry."""
+    if not raw_job_id:
+        return False
+    try:
+        job_id = UUID(str(raw_job_id))
+    except (ValueError, TypeError):
+        return False
+
+    job = await session.get(Job, job_id)
+    if not job:
+        return False
+
+    next_retry_count = (job.retry_count or 0) + 1
+    return next_retry_count <= (job.max_retries or 0)
 
 
 @register_handler("upload_file")
@@ -47,6 +64,8 @@ async def upload_file_handler(payload: dict, session: AsyncSession) -> dict:
     # Ensure temp file exists
     if not os.path.exists(temp_path):
         raise DriveOrganizerError(f"Temporary file not found: {temp_path}", status_code=404)
+
+    remove_temp_file = True
 
     try:
         # 1. Fetch account
@@ -148,6 +167,14 @@ async def upload_file_handler(payload: dict, session: AsyncSession) -> dict:
         }
 
     except Exception as e:
+        try:
+            if await _job_will_retry(session, payload.get("_job_id")):
+                # Keep temp file for the next retry attempt.
+                remove_temp_file = False
+                logger.info("Preserving temp file for retry: %s", temp_path)
+        except Exception:
+            logger.exception("Failed to evaluate retry state for upload job temp file cleanup")
+
         progress.current = 1
         reason_text = str(e).strip() or e.__class__.__name__
         error_entry = {
@@ -170,10 +197,11 @@ async def upload_file_handler(payload: dict, session: AsyncSession) -> dict:
         logger.error(f"Upload job failed for {filename}: {e}")
         raise
     finally:
-        # Cleanup temp file regardless of success/failure
-        try:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-                logger.info(f"Cleaned up temp file {temp_path}")
-        except Exception as cleanup_error:
-            logger.warning(f"Failed to cleanup temp file {temp_path}: {cleanup_error}")
+        # Cleanup temp file on success and on terminal failures.
+        if remove_temp_file:
+            try:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                    logger.info(f"Cleaned up temp file {temp_path}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to cleanup temp file {temp_path}: {cleanup_error}")

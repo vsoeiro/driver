@@ -8,7 +8,7 @@ import { jobsService } from '../services/jobs';
 import AdminTabs from '../components/AdminTabs';
 
 function PluginField({ field, onChange, onOpenFolderPicker, accountLabelById }) {
-    const inputClass = 'w-full border rounded-md p-2 bg-background text-sm';
+    const inputClass = 'input-shell w-full p-2 text-sm';
     const renderers = {
         number: () => (
             <input
@@ -369,11 +369,11 @@ export default function AdminSettings() {
     };
 
     return (
-        <div className="flex flex-col h-screen">
-            <div className="p-4 border-b bg-background flex items-center justify-between gap-3">
+        <div className="app-page">
+            <div className="page-header flex flex-wrap items-start justify-between gap-3">
                 <div>
-                    <h1 className="text-lg font-semibold text-foreground">Admin</h1>
-                    <p className="text-sm text-muted-foreground">Grouped runtime configuration panel.</p>
+                    <h1 className="page-title">Admin Settings</h1>
+                    <p className="page-subtitle">Grouped runtime configuration panel.</p>
                 </div>
                 <AdminTabs />
             </div>
@@ -383,8 +383,8 @@ export default function AdminSettings() {
                     <Loader2 className="animate-spin text-primary" size={30} />
                 </div>
             ) : (
-                <form onSubmit={handleSave} className="flex-1 min-h-0 flex">
-                    <aside className="w-72 border-r bg-muted/10 p-3 space-y-3 overflow-auto">
+                <form onSubmit={handleSave} className="flex-1 min-h-0 flex gap-4">
+                    <aside className="surface-card w-72 p-3 space-y-3 overflow-auto">
                         <div className="relative">
                             <Search className="w-4 h-4 absolute left-2 top-2.5 text-muted-foreground" />
                             <input
@@ -392,7 +392,7 @@ export default function AdminSettings() {
                                 value={groupFilter}
                                 onChange={(e) => setGroupFilter(e.target.value)}
                                 placeholder="Search settings"
-                                className="w-full border rounded-md pl-8 pr-2 py-2 bg-background text-sm"
+                                className="input-shell w-full pl-8 pr-2 py-2 text-sm"
                             />
                         </div>
 
@@ -402,10 +402,10 @@ export default function AdminSettings() {
                                     key={group.id}
                                     type="button"
                                     onClick={() => setActiveGroupId(group.id)}
-                                    className={`w-full text-left rounded-md px-3 py-2 border transition-colors ${
+                                    className={`w-full text-left rounded-lg px-3 py-2 border transition-colors ${
                                         activeGroupId === group.id
-                                            ? 'bg-primary text-primary-foreground border-primary'
-                                            : 'bg-background hover:bg-accent text-foreground'
+                                            ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                                            : 'bg-card/80 hover:bg-accent/65 text-foreground border-border/70'
                                     }`}
                                 >
                                     <div className="text-sm font-medium truncate">{group.title}</div>
@@ -417,8 +417,8 @@ export default function AdminSettings() {
                         </div>
                     </aside>
 
-                    <section className="flex-1 min-h-0 overflow-auto p-5 space-y-5">
-                        <div className="flex items-center justify-between gap-3 border-b pb-4">
+                    <section className="surface-card flex-1 min-h-0 overflow-auto p-5 space-y-5">
+                        <div className="flex items-center justify-between gap-3 border-b border-border/70 pb-4">
                             <div>
                                 <h2 className="text-base font-semibold">{selectedGroup?.title || 'Settings group'}</h2>
                                 <p className="text-sm text-muted-foreground">{selectedGroup?.description || 'Select a group on the left.'}</p>
@@ -426,7 +426,7 @@ export default function AdminSettings() {
                             <button
                                 type="submit"
                                 disabled={saving}
-                                className="px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium disabled:opacity-50 inline-flex items-center gap-2"
+                                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-lg shadow-primary/20 transition-transform hover:-translate-y-[1px] hover:bg-primary/92 disabled:opacity-50"
                             >
                                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                                 Save

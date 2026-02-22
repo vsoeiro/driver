@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import logging
 from typing import Any
@@ -22,6 +24,35 @@ from backend.services.job_queue import get_job_queue
 
 logger = logging.getLogger(__name__)
 
+PERIOD_WINDOW_HOURS: dict[str, int] = {
+    "24h": 24,
+    "3d": 72,
+    "7d": 168,
+    "30d": 720,
+    "90d": 2160,
+}
+DEFAULT_PERIOD_KEY = "24h"
+OBSERVABILITY_CACHE_TTL_SECONDS = 20
+
+
+@dataclass
+class _SnapshotCacheEntry:
+    snapshot: ObservabilitySnapshot
+    expires_at: datetime
+
+
+_snapshot_cache: dict[str, _SnapshotCacheEntry] = {}
+_snapshot_cache_lock: asyncio.Lock | None = None
+
+
+async def clear_observability_cache() -> None:
+    """Invalidate in-memory observability snapshots."""
+    global _snapshot_cache_lock
+    if _snapshot_cache_lock is None:
+        _snapshot_cache_lock = asyncio.Lock()
+    async with _snapshot_cache_lock:
+        _snapshot_cache.clear()
+
 
 class ObservabilityService:
     """Build operational metrics and basic alerts for admin usage."""
@@ -29,10 +60,87 @@ class ObservabilityService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def snapshot(self) -> ObservabilitySnapshot:
+    @staticmethod
+    def normalize_period(period: str | None) -> tuple[str, int]:
+        candidate = (period or DEFAULT_PERIOD_KEY).strip().lower()
+        if candidate not in PERIOD_WINDOW_HOURS:
+            candidate = DEFAULT_PERIOD_KEY
+        return candidate, PERIOD_WINDOW_HOURS[candidate]
+
+    async def snapshot(
+        self,
+        *,
+        period: str | None = None,
+        force_refresh: bool = False,
+    ) -> ObservabilitySnapshot:
+        period_key, period_hours = self.normalize_period(period)
         now = datetime.now(UTC)
-        day_ago = now - timedelta(hours=24)
+
+        if not force_refresh:
+            cached = await self._get_cached_snapshot(period_key=period_key, now=now)
+            if cached is not None:
+                return cached
+
+        snapshot = await self._build_snapshot(
+            now=now,
+            period_key=period_key,
+            period_hours=period_hours,
+        )
+        expires_at = now + timedelta(seconds=OBSERVABILITY_CACHE_TTL_SECONDS)
+        snapshot.cache_hit = False
+        snapshot.cache_ttl_seconds = OBSERVABILITY_CACHE_TTL_SECONDS
+        snapshot.cache_expires_at = expires_at
+
+        await self._store_cached_snapshot(
+            period_key=period_key,
+            snapshot=snapshot,
+            expires_at=expires_at,
+        )
+        return snapshot
+
+    async def _get_cached_snapshot(self, *, period_key: str, now: datetime) -> ObservabilitySnapshot | None:
+        global _snapshot_cache_lock
+        if _snapshot_cache_lock is None:
+            _snapshot_cache_lock = asyncio.Lock()
+        async with _snapshot_cache_lock:
+            entry = _snapshot_cache.get(period_key)
+            if entry is None:
+                return None
+            if entry.expires_at <= now:
+                _snapshot_cache.pop(period_key, None)
+                return None
+            snapshot = entry.snapshot.model_copy(deep=True)
+            snapshot.cache_hit = True
+            snapshot.cache_expires_at = entry.expires_at
+            snapshot.cache_ttl_seconds = max(0, int((entry.expires_at - now).total_seconds()))
+            return snapshot
+
+    async def _store_cached_snapshot(
+        self,
+        *,
+        period_key: str,
+        snapshot: ObservabilitySnapshot,
+        expires_at: datetime,
+    ) -> None:
+        global _snapshot_cache_lock
+        if _snapshot_cache_lock is None:
+            _snapshot_cache_lock = asyncio.Lock()
+        async with _snapshot_cache_lock:
+            _snapshot_cache[period_key] = _SnapshotCacheEntry(
+                snapshot=snapshot.model_copy(deep=True),
+                expires_at=expires_at,
+            )
+
+    async def _build_snapshot(
+        self,
+        *,
+        now: datetime,
+        period_key: str,
+        period_hours: int,
+    ) -> ObservabilitySnapshot:
+        period_start = now - timedelta(hours=period_hours)
         hour_ago = now - timedelta(hours=1)
+        period_label = period_key
 
         queue = get_job_queue()
         redis_ok = True
@@ -53,21 +161,21 @@ class ObservabilityService:
 
         finalized_stmt = select(Job).where(
             Job.completed_at.is_not(None),
-            Job.completed_at >= day_ago,
+            Job.completed_at >= period_start,
             Job.status.in_(["COMPLETED", "FAILED", "DEAD_LETTER", "CANCELLED"]),
         )
         recent_finalized = (await self.session.execute(finalized_stmt)).scalars().all()
 
         durations: list[float] = []
         success_count = 0
-        dead_letter_24h = 0
+        dead_letter_window = 0
         throughput_last_hour = 0
         failures_last_hour = 0
         finalized_last_hour = 0
-        metrics_total_24h = 0
-        metrics_success_24h = 0
-        metrics_failed_24h = 0
-        metrics_skipped_24h = 0
+        metrics_total_window = 0
+        metrics_success_window = 0
+        metrics_failed_window = 0
+        metrics_skipped_window = 0
 
         for job in recent_finalized:
             if job.started_at and job.completed_at:
@@ -75,20 +183,20 @@ class ObservabilityService:
             if job.status == "COMPLETED":
                 success_count += 1
             if job.status == "DEAD_LETTER":
-                dead_letter_24h += 1
+                dead_letter_window += 1
             if job.completed_at and job.completed_at >= hour_ago:
                 throughput_last_hour += 1
                 finalized_last_hour += 1
                 if job.status in {"FAILED", "DEAD_LETTER"}:
                     failures_last_hour += 1
             metric_summary = self._extract_job_metric_summary(job)
-            metrics_total_24h += metric_summary["total"]
-            metrics_success_24h += metric_summary["success"]
-            metrics_failed_24h += metric_summary["failed"]
-            metrics_skipped_24h += metric_summary["skipped"]
+            metrics_total_window += metric_summary["total"]
+            metrics_success_window += metric_summary["success"]
+            metrics_failed_window += metric_summary["failed"]
+            metrics_skipped_window += metric_summary["skipped"]
 
-        throughput_24h = len(recent_finalized)
-        success_rate_24h = (success_count / throughput_24h) if throughput_24h > 0 else 1.0
+        throughput_window = len(recent_finalized)
+        success_rate_window = (success_count / throughput_window) if throughput_window > 0 else 1.0
         avg_duration = (sum(durations) / len(durations)) if durations else None
         p95_duration = self._p95(durations)
 
@@ -124,10 +232,11 @@ class ObservabilityService:
             now=now,
             redis_ok=redis_ok,
             retry_count=retry_count,
-            dead_letter_24h=dead_letter_24h,
+            dead_letter_window=dead_letter_window,
             running_count=running_count,
             failures_last_hour=failures_last_hour,
             finalized_last_hour=finalized_last_hour,
+            period_label=period_label,
         )
 
         dead_letter_rows = await self.session.execute(
@@ -150,20 +259,32 @@ class ObservabilityService:
 
         return ObservabilitySnapshot(
             generated_at=now,
+            period_key=period_key,
+            period_label=period_label,
+            period_hours=period_hours,
             queue_depth=queue_depth,
             pending_jobs=int(pending_count),
             running_jobs=int(running_count),
             retry_scheduled_jobs=int(retry_count),
             throughput_last_hour=throughput_last_hour,
-            throughput_last_24h=throughput_24h,
-            success_rate_last_24h=round(success_rate_24h, 4),
+            throughput_window=throughput_window,
+            throughput_last_24h=throughput_window,
+            success_rate_window=round(success_rate_window, 4),
+            success_rate_last_24h=round(success_rate_window, 4),
+            avg_duration_seconds_window=round(avg_duration, 2) if avg_duration is not None else None,
             avg_duration_seconds_last_24h=round(avg_duration, 2) if avg_duration is not None else None,
+            p95_duration_seconds_window=round(p95_duration, 2) if p95_duration is not None else None,
             p95_duration_seconds_last_24h=round(p95_duration, 2) if p95_duration is not None else None,
-            dead_letter_jobs_24h=dead_letter_24h,
-            metrics_total_24h=metrics_total_24h,
-            metrics_success_24h=metrics_success_24h,
-            metrics_failed_24h=metrics_failed_24h,
-            metrics_skipped_24h=metrics_skipped_24h,
+            dead_letter_jobs_window=dead_letter_window,
+            dead_letter_jobs_24h=dead_letter_window,
+            metrics_total_window=metrics_total_window,
+            metrics_success_window=metrics_success_window,
+            metrics_failed_window=metrics_failed_window,
+            metrics_skipped_window=metrics_skipped_window,
+            metrics_total_24h=metrics_total_window,
+            metrics_success_24h=metrics_success_window,
+            metrics_failed_24h=metrics_failed_window,
+            metrics_skipped_24h=metrics_skipped_window,
             recent_alerts=alerts,
             integration_health=integration_health,
             dead_letter_jobs=dead_letter_jobs,
@@ -206,10 +327,11 @@ class ObservabilityService:
         now: datetime,
         redis_ok: bool,
         retry_count: int,
-        dead_letter_24h: int,
+        dead_letter_window: int,
         running_count: int,
         failures_last_hour: int,
         finalized_last_hour: int,
+        period_label: str,
     ) -> list[ObservabilityAlert]:
         alerts: list[ObservabilityAlert] = []
 
@@ -223,12 +345,12 @@ class ObservabilityService:
                 )
             )
 
-        if dead_letter_24h > 0:
+        if dead_letter_window > 0:
             alerts.append(
                 ObservabilityAlert(
                     severity="warning",
                     code="dead_letter_detected",
-                    message=f"{dead_letter_24h} job(s) reached dead-letter in the last 24 hours.",
+                    message=f"{dead_letter_window} job(s) reached dead-letter in the selected period ({period_label}).",
                     created_at=now,
                 )
             )

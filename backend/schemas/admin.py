@@ -86,20 +86,35 @@ class DeadLetterJobSummary(BaseModel):
 
 class ObservabilitySnapshot(BaseModel):
     generated_at: datetime
+    period_key: str = "24h"
+    period_label: str = "24h"
+    period_hours: int = 24
     queue_depth: int
     pending_jobs: int
     running_jobs: int
     retry_scheduled_jobs: int
     throughput_last_hour: int
+    throughput_window: int
     throughput_last_24h: int
+    success_rate_window: float
     success_rate_last_24h: float
+    avg_duration_seconds_window: float | None = None
     avg_duration_seconds_last_24h: float | None = None
+    p95_duration_seconds_window: float | None = None
     p95_duration_seconds_last_24h: float | None = None
+    dead_letter_jobs_window: int
     dead_letter_jobs_24h: int
+    metrics_total_window: int = 0
+    metrics_success_window: int = 0
+    metrics_failed_window: int = 0
+    metrics_skipped_window: int = 0
     metrics_total_24h: int = 0
     metrics_success_24h: int = 0
     metrics_failed_24h: int = 0
     metrics_skipped_24h: int = 0
+    cache_hit: bool = False
+    cache_ttl_seconds: int = 0
+    cache_expires_at: datetime | None = None
     recent_alerts: list[ObservabilityAlert] = []
     integration_health: list[IntegrationHealthStatus] = []
     dead_letter_jobs: list[DeadLetterJobSummary] = []

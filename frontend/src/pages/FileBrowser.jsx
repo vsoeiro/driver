@@ -70,9 +70,11 @@ export default function FileBrowser() {
     const [createFolderModal, setCreateFolderModal] = useState(false);
     const [metadataMenuOpen, setMetadataMenuOpen] = useState(false);
     const metadataMenuRef = useRef(null);
+    const navDragCounterRef = useRef(0);
     const [newFolderName, setNewFolderName] = useState('');
     const [actionLoading, setActionLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
+    const [isNavDropActive, setIsNavDropActive] = useState(false);
     const { showToast } = useToast();
 
     // Reset selection on folder change
@@ -244,6 +246,47 @@ export default function FileBrowser() {
         setSearchQuery('');
     };
 
+    const hasFilesInDragEvent = (event) => {
+        const types = Array.from(event?.dataTransfer?.types || []);
+        return types.includes('Files');
+    };
+
+    const handleNavDragEnter = (event) => {
+        if (!accountId || !hasFilesInDragEvent(event)) return;
+        event.preventDefault();
+        navDragCounterRef.current += 1;
+        setIsNavDropActive(true);
+    };
+
+    const handleNavDragOver = (event) => {
+        if (!accountId || !hasFilesInDragEvent(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        if (!isNavDropActive) {
+            setIsNavDropActive(true);
+        }
+    };
+
+    const handleNavDragLeave = (event) => {
+        if (!accountId || !hasFilesInDragEvent(event)) return;
+        event.preventDefault();
+        navDragCounterRef.current = Math.max(0, navDragCounterRef.current - 1);
+        if (navDragCounterRef.current === 0) {
+            setIsNavDropActive(false);
+        }
+    };
+
+    const handleNavDrop = (event) => {
+        if (!accountId || !hasFilesInDragEvent(event)) return;
+        event.preventDefault();
+        navDragCounterRef.current = 0;
+        setIsNavDropActive(false);
+        const droppedFiles = Array.from(event.dataTransfer?.files || []).filter(Boolean);
+        if (droppedFiles.length === 0) return;
+        showToast(`Uploading ${droppedFiles.length} file(s)...`, 'info');
+        upload(droppedFiles);
+    };
+
     const fileInputRef = useRef(null);
 
     // Get single selected item for singular actions
@@ -277,10 +320,20 @@ export default function FileBrowser() {
     }, [selectedItems, sortedFiles]);
 
     return (
-        <div className="flex flex-col h-screen">
+        <div className="app-page">
             {/* Header */}
-            <header className="p-4 border-b flex items-center justify-between bg-background z-10 sticky top-0 h-16">
-                <div className="flex items-center gap-4 overflow-hidden">
+            <header className="page-header flex flex-wrap items-center justify-between gap-3">
+                <div
+                    className={`flex items-center gap-4 overflow-hidden rounded-lg border px-2 py-1.5 transition-colors ${
+                        isNavDropActive
+                            ? 'border-primary/45 bg-primary/10'
+                            : 'border-transparent'
+                    }`}
+                    onDragEnter={handleNavDragEnter}
+                    onDragOver={handleNavDragOver}
+                    onDragLeave={handleNavDragLeave}
+                    onDrop={handleNavDrop}
+                >
                     <nav className="flex items-center text-sm text-muted-foreground overflow-x-auto whitespace-nowrap scrollbar-hide">
                         <Link to={`/drive/${accountId}`} className="hover:text-foreground hover:underline px-1 font-medium">
                             Root
@@ -318,6 +371,11 @@ export default function FileBrowser() {
                             </button>
                         </div>
                     )}
+                    {isNavDropActive && (
+                        <span className="status-chip border-primary/35 bg-primary/12 text-primary whitespace-nowrap">
+                            Drop files to upload
+                        </span>
+                    )}
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -352,7 +410,7 @@ export default function FileBrowser() {
             </header>
 
             {/* Toolbar (Always visible) */}
-            <div className="bg-muted/50 border-b px-4 py-2 flex items-center justify-between gap-2 text-sm h-14">
+            <div className="toolbar-surface relative z-40 mb-4 px-4 py-2 flex items-center justify-between gap-2 text-sm">
                 <div className="flex items-center w-full max-w-sm relative">
                     <Search className="absolute left-2 text-muted-foreground" size={16} />
                     <input
@@ -361,7 +419,7 @@ export default function FileBrowser() {
                         onChange={(e) => setSearchTerm(e.target.value)}
                         onKeyDown={handleSearchSubmit}
                         placeholder="Search files..."
-                        className="pl-8 pr-8 py-1.5 text-sm w-full rounded-md border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                        className="input-shell pl-8 pr-8 py-1.5 text-sm w-full"
                     />
                     {searchTerm && (
                         <button onClick={clearSearch} className="absolute right-2 text-muted-foreground hover:text-foreground">
@@ -411,7 +469,7 @@ export default function FileBrowser() {
                         </button>
 
                         {metadataMenuOpen && (
-                            <div className="absolute top-full left-0 w-48 pt-1 z-50">
+                            <div className="absolute top-full left-0 w-48 pt-1 z-[90]">
                                 <div className="bg-popover border rounded-md shadow-md py-1">
                                     <button
                                         onClick={() => {
@@ -460,7 +518,7 @@ export default function FileBrowser() {
             </div>
 
             {/* Content */}
-            <main className="flex-1 overflow-auto p-4">
+            <main className="flex-1 overflow-auto">
                 {loading ? (
                     <div className="flex justify-center p-12">
                         <Loader2 className="animate-spin text-primary" size={32} />
@@ -470,12 +528,20 @@ export default function FileBrowser() {
                         Error: {error}
                     </div>
                 ) : files.length === 0 ? (
-                    <div className="text-center p-12 text-muted-foreground">
-                        {searchQuery ? `No results for "${searchQuery}"` : 'This folder is empty.'}
+                    <div className="empty-state">
+                        <div className="empty-state-icon">
+                            <Folder size={26} />
+                        </div>
+                        <div className="empty-state-title">
+                            {searchQuery ? 'No matching files' : 'This folder is empty'}
+                        </div>
+                        <p className="empty-state-text">
+                            {searchQuery ? `No results for "${searchQuery}".` : 'Upload files or create a new folder to get started.'}
+                        </p>
                     </div>
                 ) : (
-                    <div className="border rounded-lg overflow-hidden bg-card select-none">
-                        <div className="grid grid-cols-[40px_40px_1fr_120px_180px] gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
+                    <div className="surface-card overflow-hidden select-none">
+                        <div className="grid grid-cols-[40px_40px_1fr_120px_180px] gap-4 p-3 border-b border-border/70 bg-muted/45 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
                             <div className="flex justify-center items-center">
                                 <button onClick={toggleSelectAll} className="hover:text-foreground">
                                     {selectedItems.size === files.length && files.length > 0 ? <CheckSquare size={16} /> : <Square size={16} />}
@@ -494,7 +560,7 @@ export default function FileBrowser() {
                                 return (
                                     <div
                                         key={file.id}
-                                        className={`group grid grid-cols-[40px_40px_1fr_120px_180px] gap-4 p-3 items-center hover:bg-muted/30 transition-colors ${isSelected ? 'bg-muted/40' : ''}`}
+                                        className={`group grid grid-cols-[40px_40px_1fr_120px_180px] gap-4 p-3 items-center hover:bg-accent/35 transition-colors ${isSelected ? 'bg-muted/45' : ''}`}
                                         onClick={(e) => toggleSelection(file.id, index, !e.altKey, e.shiftKey)}
                                     >
                                         <div className="flex justify-center items-center">

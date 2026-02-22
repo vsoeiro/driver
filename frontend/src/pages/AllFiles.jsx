@@ -60,7 +60,7 @@ const FilterBar = ({ onFilter, filters, accounts, categories }) => {
     };
 
     return (
-        <div className="relative">
+        <div className="relative z-[90]">
             <button
                 onClick={() => setIsOpen(!isOpen)}
                 className={`flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium ${isOpen ? 'bg-accent text-accent-foreground' : 'hover:bg-accent'}`}
@@ -69,7 +69,7 @@ const FilterBar = ({ onFilter, filters, accounts, categories }) => {
             </button>
 
             {isOpen && (
-                <div className="absolute right-0 top-full mt-2 w-72 bg-popover border rounded-md shadow-lg p-4 z-50 space-y-4">
+                <div className="absolute right-0 top-full mt-2 w-72 bg-popover border rounded-md shadow-lg p-4 z-[120] space-y-4">
                     <div>
                         <label className="block text-sm font-medium mb-1">Account</label>
                         <select
@@ -882,9 +882,9 @@ export default function AllFiles() {
     };
 
     return (
-        <div className="flex flex-col h-screen">
+        <div className="app-page">
             {/* Header */}
-            <div className="p-4 border-b flex items-center justify-between bg-background">
+            <div className="page-header z-[80] flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                     <button
                         onClick={clearPathPrefix}
@@ -908,7 +908,7 @@ export default function AllFiles() {
 
                 <div className="flex items-center gap-2">
                     <select
-                        className="border rounded-md px-2 py-1.5 text-sm bg-background"
+                        className="input-shell px-2 py-1.5 text-sm"
                         value={searchScope}
                         onChange={(e) => setSearchScope(e.target.value)}
                     >
@@ -921,7 +921,7 @@ export default function AllFiles() {
                         <input
                             type="text"
                             placeholder={searchPlaceholders[searchScope]}
-                            className="pl-8 pr-4 py-1.5 text-sm border rounded-md w-64 focus:outline-none focus:ring-1 focus:ring-primary"
+                            className="input-shell pl-8 pr-4 py-1.5 text-sm w-64"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); fetchItems(1); } }}
@@ -941,7 +941,7 @@ export default function AllFiles() {
             </div>
 
             {/* Toolbar */}
-            <div className="bg-muted/50 border-b px-4 py-2 flex items-center justify-between gap-2 text-sm h-14">
+            <div className="toolbar-surface relative z-40 mb-4 px-4 py-2 flex items-center justify-between gap-2 text-sm">
                 <div className="flex items-center gap-2">
                     <span className="font-medium mr-2 whitespace-nowrap w-24 text-right tabular-nums">{selectedItems.size} selected</span>
                     <div className="h-4 w-px bg-border mx-2" />
@@ -977,7 +977,7 @@ export default function AllFiles() {
                         </button>
 
                         {metadataMenuOpen && (
-                            <div className="absolute top-full left-0 w-52 pt-1 z-50">
+                            <div className="absolute top-full left-0 w-52 pt-1 z-[90]">
                                 <div className="bg-popover border rounded-md shadow-md py-1">
                                     <button
                                         onClick={() => {
@@ -1058,7 +1058,7 @@ export default function AllFiles() {
 
             {/* Path Prefix Breadcrumb */}
             {pathPrefix && (
-                <div className="bg-blue-50 border-b px-4 py-2 flex items-center gap-2 text-sm">
+                <div className="mb-4 rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-2 flex items-center gap-2 text-sm">
                     <FolderOpen size={16} className="text-blue-500" />
                     <span className="text-muted-foreground">Showing files in:</span>
                     <span className="font-medium text-blue-700">{pathPrefix}</span>
@@ -1069,19 +1069,23 @@ export default function AllFiles() {
             )}
 
             {/* Content */}
-            <main className="flex-1 overflow-auto p-4">
+            <main className="flex-1 overflow-auto">
                 {loading ? (
                     <div className="flex justify-center p-12">
                         <Loader2 className="animate-spin text-primary" size={32} />
                     </div>
                 ) : items.length === 0 ? (
-                    <div className="text-center p-12 text-muted-foreground">
-                        No items found.
+                    <div className="empty-state">
+                        <div className="empty-state-icon">
+                            <Folder size={26} />
+                        </div>
+                        <div className="empty-state-title">No items found</div>
+                        <p className="empty-state-text">Adjust your filters or clear the path scope to broaden results.</p>
                     </div>
                 ) : (
-                    <div className="border rounded-lg overflow-hidden bg-card select-none">
+                    <div className="surface-card overflow-hidden select-none">
                         {/* Header */}
-                        <div className="grid grid-cols-[40px_40px_2fr_170px_80px_80px_140px_minmax(150px,1fr)] gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center sticky top-0">
+                        <div className="grid grid-cols-[40px_40px_2fr_170px_80px_80px_140px_minmax(150px,1fr)] gap-4 p-3 border-b border-border/70 bg-muted/45 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center sticky top-0 z-10">
                             <div className="flex justify-center">
                                 <button onClick={toggleSelectAll}>
                                     {selectedItems.size === items.length && items.length > 0 ? <CheckSquare size={16} /> : <Square size={16} />}
@@ -1114,7 +1118,7 @@ export default function AllFiles() {
                                 return (
                                     <div
                                         key={item.id}
-                                        className={`group grid grid-cols-[40px_40px_2fr_170px_80px_80px_140px_minmax(150px,1fr)] gap-4 p-3 items-center hover:bg-muted/30 transition-colors ${isSelected ? 'bg-muted/40' : ''}`}
+                                        className={`group grid grid-cols-[40px_40px_2fr_170px_80px_80px_140px_minmax(150px,1fr)] gap-4 p-3 items-center hover:bg-accent/35 transition-colors ${isSelected ? 'bg-muted/45' : ''}`}
                                         onClick={(e) => toggleSelection(item.id, index, !e.altKey, e.shiftKey)}
                                     >
                                         <div className="flex justify-center">

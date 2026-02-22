@@ -17,7 +17,7 @@ export const createMoveJob = async (sourceAccountId, sourceItemId, destinationAc
     return response.data;
 };
 
-export const getJobs = async (limit = 50, offset = 0, statuses = [], filters = {}) => {
+export const getJobs = async (limit = 50, offset = 0, statuses = [], filters = {}, options = {}) => {
     const safeLimit = Number.isFinite(Number(limit)) ? Math.max(1, Math.floor(Number(limit))) : 50;
     const safeOffset = Number.isFinite(Number(offset)) ? Math.max(0, Math.floor(Number(offset))) : 0;
     const normalizedStatuses = Array.isArray(statuses)
@@ -27,7 +27,9 @@ export const getJobs = async (limit = 50, offset = 0, statuses = [], filters = {
         ? filters.types.map((type) => String(type || '').trim().toLowerCase()).filter(Boolean)
         : [];
     const createdAfter = typeof filters?.createdAfter === 'string' ? filters.createdAfter.trim() : '';
+    const includeEstimates = typeof options?.includeEstimates === 'boolean' ? options.includeEstimates : true;
     const params = { limit: safeLimit, offset: safeOffset };
+    params.include_estimates = includeEstimates;
     if (normalizedStatuses.length === 1) {
         params.status = normalizedStatuses[0];
     } else if (normalizedStatuses.length > 1) {

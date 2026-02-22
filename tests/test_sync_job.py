@@ -75,44 +75,21 @@ async def test_sync_items_handler():
             mock_children_folder, # For MyFolder
         ])
         
-        # Mock upsert_item_record
-        with patch("backend.workers.handlers.sync.upsert_item_record", new_callable=AsyncMock) as mock_upsert:
-            mock_upsert.side_effect = ["created", "created", "created"]
-            
-            # Execute
-            payload = {"account_id": str(account_id)}
-            stats = await sync_items_handler(payload, mock_session)
-            
-            # Verify
-            assert stats["processed"] == 3 # Root + Folder + File
-            assert stats["errors"] == 0
-            
-            # Check upsert calls
-            assert mock_upsert.call_count == 3
-            
-            # 1. Root
-            mock_upsert.assert_any_call(
-                mock_session,
-                account_id=mock_account.id,
-                item_data=mock_root_item,
-                parent_id=None,
-                path="/",
-            )
-            
-            # 2. Folder
-            mock_upsert.assert_any_call(
-                mock_session,
-                account_id=mock_account.id,
-                item_data=mock_folder_item,
-                parent_id=root_item_id,
-                path="/MyFolder",
-            )
-            
-            # 3. File
-            mock_upsert.assert_any_call(
-                mock_session,
-                account_id=mock_account.id,
-                item_data=mock_file_item,
-                parent_id=folder_id,
-                path="/MyFolder/MyFile.txt",
-            )
+        with patch("backend.workers.handlers.sync.fetch_item_signatures_by_item_id", new_callable=AsyncMock) as mock_fetch_signatures:
+            mock_fetch_signatures.return_value = {}
+            with patch("backend.workers.handlers.sync.bulk_upsert_item_payloads", new_callable=AsyncMock) as mock_bulk_upsert:
+                # Execute
+                payload = {"account_id": str(account_id)}
+                stats = await sync_items_handler(payload, mock_session)
+
+                # Verify
+                assert stats["processed"] == 3  # Root + Folder + File
+                assert stats["created"] == 3
+                assert stats["updated"] == 0
+                assert stats["unchanged"] == 0
+                assert stats["errors"] == 0
+
+                mock_bulk_upsert.assert_awaited_once()
+                call_payloads = mock_bulk_upsert.await_args.kwargs["payloads"]
+                upserted_ids = {row["item_id"] for row in call_payloads}
+                assert upserted_ids == {root_item_id, folder_id, file_id}

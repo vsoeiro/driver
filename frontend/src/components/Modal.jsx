@@ -14,22 +14,23 @@ export default function Modal({
     if (typeof document === 'undefined') return null;
 
     return createPortal(
-        <div className="fixed inset-0 z-[100] flex items-start justify-center p-4 pt-8 bg-background/80 backdrop-blur-sm overflow-y-auto">
-            <div className={`bg-card border text-card-foreground rounded-lg shadow-lg w-full ${maxWidthClass} max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95 duration-200`}>
-                <div className="flex items-center justify-between p-4 border-b">
-                    <h3 className="font-semibold text-lg">{title}</h3>
+        <div className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-slate-900/35 p-4 pt-10 backdrop-blur-sm">
+            <div className={`w-full ${maxWidthClass} max-h-[90vh] flex flex-col rounded-2xl border border-border/70 bg-card/95 text-card-foreground shadow-[0_22px_60px_-30px_rgba(10,25,50,0.65)] animate-in fade-in zoom-in-95 duration-200`}>
+                <div className="flex items-center justify-between border-b border-border/70 p-4">
+                    <h3 className="text-lg font-semibold tracking-tight">{title}</h3>
                     <button
                         onClick={onClose}
-                        className="p-1 hover:bg-accent rounded-md transition-colors"
+                        className="ghost-icon-button"
+                        aria-label="Close modal"
                     >
-                        <X size={20} />
+                        <X size={18} />
                     </button>
                 </div>
-                <div className={`p-4 overflow-y-auto ${bodyClassName}`}>
+                <div className={`overflow-y-auto p-4 ${bodyClassName}`}>
                     {children}
                 </div>
             </div>
         </div>,
-        document.body
+        document.body,
     );
 }

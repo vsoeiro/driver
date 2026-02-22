@@ -31,8 +31,33 @@ FILE_FIELDS = (
 class GoogleDriveClient:
     """Async client for Google Drive API."""
 
+    _shared_client: httpx.AsyncClient | None = None
+    _shared_client_lock: asyncio.Lock | None = None
+
     def __init__(self, token_manager: TokenManager) -> None:
         self._token_manager = token_manager
+
+    @classmethod
+    async def _get_http_client(cls) -> httpx.AsyncClient:
+        if cls._shared_client is not None:
+            return cls._shared_client
+        if cls._shared_client_lock is None:
+            cls._shared_client_lock = asyncio.Lock()
+        async with cls._shared_client_lock:
+            if cls._shared_client is None:
+                cls._shared_client = httpx.AsyncClient(timeout=GOOGLE_TIMEOUT)
+        return cls._shared_client
+
+    @classmethod
+    async def close_http_client(cls) -> None:
+        if cls._shared_client is None:
+            return
+        if cls._shared_client_lock is None:
+            cls._shared_client_lock = asyncio.Lock()
+        async with cls._shared_client_lock:
+            if cls._shared_client is not None:
+                await cls._shared_client.aclose()
+                cls._shared_client = None
 
     async def _request(
         self,
@@ -53,8 +78,14 @@ class GoogleDriveClient:
             headers = dict(request_headers)
             headers["Authorization"] = f"Bearer {access_token}"
             effective_timeout = timeout or GOOGLE_TIMEOUT
-            async with httpx.AsyncClient(timeout=effective_timeout) as client:
-                return await client.request(method=method, url=url, headers=headers, **kwargs)
+            client = await self._get_http_client()
+            return await client.request(
+                method=method,
+                url=url,
+                headers=headers,
+                timeout=effective_timeout,
+                **kwargs,
+            )
 
         try:
             access_token = await self._token_manager.get_valid_access_token(account)
@@ -440,15 +471,16 @@ class GoogleDriveClient:
         end_byte: int,
         total_size: int,
     ) -> dict:
-        async with httpx.AsyncClient(timeout=GOOGLE_TIMEOUT) as client:
-            response = await client.put(
-                upload_url,
-                content=chunk,
-                headers={
-                    "Content-Length": str(len(chunk)),
-                    "Content-Range": f"bytes {start_byte}-{end_byte}/{total_size}",
-                },
-            )
+        client = await self._get_http_client()
+        response = await client.put(
+            upload_url,
+            content=chunk,
+            headers={
+                "Content-Length": str(len(chunk)),
+                "Content-Range": f"bytes {start_byte}-{end_byte}/{total_size}",
+            },
+            timeout=GOOGLE_TIMEOUT,
+        )
 
         if response.status_code == 308:
             range_header = response.headers.get("Range")
@@ -566,3 +598,8 @@ class GoogleDriveClient:
         )
         data = response.json()
         return data.get("webViewLink") or data.get("id", "")
+
+
+async def close_google_drive_http_client() -> None:
+    """Close shared Google Drive HTTP client used across request scopes."""
+    await GoogleDriveClient.close_http_client()

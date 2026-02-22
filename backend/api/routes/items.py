@@ -6,7 +6,7 @@ from typing import Optional
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func, cast, Float, case, String
+from sqlalchemy import select, func, cast, Float, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.dependencies import get_session
@@ -113,6 +113,7 @@ async def list_items(
     category_id: Optional[UUID] = None,
     has_metadata: Optional[bool] = None,
     metadata_filters: Optional[str] = Query(None, alias="metadata"),  # JSON string: {"attr_id": "value"}
+    include_total: bool = Query(True, description="If false, skips expensive total count query."),
     session: AsyncSession = Depends(get_session),
 ):
     """List all items with pagination and filtering."""
@@ -189,70 +190,71 @@ async def list_items(
     for condition in metadata_conditions:
         query = query.where(condition)
 
-    # Count total
-    count_query = select(func.count(Item.id))
-    
-    if account_id:
-        count_query = count_query.where(Item.account_id == account_id)
-    if q:
-        search_pattern = f"%{q}%"
-        if search_fields == "name":
-            count_query = count_query.where(Item.name.ilike(search_pattern))
-        elif search_fields == "path":
-            count_query = count_query.where(Item.path.ilike(search_pattern))
-        else:
-            count_query = count_query.where(
-                Item.name.ilike(search_pattern) | Item.path.ilike(search_pattern)
-            )
-    if path_prefix:
-        clean_prefix = path_prefix.rstrip("/")
-        if direct_children_only:
-            child_pattern = clean_prefix + "/%"
-            grandchild_pattern = clean_prefix + "/%/%"
-            count_query = count_query.where(
-                Item.path.ilike(child_pattern),
-                ~Item.path.ilike(grandchild_pattern),
-            )
-        else:
-            child_pattern = clean_prefix + "/%"
-            count_query = count_query.where(Item.path.ilike(child_pattern))
-    if extensions:
-        clean_exts = [e.lstrip(".").lower() for e in extensions]
-        count_query = count_query.where(Item.extension.in_(clean_exts))
-    if item_type:
-        count_query = count_query.where(Item.item_type == item_type)
-    if size_min is not None:
-        count_query = count_query.where(Item.size >= size_min)
-    if size_max is not None:
-        count_query = count_query.where(Item.size <= size_max)
-    if category_id:
-        count_query = count_query.join(
-            ItemMetadata,
-            (Item.item_id == ItemMetadata.item_id) & (Item.account_id == ItemMetadata.account_id)
-        ).where(ItemMetadata.category_id == category_id)
-    if has_metadata is True:
-        count_query = count_query.join(
-            ItemMetadata,
-            (Item.item_id == ItemMetadata.item_id) & (Item.account_id == ItemMetadata.account_id),
-            isouter=False
-        ) if not category_id else count_query
-    elif has_metadata is False:
-        count_query = count_query.outerjoin(
-            ItemMetadata,
-            (Item.item_id == ItemMetadata.item_id) & (Item.account_id == ItemMetadata.account_id)
-        ).where(ItemMetadata.id.is_(None)) if not category_id else count_query
+    total: int | None = None
+    if include_total:
+        count_query = select(func.count(Item.id))
 
-    if metadata_conditions:
-        if not category_id and has_metadata is None:
-            # Need to join ItemMetadata if not already joined
+        if account_id:
+            count_query = count_query.where(Item.account_id == account_id)
+        if q:
+            search_pattern = f"%{q}%"
+            if search_fields == "name":
+                count_query = count_query.where(Item.name.ilike(search_pattern))
+            elif search_fields == "path":
+                count_query = count_query.where(Item.path.ilike(search_pattern))
+            else:
+                count_query = count_query.where(
+                    Item.name.ilike(search_pattern) | Item.path.ilike(search_pattern)
+                )
+        if path_prefix:
+            clean_prefix = path_prefix.rstrip("/")
+            if direct_children_only:
+                child_pattern = clean_prefix + "/%"
+                grandchild_pattern = clean_prefix + "/%/%"
+                count_query = count_query.where(
+                    Item.path.ilike(child_pattern),
+                    ~Item.path.ilike(grandchild_pattern),
+                )
+            else:
+                child_pattern = clean_prefix + "/%"
+                count_query = count_query.where(Item.path.ilike(child_pattern))
+        if extensions:
+            clean_exts = [e.lstrip(".").lower() for e in extensions]
+            count_query = count_query.where(Item.extension.in_(clean_exts))
+        if item_type:
+            count_query = count_query.where(Item.item_type == item_type)
+        if size_min is not None:
+            count_query = count_query.where(Item.size >= size_min)
+        if size_max is not None:
+            count_query = count_query.where(Item.size <= size_max)
+        if category_id:
             count_query = count_query.join(
                 ItemMetadata,
                 (Item.item_id == ItemMetadata.item_id) & (Item.account_id == ItemMetadata.account_id)
-            )
-        for condition in metadata_conditions:
-            count_query = count_query.where(condition)
+            ).where(ItemMetadata.category_id == category_id)
+        if has_metadata is True:
+            count_query = count_query.join(
+                ItemMetadata,
+                (Item.item_id == ItemMetadata.item_id) & (Item.account_id == ItemMetadata.account_id),
+                isouter=False
+            ) if not category_id else count_query
+        elif has_metadata is False:
+            count_query = count_query.outerjoin(
+                ItemMetadata,
+                (Item.item_id == ItemMetadata.item_id) & (Item.account_id == ItemMetadata.account_id)
+            ).where(ItemMetadata.id.is_(None)) if not category_id else count_query
 
-    total = (await session.execute(count_query)).scalar_one()
+        if metadata_conditions:
+            if not category_id and has_metadata is None:
+                # Need to join ItemMetadata if not already joined
+                count_query = count_query.join(
+                    ItemMetadata,
+                    (Item.item_id == ItemMetadata.item_id) & (Item.account_id == ItemMetadata.account_id)
+                )
+            for condition in metadata_conditions:
+                count_query = count_query.where(condition)
+
+        total = (await session.execute(count_query)).scalar_one()
 
     # Sort
     sort_column = getattr(Item, sort_by)
@@ -272,11 +274,13 @@ async def list_items(
         else:
             sort_expression = metadata_field_text
 
-    nulls_last = case((sort_expression.is_(None), 1), else_=0)
+    primary_sort = sort_expression.desc().nullslast() if sort_order == "desc" else sort_expression.asc().nullslast()
+    secondary_sort = Item.modified_at.desc().nullslast() if sort_order == "desc" else Item.modified_at.asc().nullslast()
+    tie_breaker = Item.id.desc() if sort_order == "desc" else Item.id.asc()
     if sort_order == "desc":
-        query = query.order_by(nulls_last.asc(), sort_expression.desc(), Item.modified_at.desc())
+        query = query.order_by(primary_sort, secondary_sort, tie_breaker)
     else:
-        query = query.order_by(nulls_last.asc(), sort_expression.asc(), Item.modified_at.desc())
+        query = query.order_by(primary_sort, secondary_sort, tie_breaker)
 
     # Pagination
     query = query.offset((page - 1) * page_size).limit(page_size)
@@ -321,6 +325,9 @@ async def list_items(
             "metadata": metadata_data
         }
         items.append(item_data)
+
+    if total is None:
+        total = ((page - 1) * page_size) + len(items)
 
     return ItemListResponse(
         items=items,

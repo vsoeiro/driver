@@ -11,7 +11,7 @@ export default function JobStatusNotifier() {
     useEffect(() => {
         const checkJobs = async () => {
             try {
-                const jobs = await getJobs();
+                const jobs = await getJobs(50, 0, [], {}, { includeEstimates: false });
                 const currentRunning = new Set();
 
                 // On first load, just populate running jobs without notifying

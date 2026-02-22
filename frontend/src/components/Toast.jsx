@@ -11,48 +11,47 @@ export default function Toast({ id, type, message, onClose, duration = 5000 }) {
 
     const styles = {
         success: {
-            bg: 'bg-green-500/10',
-            border: 'border-green-500/20',
-            text: 'text-green-500',
-            icon: <Check className="w-5 h-5 text-green-500" />
+            accent: 'border-emerald-400/50',
+            iconWrap: 'bg-emerald-500/12 text-emerald-700',
+            text: 'text-emerald-900',
+            icon: <Check className="w-4 h-4" />,
         },
         error: {
-            bg: 'bg-red-500/10',
-            border: 'border-red-500/20',
-            text: 'text-red-500',
-            icon: <AlertCircle className="w-5 h-5 text-red-500" />
+            accent: 'border-rose-400/55',
+            iconWrap: 'bg-rose-500/12 text-rose-700',
+            text: 'text-rose-900',
+            icon: <AlertCircle className="w-4 h-4" />,
         },
         info: {
-            bg: 'bg-blue-500/10',
-            border: 'border-blue-500/20',
-            text: 'text-blue-500',
-            icon: <Info className="w-5 h-5 text-blue-500" />
+            accent: 'border-sky-400/55',
+            iconWrap: 'bg-sky-500/12 text-sky-700',
+            text: 'text-slate-900',
+            icon: <Info className="w-4 h-4" />,
         },
         warning: {
-            bg: 'bg-yellow-500/10',
-            border: 'border-yellow-500/20',
-            text: 'text-yellow-500',
-            icon: <AlertTriangle className="w-5 h-5 text-yellow-500" />
-        }
+            accent: 'border-amber-400/65',
+            iconWrap: 'bg-amber-500/14 text-amber-700',
+            text: 'text-amber-900',
+            icon: <AlertTriangle className="w-4 h-4" />,
+        },
     };
 
     const style = styles[type] || styles.info;
 
     return (
-        <div className={`flex items-start gap-3 p-4 rounded-lg border backdrop-blur-md shadow-lg transition-all animate-slide-in-right ${style.bg} ${style.border}`}>
-            <div className="flex-shrink-0 mt-0.5">
+        <div className={`pointer-events-auto flex items-start gap-3 rounded-xl border bg-card/95 p-3 shadow-[0_18px_42px_-32px_rgba(7,24,48,0.72)] backdrop-blur-md ${style.accent} animate-enter-stagger`}>
+            <div className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${style.iconWrap}`}>
                 {style.icon}
             </div>
-            <div className="flex-1 min-w-[200px]">
-                <p className={`text-sm font-medium ${style.text}`}>
-                    {message}
-                </p>
+            <div className="min-w-[180px] flex-1">
+                <p className={`text-sm font-medium ${style.text}`}>{message}</p>
             </div>
             <button
                 onClick={() => onClose(id)}
-                className={`flex-shrink-0 p-1 rounded-md transition-colors hover:bg-black/10 ${style.text}`}
+                className="ghost-icon-button p-1.5"
+                aria-label="Close toast"
             >
-                <X className="w-4 h-4" />
+                <X className="h-4 w-4" />
             </button>
         </div>
     );

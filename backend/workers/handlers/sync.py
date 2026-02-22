@@ -7,12 +7,17 @@ import logging
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.config import get_settings
-from backend.db.models import Item, LinkedAccount
-from backend.services.item_index import delete_items_by_ids, upsert_item_record
+from backend.db.models import LinkedAccount
+from backend.services.item_index import (
+    build_item_payload,
+    build_item_signature_from_payload,
+    bulk_upsert_item_payloads,
+    delete_items_by_ids,
+    fetch_item_signatures_by_item_id,
+)
 from backend.services.providers.base import DriveProviderClient
 from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
@@ -179,28 +184,34 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
             entry["stage"] = stage
         stats["error_items"].append(entry)
 
-    existing_rows = (
-        await session.execute(select(Item.item_id).where(Item.account_id == account.id))
-    ).scalars().all()
-    existing_ids = set(existing_rows)
+    existing_signatures = await fetch_item_signatures_by_item_id(
+        session,
+        account_id=account.id,
+    )
+    existing_ids = set(existing_signatures.keys())
     remote_ids: set[str] = set()
+    pending_upsert_payloads: list[dict] = []
+    upsert_batch_size = 500
 
     for entry in entries:
-        item_id = getattr(entry.item, "id")
+        item_id = str(getattr(entry.item, "id"))
         remote_ids.add(item_id)
 
         try:
-            result = await upsert_item_record(
-                session,
+            payload = build_item_payload(
                 account_id=account.id,
                 item_data=entry.item,
                 parent_id=entry.parent_id,
                 path=entry.path,
             )
-            if result == "created":
+            new_signature = build_item_signature_from_payload(payload)
+            old_signature = existing_signatures.get(item_id)
+            if old_signature is None:
                 stats["created"] += 1
-            elif result == "updated":
+                pending_upsert_payloads.append(payload)
+            elif old_signature != new_signature:
                 stats["updated"] += 1
+                pending_upsert_payloads.append(payload)
             else:
                 stats["unchanged"] += 1
         except Exception as exc:  # noqa: BLE001
@@ -215,7 +226,21 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
 
         stats["processed"] += 1
         await progress.increment()
+        if len(pending_upsert_payloads) >= upsert_batch_size:
+            await bulk_upsert_item_payloads(
+                session,
+                payloads=pending_upsert_payloads,
+                chunk_size=upsert_batch_size,
+            )
+            pending_upsert_payloads.clear()
         if stats["processed"] % 50 == 0:
+            if pending_upsert_payloads:
+                await bulk_upsert_item_payloads(
+                    session,
+                    payloads=pending_upsert_payloads,
+                    chunk_size=upsert_batch_size,
+                )
+                pending_upsert_payloads.clear()
             await session.commit()
             logger.info(
                 "Sync progress account_id=%s processed=%s created=%s updated=%s unchanged=%s",
@@ -225,6 +250,13 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
                 stats["updated"],
                 stats["unchanged"],
             )
+
+    if pending_upsert_payloads:
+        await bulk_upsert_item_payloads(
+            session,
+            payloads=pending_upsert_payloads,
+            chunk_size=upsert_batch_size,
+        )
 
     stale_ids = list(existing_ids - remote_ids)
     if stale_ids:

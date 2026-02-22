@@ -10,8 +10,13 @@ export const updateRuntimeSettings = async (payload) => {
     return response.data;
 };
 
-export const getObservabilitySnapshot = async () => {
-    const response = await api.get('/admin/observability');
+export const getObservabilitySnapshot = async ({ period = '24h', forceRefresh = false } = {}) => {
+    const response = await api.get('/admin/observability', {
+        params: {
+            period,
+            force_refresh: Boolean(forceRefresh),
+        },
+    });
     return response.data;
 };
 

@@ -7,6 +7,7 @@ from uuid import UUID
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query, Request, status, UploadFile, File, Form
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 
 from backend.api.dependencies import DBSession, JobServiceDep
@@ -110,6 +111,7 @@ async def list_jobs(
     job_service: JobServiceDep,
     limit: int = 50,
     offset: int = 0,
+    include_estimates: bool = Query(True),
     status_filter: list[str] | None = Query(default=None, alias="status"),
     type_filter: list[str] | None = Query(default=None, alias="type"),
     created_after: datetime | None = Query(default=None),
@@ -145,6 +147,7 @@ async def list_jobs(
         statuses=statuses or None,
         job_types=types or None,
         created_after=created_after,
+        include_estimates=include_estimates,
     )
 
 
@@ -172,8 +175,11 @@ async def create_upload_job(
     temp_filename = f"{uuid4()}_{file.filename}"
     temp_path = os.path.join(temp_dir, temp_filename)
     
-    with open(temp_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    def _persist_upload_temp_file() -> None:
+        with open(temp_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+    await run_in_threadpool(_persist_upload_temp_file)
         
     # Create Job
     payload = {
@@ -189,7 +195,16 @@ async def create_upload_job(
         payload=payload,
     )
     
-    return await job_service.create_job(job_in)
+    try:
+        return await job_service.create_job(job_in)
+    except Exception:
+        # If job creation fails, avoid leaking temp files.
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except Exception:
+            pass
+        raise
 
 
 @router.post("/metadata-update", response_model=Job, status_code=status.HTTP_201_CREATED)

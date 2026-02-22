@@ -44,17 +44,38 @@ export default function AdminDashboard() {
     const { showToast } = useToast();
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [period, setPeriod] = useState('24h');
     const [snapshot, setSnapshot] = useState(null);
     const [reprocessingJobId, setReprocessingJobId] = useState(null);
 
-    const loadSnapshot = useCallback(async (silent = false) => {
+    const PERIOD_OPTIONS = [
+        { value: '24h', label: 'Last 24h' },
+        { value: '3d', label: 'Last 3 days' },
+        { value: '7d', label: 'Last 7 days' },
+        { value: '30d', label: 'Last 30 days' },
+        { value: '90d', label: 'Last 90 days' },
+    ];
+
+    const selectedPeriodLabel = useMemo(
+        () => PERIOD_OPTIONS.find((option) => option.value === period)?.label || period,
+        [period],
+    );
+
+    const loadSnapshot = useCallback(async ({
+        silent = false,
+        forceRefresh = false,
+        periodValue = period,
+    } = {}) => {
         if (silent) {
             setRefreshing(true);
         } else {
             setLoading(true);
         }
         try {
-            const data = await settingsService.getObservabilitySnapshot();
+            const data = await settingsService.getObservabilitySnapshot({
+                period: periodValue,
+                forceRefresh,
+            });
             setSnapshot(data);
         } catch (error) {
             const message = error?.response?.data?.detail || 'Failed to load observability snapshot';
@@ -63,26 +84,31 @@ export default function AdminDashboard() {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [showToast]);
+    }, [showToast, period]);
 
     useEffect(() => {
         let cancelled = false;
         const run = async () => {
             if (!cancelled) {
-                await loadSnapshot(false);
+                await loadSnapshot({ silent: false, forceRefresh: false, periodValue: period });
             }
         };
         run();
         const interval = setInterval(() => {
             if (!cancelled) {
-                loadSnapshot(true);
+                loadSnapshot({ silent: true, forceRefresh: false, periodValue: period });
             }
         }, 15000);
         return () => {
             cancelled = true;
             clearInterval(interval);
         };
-    }, [loadSnapshot]);
+    }, [loadSnapshot, period]);
+
+    const windowLabel = useMemo(
+        () => snapshot?.period_label || selectedPeriodLabel,
+        [snapshot, selectedPeriodLabel],
+    );
 
     const queueBars = useMemo(() => {
         if (!snapshot) return [];
@@ -96,90 +122,116 @@ export default function AdminDashboard() {
 
     const throughputBars = useMemo(() => {
         if (!snapshot) return [];
+        const windowValue = snapshot.throughput_window ?? snapshot.throughput_last_24h ?? 0;
         return [
             { label: 'Last hour', value: snapshot.throughput_last_hour || 0 },
-            { label: 'Last 24h', value: snapshot.throughput_last_24h || 0 },
+            { label: `Selected (${windowLabel})`, value: windowValue },
         ];
-    }, [snapshot]);
+    }, [snapshot, windowLabel]);
 
     const durationBars = useMemo(() => {
         if (!snapshot) return [];
+        const avgDuration = snapshot.avg_duration_seconds_window ?? snapshot.avg_duration_seconds_last_24h ?? 0;
+        const p95Duration = snapshot.p95_duration_seconds_window ?? snapshot.p95_duration_seconds_last_24h ?? 0;
         return [
-            { label: 'Average (s)', value: Number(snapshot.avg_duration_seconds_last_24h || 0) },
-            { label: 'P95 (s)', value: Number(snapshot.p95_duration_seconds_last_24h || 0) },
+            { label: 'Average (s)', value: Number(avgDuration) },
+            { label: 'P95 (s)', value: Number(p95Duration) },
         ];
     }, [snapshot]);
 
     const metricsBars = useMemo(() => {
         if (!snapshot) return [];
+        const total = snapshot.metrics_total_window ?? snapshot.metrics_total_24h ?? 0;
+        const success = snapshot.metrics_success_window ?? snapshot.metrics_success_24h ?? 0;
+        const failed = snapshot.metrics_failed_window ?? snapshot.metrics_failed_24h ?? 0;
+        const skipped = snapshot.metrics_skipped_window ?? snapshot.metrics_skipped_24h ?? 0;
         return [
-            { label: 'Total', value: snapshot.metrics_total_24h || 0 },
-            { label: 'Success', value: snapshot.metrics_success_24h || 0 },
-            { label: 'Failed', value: snapshot.metrics_failed_24h || 0 },
-            { label: 'Skipped', value: snapshot.metrics_skipped_24h || 0 },
+            { label: 'Total', value: total },
+            { label: 'Success', value: success },
+            { label: 'Failed', value: failed },
+            { label: 'Skipped', value: skipped },
         ];
     }, [snapshot]);
 
-    const handleReprocess = async (jobId) => {
+    const successRateWindow = snapshot?.success_rate_window ?? snapshot?.success_rate_last_24h ?? 0;
+    const deadLetterWindow = snapshot?.dead_letter_jobs_window ?? snapshot?.dead_letter_jobs_24h ?? 0;
+
+    const handleReprocess = useCallback(async (jobId) => {
         setReprocessingJobId(jobId);
         try {
             const job = await jobsService.reprocessJob(jobId);
             showToast(`Reprocess job queued (${job.id}).`, 'success');
-            await loadSnapshot(true);
+            await loadSnapshot({ silent: true, forceRefresh: true, periodValue: period });
         } catch (error) {
             const message = error?.response?.data?.detail || 'Failed to reprocess dead-letter job';
             showToast(message, 'error');
         } finally {
             setReprocessingJobId(null);
         }
-    };
+    }, [showToast, loadSnapshot, period]);
 
     return (
-        <div className="h-screen flex flex-col bg-background">
-            <div className="border-b px-5 py-4 flex items-center justify-between gap-3">
+        <div className="app-page">
+            <div className="page-header flex flex-wrap items-start justify-between gap-3">
                 <div>
-                    <h1 className="text-xl font-semibold">Admin Dashboard</h1>
-                    <p className="text-sm text-muted-foreground">Operational health and job analytics in real time.</p>
+                    <h1 className="page-title">Admin Dashboard</h1>
+                    <p className="page-subtitle">Operational health and job analytics in real time.</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                     <AdminTabs />
+                    <select
+                        value={period}
+                        onChange={(event) => setPeriod(event.target.value)}
+                        className="input-shell px-2 py-1.5 text-sm"
+                        aria-label="Select period window"
+                    >
+                        {PERIOD_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                    </select>
                     <button
                         type="button"
-                        onClick={() => loadSnapshot(true)}
-                        className="px-3 py-1.5 rounded-md border text-sm hover:bg-accent inline-flex items-center gap-2"
+                        onClick={() => loadSnapshot({ silent: true, forceRefresh: true, periodValue: period })}
+                        className="btn-refresh"
                     >
                         {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                        Refresh
+                        Reload
                     </button>
                 </div>
             </div>
 
-            <div className="flex-1 overflow-auto p-5">
+            <div className="flex-1 overflow-auto">
                 {loading && !snapshot ? (
                     <div className="flex justify-center p-12">
                         <Loader2 className="animate-spin text-primary" size={30} />
                     </div>
                 ) : !snapshot ? (
-                    <div className="text-sm text-muted-foreground">No dashboard data available.</div>
+                    <div className="empty-state">
+                        <div className="empty-state-title">No dashboard data available</div>
+                        <p className="empty-state-text">Try reloading to fetch a fresh observability snapshot.</p>
+                    </div>
                 ) : (
                     <div className="space-y-5">
-                        <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
-                            <div className="rounded-lg border p-3 bg-card">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                            <div className="surface-card p-3">
                                 <div className="text-xs text-muted-foreground">Queue Depth</div>
                                 <div className="text-2xl font-semibold">{snapshot.queue_depth}</div>
                             </div>
-                            <div className="rounded-lg border p-3 bg-card">
-                                <div className="text-xs text-muted-foreground">Dead-letter (24h)</div>
-                                <div className="text-2xl font-semibold">{snapshot.dead_letter_jobs_24h}</div>
+                            <div className="surface-card p-3">
+                                <div className="text-xs text-muted-foreground">Dead-letter ({windowLabel})</div>
+                                <div className="text-2xl font-semibold">{deadLetterWindow}</div>
                             </div>
-                            <div className="rounded-lg border p-3 bg-card">
+                            <div className="surface-card p-3">
                                 <div className="text-xs text-muted-foreground">Generated At</div>
                                 <div className="text-sm font-medium">{new Date(snapshot.generated_at).toLocaleString()}</div>
+                                <div className="text-xs text-muted-foreground mt-1">
+                                    Cache: {snapshot.cache_hit ? `hit (${snapshot.cache_ttl_seconds}s left)` : 'fresh'}
+                                </div>
                             </div>
                         </div>
 
-                        <div className="rounded-lg border p-4 bg-card">
-                            <h2 className="font-medium mb-3">Job Metrics (24h)</h2>
+                        <div className="surface-card p-4">
+                            <h2 className="font-medium mb-3">Job Metrics ({windowLabel})</h2>
                             <MiniBars
                                 items={metricsBars}
                                 max={Math.max(...metricsBars.map((item) => item.value), 1)}
@@ -187,20 +239,20 @@ export default function AdminDashboard() {
                         </div>
 
                         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                            <div className="rounded-lg border p-4 bg-card">
-                                <h2 className="font-medium mb-3">Success Rate (24h)</h2>
+                            <div className="surface-card p-4">
+                                <h2 className="font-medium mb-3">Success Rate ({windowLabel})</h2>
                                 <div className="flex items-center justify-center">
-                                    <PercentRing value={(snapshot.success_rate_last_24h || 0) * 100} />
+                                    <PercentRing value={successRateWindow * 100} />
                                 </div>
                             </div>
-                            <div className="rounded-lg border p-4 bg-card">
+                            <div className="surface-card p-4">
                                 <h2 className="font-medium mb-3">Queue Load</h2>
                                 <MiniBars
                                     items={queueBars}
                                     max={Math.max(...queueBars.map((item) => item.value), 1)}
                                 />
                             </div>
-                            <div className="rounded-lg border p-4 bg-card">
+                            <div className="surface-card p-4">
                                 <h2 className="font-medium mb-3">Throughput</h2>
                                 <MiniBars
                                     items={throughputBars}
@@ -217,21 +269,21 @@ export default function AdminDashboard() {
                         </div>
 
                         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                            <div className="rounded-lg border p-4 bg-card">
+                            <div className="surface-card p-4">
                                 <h2 className="font-medium mb-3">Integration Health</h2>
                                 <div className="space-y-2">
                                     {(snapshot.integration_health || []).map((item) => (
-                                        <div key={item.key} className="flex items-start justify-between gap-2 border rounded-md p-2">
+                                        <div key={item.key} className="flex items-start justify-between gap-2 rounded-lg border border-border/70 bg-card/70 p-2.5">
                                             <div>
                                                 <div className="text-sm font-medium">{item.label}</div>
                                                 <div className="text-xs text-muted-foreground">{item.detail || '-'}</div>
                                             </div>
-                                            <span className={`px-2 py-0.5 rounded border text-xs ${
+                                            <span className={`status-chip ${
                                                 item.status === 'ok'
-                                                    ? 'text-green-700 border-green-200 bg-green-50'
+                                                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                                                     : item.status === 'warning'
-                                                        ? 'text-amber-700 border-amber-200 bg-amber-50'
-                                                        : 'text-red-700 border-red-200 bg-red-50'
+                                                        ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                                        : 'border-rose-200 bg-rose-50 text-rose-700'
                                             }`}>
                                                 {item.status}
                                             </span>
@@ -240,11 +292,11 @@ export default function AdminDashboard() {
                                 </div>
                             </div>
 
-                            <div className="rounded-lg border p-4 bg-card">
+                            <div className="surface-card p-4">
                                 <h2 className="font-medium mb-3">Alerts</h2>
                                 <div className="space-y-2">
                                     {(snapshot.recent_alerts || []).map((alert) => (
-                                        <div key={`${alert.code}:${alert.created_at}`} className="border rounded-md p-2 bg-muted/20">
+                                        <div key={`${alert.code}:${alert.created_at}`} className="rounded-lg border border-border/70 bg-muted/25 p-2.5">
                                             <div className="text-sm font-medium inline-flex items-center gap-1">
                                                 {alert.severity !== 'info' && <AlertTriangle className="w-4 h-4" />}
                                                 {alert.severity.toUpperCase()} - {alert.code}
@@ -256,12 +308,12 @@ export default function AdminDashboard() {
                             </div>
                         </div>
 
-                        <div className="rounded-lg border p-4 bg-card">
+                        <div className="surface-card p-4">
                             <h2 className="font-medium mb-3">Dead-letter Queue</h2>
                             {snapshot.dead_letter_jobs?.length > 0 ? (
                                 <div className="space-y-2">
                                     {snapshot.dead_letter_jobs.map((job) => (
-                                        <div key={job.id} className="border rounded-md p-2 flex items-center justify-between gap-3">
+                                        <div key={job.id} className="rounded-lg border border-border/70 bg-card/70 p-2.5 flex items-center justify-between gap-3">
                                             <div className="min-w-0">
                                                 <div className="text-sm font-medium truncate">{job.type}</div>
                                                 <div className="text-xs text-muted-foreground truncate">
@@ -275,7 +327,7 @@ export default function AdminDashboard() {
                                                 type="button"
                                                 onClick={() => handleReprocess(job.id)}
                                                 disabled={reprocessingJobId === job.id}
-                                                className="px-3 py-1.5 rounded-md border text-sm hover:bg-accent disabled:opacity-50 inline-flex items-center gap-2"
+                                                className="btn-refresh disabled:opacity-50"
                                             >
                                                 {reprocessingJobId === job.id
                                                     ? <Loader2 className="w-4 h-4 animate-spin" />

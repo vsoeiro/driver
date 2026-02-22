@@ -18,14 +18,18 @@ export default function Layout() {
     }, [sidebarCollapsed]);
 
     return (
-        <div className="flex min-h-screen bg-background text-foreground">
-            <Sidebar
-                collapsed={sidebarCollapsed}
-                onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
-            />
-            <main className="flex-1 min-w-0 overflow-auto">
-                <Outlet />
-            </main>
+        <div className="app-shell">
+            <div className="min-h-screen p-3 sm:p-4">
+                <div className="app-panel flex h-[calc(100vh-1.5rem)] overflow-hidden">
+                    <Sidebar
+                        collapsed={sidebarCollapsed}
+                        onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
+                    />
+                    <main className="flex-1 min-w-0 min-h-0 overflow-auto">
+                        <Outlet />
+                    </main>
+                </div>
+            </div>
         </div>
     );
 }
