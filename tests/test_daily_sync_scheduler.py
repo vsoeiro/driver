@@ -60,12 +60,6 @@ async def test_get_runtime_settings_falls_back_to_env_defaults():
         enable_daily_sync_scheduler=True,
         daily_sync_cron="0 1 * * *",
         worker_job_timeout_seconds=900,
-        ai_enabled=True,
-        ai_provider="ollama",
-        ai_base_url="http://localhost:11434",
-        ai_model="llama3.1:8b",
-        ai_temperature=0.1,
-        ai_timeout_seconds=120,
     )
 
     with patch("backend.services.sync_scheduler.get_settings", return_value=fake_settings):
@@ -74,4 +68,3 @@ async def test_get_runtime_settings_falls_back_to_env_defaults():
     assert isinstance(runtime, RuntimeSettings)
     assert runtime.daily_sync_cron == "0 1 * * *"
     assert runtime.worker_job_timeout_seconds == 900
-    assert runtime.ai_provider == "ollama"

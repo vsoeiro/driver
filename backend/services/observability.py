@@ -17,7 +17,6 @@ from backend.schemas.admin import (
     ObservabilityAlert,
     ObservabilitySnapshot,
 )
-from backend.services.ai import AIService
 from backend.services.app_settings import AppSettingsService
 from backend.services.job_queue import get_job_queue
 
@@ -100,20 +99,12 @@ class ObservabilityService:
             provider_counts[account.provider] = provider_counts.get(account.provider, 0) + 1
 
         runtime = await AppSettingsService(self.session).get_runtime_settings()
-        ai_config, ai_available, ai_detail = await AIService(self.session).health()
-
         integration_health = [
             IntegrationHealthStatus(
                 key="redis",
                 label="Redis Queue",
                 status="ok" if redis_ok else "error",
                 detail=redis_detail,
-            ),
-            IntegrationHealthStatus(
-                key="ai",
-                label="Local AI",
-                status="ok" if ai_available else "warning",
-                detail=ai_detail,
             ),
             IntegrationHealthStatus(
                 key="scheduler",
@@ -176,8 +167,6 @@ class ObservabilityService:
             recent_alerts=alerts,
             integration_health=integration_health,
             dead_letter_jobs=dead_letter_jobs,
-            ai_provider=ai_config.provider,
-            ai_model=ai_config.model,
         )
 
     @staticmethod

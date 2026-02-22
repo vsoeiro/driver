@@ -33,12 +33,6 @@ async def get_runtime_settings(db: DBSession) -> RuntimeSettingsResponse:
         enable_daily_sync_scheduler=settings.enable_daily_sync_scheduler,
         daily_sync_cron=settings.daily_sync_cron,
         worker_job_timeout_seconds=settings.worker_job_timeout_seconds,
-        ai_enabled=settings.ai_enabled,
-        ai_provider=settings.ai_provider,
-        ai_base_url=settings.ai_base_url,
-        ai_model=settings.ai_model,
-        ai_temperature=settings.ai_temperature,
-        ai_timeout_seconds=settings.ai_timeout_seconds,
         plugin_settings=[
             PluginSettingsGroupResponse(
                 plugin_key=group["plugin_key"],
@@ -63,12 +57,6 @@ async def update_runtime_settings(
         enable_daily_sync_scheduler=payload.enable_daily_sync_scheduler,
         daily_sync_cron=payload.daily_sync_cron,
         worker_job_timeout_seconds=payload.worker_job_timeout_seconds,
-        ai_enabled=payload.ai_enabled,
-        ai_provider=payload.ai_provider,
-        ai_base_url=payload.ai_base_url,
-        ai_model=payload.ai_model,
-        ai_temperature=payload.ai_temperature,
-        ai_timeout_seconds=payload.ai_timeout_seconds,
     )
     try:
         await plugin_service.update_plugin_configs(payload.plugin_settings)
@@ -79,12 +67,6 @@ async def update_runtime_settings(
         enable_daily_sync_scheduler=settings.enable_daily_sync_scheduler,
         daily_sync_cron=settings.daily_sync_cron,
         worker_job_timeout_seconds=settings.worker_job_timeout_seconds,
-        ai_enabled=settings.ai_enabled,
-        ai_provider=settings.ai_provider,
-        ai_base_url=settings.ai_base_url,
-        ai_model=settings.ai_model,
-        ai_temperature=settings.ai_temperature,
-        ai_timeout_seconds=settings.ai_timeout_seconds,
         plugin_settings=[
             PluginSettingsGroupResponse(
                 plugin_key=group["plugin_key"],

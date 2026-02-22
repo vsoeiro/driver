@@ -2,10 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import Modal from './Modal';
 import { metadataService } from '../services/metadata';
 import { jobsService } from '../services/jobs';
-import { aiService } from '../services/ai';
 import { driveService } from '../services/drive';
 import { useToast } from '../contexts/ToastContext';
-import { Loader2, AlertTriangle, Sparkles, ZoomIn, ZoomOut, X } from 'lucide-react';
+import { Loader2, AlertTriangle, ZoomIn, ZoomOut, X } from 'lucide-react';
 import { getCategoryPluginView } from '../plugins/metadataCategoryViews';
 import { buildCoverCacheKey, getCachedCoverUrl, setCachedCoverUrl } from '../utils/coverCache';
 import {
@@ -17,15 +16,6 @@ import {
     sortAttributesForCategory,
     tagsToInputValue,
 } from '../utils/metadata';
-const COMIC_AI_ALLOWED_FIELDS = new Set([
-    'series',
-    'volume',
-    'issue_number',
-    'title',
-    'publisher',
-    'writer',
-    'penciller',
-]);
 const DEFAULT_COMIC_FORM_FIELD_GROUPS = [
     ['series', 'title'],
     ['volume', 'issue_number', 'year', 'month'],
@@ -56,8 +46,6 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [history, setHistory] = useState([]);
-    const [aiFilling, setAiFilling] = useState(false);
-    const [aiSuggestions, setAiSuggestions] = useState({});
     const [coverUrl, setCoverUrl] = useState(null);
     const [coverLoading, setCoverLoading] = useState(false);
     const [isCoverZoomOpen, setIsCoverZoomOpen] = useState(false);
@@ -104,11 +92,9 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
             if (meta) {
                 setSelectedCategoryId(meta.category_id);
                 setFormValues(meta.values || {});
-                setAiSuggestions(meta.ai_suggestions || {});
             } else {
                 setSelectedCategoryId('');
                 setFormValues({});
-                setAiSuggestions({});
             }
             const historyData = await metadataService.getItemMetadataHistory(accountId, providerItemId);
             setHistory(historyData || []);
@@ -128,7 +114,6 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
             // Reset state
             setSelectedCategoryId('');
             setFormValues({});
-            setAiSuggestions({});
             setHistory([]);
             setLayoutMap({});
             setTagInputDrafts({});
@@ -156,116 +141,6 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
         window.addEventListener('keydown', onKeyDown);
         return () => window.removeEventListener('keydown', onKeyDown);
     }, [isCoverZoomOpen]);
-
-    const normalizeAiValue = (attribute, value) => {
-        if (value === undefined || value === null || value === '') return value;
-
-        if (attribute.data_type === 'boolean') {
-            if (typeof value === 'boolean') return value;
-            if (typeof value === 'number') return value !== 0;
-            if (typeof value === 'string') {
-                const normalized = value.trim().toLowerCase();
-                if (['true', 'yes', '1', 'y'].includes(normalized)) return true;
-                if (['false', 'no', '0', 'n'].includes(normalized)) return false;
-            }
-            return Boolean(value);
-        }
-
-        if (attribute.data_type === 'number') {
-            const parsed = Number(value);
-            return Number.isNaN(parsed) ? value : parsed;
-        }
-
-        if (attribute.data_type === 'date') {
-            const strValue = String(value);
-            return strValue.length >= 10 ? strValue.slice(0, 10) : strValue;
-        }
-
-        if (attribute.data_type === 'tags') {
-            return Array.isArray(value) ? value : parseTagsInput(String(value));
-        }
-
-        return value;
-    };
-
-    const handleFillWithAI = async () => {
-        if (!selectedCategoryId) {
-            showToast('Select a category first', 'error');
-            return;
-        }
-        if (!item?.name) {
-            showToast('File name is not available for AI extraction', 'error');
-            return;
-        }
-
-        try {
-            setAiFilling(true);
-            const category = categories.find(c => c.id === selectedCategoryId);
-            const titleAttr = (category?.attributes || []).find(
-                (attr) => attr.plugin_field_key === 'title'
-            );
-            const coverAttr = (category?.attributes || []).find(
-                (attr) => attr.plugin_field_key === 'cover_item_id'
-            );
-            const coverAccountAttr = (category?.attributes || []).find(
-                (attr) => attr.plugin_field_key === 'cover_account_id'
-            );
-
-            const title = titleAttr ? (formValues[titleAttr.id] || item.name) : item.name;
-            const coverItemId = coverAttr ? formValues[coverAttr.id] : null;
-            const coverAccountId = coverAccountAttr ? formValues[coverAccountAttr.id] : accountId;
-            if (!coverItemId) {
-                showToast('Run Map Comics first so cover metadata is available for AI.', 'error');
-                return;
-            }
-
-            const result = await aiService.suggestComicMetadata({
-                category_id: selectedCategoryId,
-                title,
-                account_id: accountId,
-                item_id: providerItemId,
-                cover_account_id: coverAccountId || null,
-                cover_item_id: coverItemId || null,
-            });
-
-            const attrsById = new Map((category?.attributes || []).map((a) => [a.id, a]));
-            const normalizedSuggestions = {};
-            Object.entries(result.suggestions || {}).forEach(([attrId, rawSuggestion]) => {
-                const attr = attrsById.get(attrId);
-                if (!attr || !rawSuggestion || typeof rawSuggestion !== 'object') return;
-                if (isComicPluginCategory) {
-                    if (!COMIC_AI_ALLOWED_FIELDS.has(attr.plugin_field_key)) return;
-                    if (READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key)) return;
-                }
-                normalizedSuggestions[attrId] = {
-                    ...rawSuggestion,
-                    value: normalizeAiValue(attr, rawSuggestion.value),
-                };
-            });
-
-            const filledCount = Object.keys(normalizedSuggestions).length;
-            if (filledCount === 0) {
-                showToast('AI did not generate useful suggestions for this item.', 'error');
-                return;
-            }
-
-            setAiSuggestions((prev) => ({ ...prev, ...normalizedSuggestions }));
-            await metadataService.updateItemAISuggestions(accountId, providerItemId, {
-                category_id: selectedCategoryId,
-                suggestions: { ...aiSuggestions, ...normalizedSuggestions },
-            });
-
-            showToast(
-                `AI suggested ${filledCount} field(s)`,
-                'success'
-            );
-        } catch (error) {
-            const message = error?.response?.data?.detail || 'Failed to generate AI suggestions';
-            showToast(message, 'error');
-        } finally {
-            setAiFilling(false);
-        }
-    };
 
     const handleSave = async (e) => {
         e.preventDefault();
@@ -323,7 +198,6 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                     item_id: providerItemId,
                     category_id: selectedCategoryId,
                     values: formValues,
-                    ai_suggestions: aiSuggestions,
                 });
                 showToast('Metadata saved successfully', 'success');
             }
@@ -344,45 +218,6 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
             ...prev,
             [attributeId]: value
         }));
-        if (aiSuggestions[attributeId]) {
-            setAiSuggestions((prev) => {
-                const next = { ...prev };
-                delete next[attributeId];
-                return next;
-            });
-        }
-    };
-
-    const handleAcceptSuggestion = async (attributeId) => {
-        if (!selectedCategoryId) return;
-        try {
-            const updated = await metadataService.acceptItemAISuggestion(accountId, providerItemId, {
-                category_id: selectedCategoryId,
-                attribute_id: attributeId,
-            });
-            setFormValues(updated.values || {});
-            setAiSuggestions(updated.ai_suggestions || {});
-            setTagInputDrafts({});
-            showToast('AI suggestion accepted', 'success');
-        } catch (error) {
-            const message = error?.response?.data?.detail || 'Failed to accept AI suggestion';
-            showToast(message, 'error');
-        }
-    };
-
-    const handleRejectSuggestion = async (attributeId) => {
-        if (!selectedCategoryId) return;
-        try {
-            const updated = await metadataService.rejectItemAISuggestion(accountId, providerItemId, {
-                category_id: selectedCategoryId,
-                attribute_id: attributeId,
-            });
-            setAiSuggestions(updated.ai_suggestions || {});
-            showToast('AI suggestion rejected', 'success');
-        } catch (error) {
-            const message = error?.response?.data?.detail || 'Failed to reject AI suggestion';
-            showToast(message, 'error');
-        }
     };
 
     const selectedCategory = categories.find(c => c.id === selectedCategoryId);
@@ -438,12 +273,6 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
     const coverItemId = coverAttr ? formValues?.[coverAttr.id] : null;
     const coverAccountId = coverAccountAttr ? formValues?.[coverAccountAttr.id] : accountId;
     const showCoverPanel = !!(selectedCategory && coverAttr && item?.item_type !== 'folder');
-    const canUseComicAI = !!(
-        selectedCategory &&
-        isComicPluginCategory &&
-        item?.item_type !== 'folder' &&
-        coverItemId
-    );
 
     useEffect(() => {
         if (!isOpen || !showCoverPanel || !coverItemId || !coverAccountId) {
@@ -487,19 +316,6 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
     const renderAttributeField = (attr, className = '', style = null) => {
         const isReadOnlyComputed = selectedCategory?.plugin_key === 'comicrack_core'
             && READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key);
-        const isAiEligibleComputed = !(
-            isComicPluginCategory && !COMIC_AI_ALLOWED_FIELDS.has(attr.plugin_field_key)
-        );
-        const suggestion = isAiEligibleComputed ? aiSuggestions[attr.id] : null;
-        const suggestionValue = suggestion?.value;
-        const suggestionText = suggestionValue === undefined || suggestionValue === null
-            ? ''
-            : Array.isArray(suggestionValue)
-                ? suggestionValue.join(', ')
-                : String(suggestionValue);
-        const confidence = typeof suggestion?.confidence === 'number'
-            ? Math.round(suggestion.confidence * 100)
-            : null;
         const tagsValue = tagInputDrafts[attr.id] ?? tagsToInputValue(formValues[attr.id] || []);
 
         return (
@@ -514,7 +330,6 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                         type="text"
                         className="w-full border rounded-md p-2 bg-background"
                         value={formValues[attr.id] || ''}
-                        placeholder={!formValues[attr.id] ? suggestionText : ''}
                         disabled={isReadOnlyComputed}
                         onChange={(e) => handleInputChange(attr.id, e.target.value)}
                     />
@@ -525,7 +340,6 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                         type="number"
                         className="w-full border rounded-md p-2 bg-background"
                         value={formValues[attr.id] || ''}
-                        placeholder={!formValues[attr.id] ? suggestionText : ''}
                         disabled={isReadOnlyComputed}
                         onChange={(e) => handleInputChange(attr.id, e.target.value)}
                     />
@@ -561,9 +375,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                         disabled={isReadOnlyComputed}
                         onChange={(e) => handleInputChange(attr.id, e.target.value)}
                     >
-                        <option value="">
-                            {suggestionText ? `AI: ${suggestionText}` : 'Select...'}
-                        </option>
+                        <option value="">Select...</option>
                         {getSelectOptions(attr.options).map((opt) => (
                             <option key={opt} value={opt}>{opt}</option>
                         ))}
@@ -576,7 +388,7 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                             type="text"
                             className="w-full border rounded-md p-2 bg-background"
                             value={tagsValue}
-                            placeholder={!tagsValue ? (suggestionText || 'tag1, tag2, tag3') : ''}
+                            placeholder={!tagsValue ? 'tag1, tag2, tag3' : ''}
                             disabled={isReadOnlyComputed}
                             onChange={(e) => {
                                 const text = e.target.value;
@@ -609,28 +421,6 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                 {isReadOnlyComputed && (
                     <div className="mt-1 text-xs text-muted-foreground">
                         Mapped field (read-only)
-                    </div>
-                )}
-
-                {suggestion && (
-                    <div className="mt-2 flex items-center gap-2 text-xs">
-                        <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-700">
-                            AI suggestion{confidence !== null ? ` (${confidence}%)` : ''}
-                        </span>
-                        <button
-                            type="button"
-                            onClick={() => handleAcceptSuggestion(attr.id)}
-                            className="px-2 py-0.5 rounded border hover:bg-accent"
-                        >
-                            Accept
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => handleRejectSuggestion(attr.id)}
-                            className="px-2 py-0.5 rounded border hover:bg-accent"
-                        >
-                            Reject
-                        </button>
                     </div>
                 )}
             </div>
@@ -719,7 +509,6 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                                     value={selectedCategoryId}
                                     onChange={e => {
                                         setSelectedCategoryId(e.target.value);
-                                        setAiSuggestions({});
                                     }}
                                 >
                                     <option value="">Select a category...</option>
@@ -728,35 +517,6 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                                     ))}
                                 </select>
                             </div>
-
-                            {selectedCategory && (
-                                <div className="space-y-2 border rounded-md p-3 bg-muted/20">
-                                    <div className="flex items-center justify-between gap-3">
-                                        <div>
-                                            <h4 className="text-sm font-medium">AI Assist</h4>
-                                            <p className="text-xs text-muted-foreground">
-                                                AI suggestions are enabled only after comic cover is mapped.
-                                            </p>
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={handleFillWithAI}
-                                            disabled={aiFilling || !item?.name || !canUseComicAI}
-                                            className="px-3 py-2 text-sm font-medium border rounded-md hover:bg-accent disabled:opacity-50 flex items-center gap-2"
-                                        >
-                                            {aiFilling ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />}
-                                            Fill with AI
-                                        </button>
-                                    </div>
-                                    <div className="text-xs text-muted-foreground bg-background border rounded-md p-2">
-                                        {!isComicPluginCategory
-                                            ? 'AI Assist is available only for Comics plugin category.'
-                                            : !coverItemId
-                                                ? 'Run Map Comics first to populate cover metadata, then AI assist will be enabled.'
-                                                : <>Source context: <span className="font-medium">{item?.name || '-'}</span></>}
-                                    </div>
-                                </div>
-                            )}
 
                             {selectedCategory && (
                                 <div className="space-y-3 border-t pt-4">

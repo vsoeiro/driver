@@ -86,12 +86,6 @@ export default function AdminSettings() {
         enable_daily_sync_scheduler: true,
         daily_sync_cron: '0 0 * * *',
         worker_job_timeout_seconds: 1800,
-        ai_enabled: true,
-        ai_provider: 'ollama',
-        ai_base_url: 'http://localhost:11434',
-        ai_model: 'llama3.1:8b',
-        ai_temperature: 0.1,
-        ai_timeout_seconds: 120,
         plugin_settings: [],
     });
 
@@ -108,12 +102,6 @@ export default function AdminSettings() {
                     enable_daily_sync_scheduler: data.enable_daily_sync_scheduler,
                     daily_sync_cron: data.daily_sync_cron,
                     worker_job_timeout_seconds: data.worker_job_timeout_seconds ?? 1800,
-                    ai_enabled: data.ai_enabled,
-                    ai_provider: data.ai_provider,
-                    ai_base_url: data.ai_base_url,
-                    ai_model: data.ai_model,
-                    ai_temperature: data.ai_temperature,
-                    ai_timeout_seconds: data.ai_timeout_seconds,
                     plugin_settings: data.plugin_settings || [],
                 });
             } catch (error) {
@@ -144,12 +132,6 @@ export default function AdminSettings() {
                 title: 'Workers',
                 description: 'Background worker execution limits and timeouts.',
                 type: 'workers',
-            },
-            {
-                id: 'ai',
-                title: 'Local AI',
-                description: 'Provider and inference runtime controls.',
-                type: 'ai',
             },
             ...form.plugin_settings.map((group) => ({
                 id: `plugin:${group.plugin_key}`,
@@ -215,24 +197,12 @@ export default function AdminSettings() {
                 enable_daily_sync_scheduler: form.enable_daily_sync_scheduler,
                 daily_sync_cron: form.daily_sync_cron,
                 worker_job_timeout_seconds: form.worker_job_timeout_seconds,
-                ai_enabled: form.ai_enabled,
-                ai_provider: form.ai_provider,
-                ai_base_url: form.ai_base_url,
-                ai_model: form.ai_model,
-                ai_temperature: form.ai_temperature,
-                ai_timeout_seconds: form.ai_timeout_seconds,
                 plugin_settings: pluginPayload,
             });
             setForm({
                 enable_daily_sync_scheduler: data.enable_daily_sync_scheduler,
                 daily_sync_cron: data.daily_sync_cron,
                 worker_job_timeout_seconds: data.worker_job_timeout_seconds ?? 1800,
-                ai_enabled: data.ai_enabled,
-                ai_provider: data.ai_provider,
-                ai_base_url: data.ai_base_url,
-                ai_model: data.ai_model,
-                ai_temperature: data.ai_temperature,
-                ai_timeout_seconds: data.ai_timeout_seconds,
                 plugin_settings: data.plugin_settings || [],
             });
             showToast('Settings saved successfully', 'success');
@@ -333,111 +303,6 @@ export default function AdminSettings() {
                         <p className="text-xs text-muted-foreground mt-1">
                             This value is read by worker processes. Restart workers after saving.
                         </p>
-                    </div>
-                </div>
-            );
-        }
-
-        if (selectedGroup.type === 'ai') {
-            return (
-                <div className="space-y-4">
-                    <div className="flex items-center justify-between gap-4">
-                        <div>
-                            <h2 className="font-medium">Local AI</h2>
-                            <p className="text-sm text-muted-foreground">Configure local AI provider for schema generation and metadata extraction.</p>
-                        </div>
-                        <label className="inline-flex items-center gap-2 text-sm">
-                            <input
-                                type="checkbox"
-                                checked={form.ai_enabled}
-                                onChange={(e) =>
-                                    setForm((prev) => ({
-                                        ...prev,
-                                        ai_enabled: e.target.checked,
-                                    }))
-                                }
-                            />
-                            Enabled
-                        </label>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium mb-1">Provider</label>
-                            <select
-                                className="w-full border rounded-md p-2 bg-background text-sm"
-                                value={form.ai_provider}
-                                onChange={(e) =>
-                                    setForm((prev) => ({
-                                        ...prev,
-                                        ai_provider: e.target.value,
-                                    }))
-                                }
-                            >
-                                <option value="ollama">ollama</option>
-                                <option value="llama_cpp">llama_cpp</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium mb-1">Model</label>
-                            <input
-                                type="text"
-                                className="w-full border rounded-md p-2 bg-background text-sm"
-                                value={form.ai_model}
-                                onChange={(e) =>
-                                    setForm((prev) => ({
-                                        ...prev,
-                                        ai_model: e.target.value,
-                                    }))
-                                }
-                            />
-                        </div>
-                        <div className="md:col-span-2">
-                            <label className="block text-sm font-medium mb-1">Base URL</label>
-                            <input
-                                type="text"
-                                className="w-full border rounded-md p-2 bg-background text-sm"
-                                value={form.ai_base_url}
-                                onChange={(e) =>
-                                    setForm((prev) => ({
-                                        ...prev,
-                                        ai_base_url: e.target.value,
-                                    }))
-                                }
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium mb-1">Temperature</label>
-                            <input
-                                type="number"
-                                step="0.1"
-                                min="0"
-                                max="2"
-                                className="w-full border rounded-md p-2 bg-background text-sm"
-                                value={form.ai_temperature}
-                                onChange={(e) =>
-                                    setForm((prev) => ({
-                                        ...prev,
-                                        ai_temperature: Number(e.target.value),
-                                    }))
-                                }
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium mb-1">Timeout (seconds)</label>
-                            <input
-                                type="number"
-                                min="1"
-                                className="w-full border rounded-md p-2 bg-background text-sm"
-                                value={form.ai_timeout_seconds}
-                                onChange={(e) =>
-                                    setForm((prev) => ({
-                                        ...prev,
-                                        ai_timeout_seconds: Number(e.target.value),
-                                    }))
-                                }
-                            />
-                        </div>
                     </div>
                 </div>
             );

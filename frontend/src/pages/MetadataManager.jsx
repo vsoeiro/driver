@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { metadataService } from '../services/metadata';
 import { itemsService } from '../services/items';
 import { accountsService } from '../services/accounts';
-import { aiService } from '../services/ai';
 import { driveService } from '../services/drive';
 import { getCategoryPluginView } from '../plugins/metadataCategoryViews';
 import { buildCoverCacheKey, getCachedCoverUrl, setCachedCoverUrl } from '../utils/coverCache';
@@ -17,7 +16,7 @@ import {
     Plus, Trash2, ChevronRight, ChevronDown, ChevronLeft,
     Database, Loader2, Tag, Hash, ArrowLeft,
     File, Folder, ArrowUpDown, ArrowUp, ArrowDown,
-    CheckSquare, Square, Eye, Search, Filter, User, Sparkles, Pencil,
+    CheckSquare, Square, Eye, Search, Filter, User, Pencil,
     Download, ArrowRightLeft, XCircle, Check, X
 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -623,7 +622,6 @@ const CategoryItemsTable = ({ category, onBack }) => {
                             ...(row.metadata || {}),
                             ...updatedMetadata,
                             values: updatedMetadata?.values || {},
-                            ai_suggestions: updatedMetadata?.ai_suggestions || {},
                         },
                     };
                 })
@@ -1518,10 +1516,6 @@ export default function MetadataManager() {
     const [editingAttribute, setEditingAttribute] = useState(false);
     const [deleteCategoryTarget, setDeleteCategoryTarget] = useState(null);
     const [deletingCategory, setDeletingCategory] = useState(false);
-    const [aiModalOpen, setAiModalOpen] = useState(false);
-    const [aiGeneratingCategory, setAiGeneratingCategory] = useState(false);
-    const [aiDocumentType, setAiDocumentType] = useState('');
-    const [aiSampleText, setAiSampleText] = useState('');
     const [layoutBuilderOpen, setLayoutBuilderOpen] = useState(false);
 
     const loadCategories = useCallback(async () => {
@@ -1669,41 +1663,6 @@ export default function MetadataManager() {
         setExpandedCategory(expandedCategory === id ? null : id);
     };
 
-    const handleGenerateCategoryWithAI = async (e) => {
-        e.preventDefault();
-        if (!aiDocumentType.trim()) {
-            showToast('Document type is required', 'error');
-            return;
-        }
-
-        try {
-            setAiGeneratingCategory(true);
-            const result = await aiService.suggestCategorySchema({
-                document_type: aiDocumentType.trim(),
-                sample_text: aiSampleText.trim() || null,
-                create_in_db: true,
-            });
-
-            showToast(
-                `Category "${result.suggestion.category_name}" created with ${result.suggestion.attributes.length} attributes`,
-                'success'
-            );
-            setAiModalOpen(false);
-            setAiDocumentType('');
-            setAiSampleText('');
-            await loadCategories();
-            if (result.created_category_id) {
-                setExpandedCategory(result.created_category_id);
-            }
-        } catch (error) {
-            const message = error?.response?.data?.detail || 'Failed to generate category with AI';
-            showToast(message, 'error');
-        } finally {
-            setAiGeneratingCategory(false);
-        }
-    };
-
-
     // If viewing a specific category's items
     if (viewingCategory) {
         return (
@@ -1733,12 +1692,6 @@ export default function MetadataManager() {
                         className="flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-accent text-sm font-medium transition-colors disabled:opacity-40"
                     >
                         Form Layout
-                    </button>
-                    <button
-                        onClick={() => setAiModalOpen(true)}
-                        className="flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-accent text-sm font-medium transition-colors"
-                    >
-                        <Sparkles size={16} /> AI Category
                     </button>
                     <button
                         onClick={() => setCreateModalOpen(true)}
@@ -1914,58 +1867,6 @@ export default function MetadataManager() {
                             className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
                         >
                             Create
-                        </button>
-                    </div>
-                </form>
-            </Modal>
-
-            {/* AI Category Modal */}
-            <Modal
-                isOpen={aiModalOpen}
-                onClose={() => !aiGeneratingCategory && setAiModalOpen(false)}
-                title="Generate Category with AI"
-            >
-                <form onSubmit={handleGenerateCategoryWithAI} className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Document Type</label>
-                        <input
-                            type="text"
-                            required
-                            className="w-full border rounded-md p-2 bg-background"
-                            value={aiDocumentType}
-                            onChange={(e) => setAiDocumentType(e.target.value)}
-                            placeholder="e.g. Invoice, Contract, Purchase Order"
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Sample Text</label>
-                        <textarea
-                            className="w-full border rounded-md p-2 bg-background"
-                            rows={6}
-                            value={aiSampleText}
-                            onChange={(e) => setAiSampleText(e.target.value)}
-                            placeholder="Optional: paste sample text from this document type for better attribute suggestions."
-                        />
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                        This will create the category and attributes directly in Metadata Manager.
-                    </p>
-                    <div className="flex justify-end gap-2 pt-2">
-                        <button
-                            type="button"
-                            onClick={() => setAiModalOpen(false)}
-                            disabled={aiGeneratingCategory}
-                            className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={aiGeneratingCategory || !aiDocumentType.trim()}
-                            className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
-                        >
-                            {aiGeneratingCategory && <Loader2 className="animate-spin" size={14} />}
-                            Generate
                         </button>
                     </div>
                 </form>

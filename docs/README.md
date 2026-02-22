@@ -6,7 +6,7 @@ This folder contains detailed documentation for all Drive Organizer API endpoint
 
 ### Complete Backend Map
 - [All Backend Endpoints](./endpoints.md)
-- Includes `auth`, `accounts`, `drive`, `items`, `jobs`, `metadata`, `admin`, `ai`, and `/health`.
+- Includes `auth`, `accounts`, `drive`, `items`, `jobs`, `metadata`, `admin`, and `/health`.
 
 ### Authentication
 - [Google Login](./auth/google-login.md)

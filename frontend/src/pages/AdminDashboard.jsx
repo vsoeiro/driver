@@ -163,7 +163,7 @@ export default function AdminDashboard() {
                     <div className="text-sm text-muted-foreground">No dashboard data available.</div>
                 ) : (
                     <div className="space-y-5">
-                        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+                        <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
                             <div className="rounded-lg border p-3 bg-card">
                                 <div className="text-xs text-muted-foreground">Queue Depth</div>
                                 <div className="text-2xl font-semibold">{snapshot.queue_depth}</div>
@@ -171,11 +171,6 @@ export default function AdminDashboard() {
                             <div className="rounded-lg border p-3 bg-card">
                                 <div className="text-xs text-muted-foreground">Dead-letter (24h)</div>
                                 <div className="text-2xl font-semibold">{snapshot.dead_letter_jobs_24h}</div>
-                            </div>
-                            <div className="rounded-lg border p-3 bg-card">
-                                <div className="text-xs text-muted-foreground">AI Provider</div>
-                                <div className="text-lg font-semibold truncate">{snapshot.ai_provider}</div>
-                                <div className="text-xs text-muted-foreground truncate">{snapshot.ai_model}</div>
                             </div>
                             <div className="rounded-lg border p-3 bg-card">
                                 <div className="text-xs text-muted-foreground">Generated At</div>

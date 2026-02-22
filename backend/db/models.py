@@ -297,7 +297,6 @@ class ItemMetadata(Base):
         nullable=False,
     )
     values: Mapped[dict] = mapped_column(JSON, default={})  # Key: Attribute ID, Value: User Input
-    ai_suggestions: Mapped[dict] = mapped_column(JSON, default={})
     version: Mapped[int] = mapped_column(Integer, default=1)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

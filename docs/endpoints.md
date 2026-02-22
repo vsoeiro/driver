@@ -2,7 +2,7 @@
 
 Complete inventory of endpoints exposed by the backend application.
 
-- Total endpoints mapped: **82**
+- Total endpoints mapped: **75**
 - Base API prefix for routers: `/api/v1`
 - Source of truth: decorators in `backend/api/routes/*.py` plus app routes in `backend/main.py`
 
@@ -12,12 +12,11 @@ Complete inventory of endpoints exposed by the backend application.
 |-------|-------|
 | `ACCOUNTS` | 3 |
 | `ADMIN` | 3 |
-| `AI` | 4 |
 | `AUTH` | 4 |
 | `DRIVE` | 20 |
 | `ITEMS` | 2 |
 | `JOBS` | 16 |
-| `METADATA` | 29 |
+| `METADATA` | 26 |
 | `SYSTEM` | 1 |
 
 ## ACCOUNTS
@@ -33,15 +32,7 @@ Complete inventory of endpoints exposed by the backend application.
 |--------|------|---------|---------|--------|
 | `GET` | `/api/v1/admin/observability` | - | `get_observability_snapshot` | `backend/api/routes/admin.py:21` |
 | `GET` | `/api/v1/admin/settings` | - | `get_runtime_settings` | `backend/api/routes/admin.py:27` |
-| `PUT` | `/api/v1/admin/settings` | - | `update_runtime_settings` | `backend/api/routes/admin.py:56` |
-## AI
-
-| Method | Path | Summary | Handler | Source |
-|--------|------|---------|---------|--------|
-| `POST` | `/api/v1/ai/extract-metadata` | - | `extract_metadata` | `backend/api/routes/ai.py:96` |
-| `GET` | `/api/v1/ai/health` | - | `ai_health` | `backend/api/routes/ai.py:29` |
-| `POST` | `/api/v1/ai/suggest-category-schema` | - | `suggest_category_schema` | `backend/api/routes/ai.py:42` |
-| `POST` | `/api/v1/ai/suggest-comic-metadata` | - | `suggest_comic_metadata` | `backend/api/routes/ai.py:121` |
+| `PUT` | `/api/v1/admin/settings` | - | `update_runtime_settings` | `backend/api/routes/admin.py:50` |
 ## AUTH
 
 | Method | Path | Summary | Handler | Source |
@@ -79,7 +70,7 @@ Complete inventory of endpoints exposed by the backend application.
 | Method | Path | Summary | Handler | Source |
 |--------|------|---------|---------|--------|
 | `GET` | `/api/v1/items` | List all items with pagination and filtering. | `list_items` | `backend/api/routes/items.py:97` |
-| `POST` | `/api/v1/items/metadata/batch` | Batch update metadata for multiple items. | `batch_update_metadata` | `backend/api/routes/items.py:336` |
+| `POST` | `/api/v1/items/metadata/batch` | Batch update metadata for multiple items. | `batch_update_metadata` | `backend/api/routes/items.py:335` |
 ## JOBS
 
 | Method | Path | Summary | Handler | Source |
@@ -104,37 +95,34 @@ Complete inventory of endpoints exposed by the backend application.
 
 | Method | Path | Summary | Handler | Source |
 |--------|------|---------|---------|--------|
-| `DELETE` | `/api/v1/metadata/attributes/{attribute_id}` | Delete a metadata attribute. | `delete_attribute` | `backend/api/routes/metadata.py:1187` |
-| `PATCH` | `/api/v1/metadata/attributes/{attribute_id}` | Update a metadata attribute. | `update_attribute` | `backend/api/routes/metadata.py:1200` |
-| `POST` | `/api/v1/metadata/batches/{batch_id}/undo` | Undo metadata changes from a batch id. | `undo_metadata_batch_route` | `backend/api/routes/metadata.py:1617` |
-| `GET` | `/api/v1/metadata/categories` | List all metadata categories with their attributes. | `list_categories` | `backend/api/routes/metadata.py:689` |
-| `POST` | `/api/v1/metadata/categories` | Create a new metadata category. | `create_category` | `backend/api/routes/metadata.py:1117` |
-| `GET` | `/api/v1/metadata/categories/stats` | Return each category with its item count. | `get_category_stats` | `backend/api/routes/metadata.py:703` |
-| `DELETE` | `/api/v1/metadata/categories/{category_id}` | Delete a metadata category. | `delete_category` | `backend/api/routes/metadata.py:1145` |
-| `POST` | `/api/v1/metadata/categories/{category_id}/attributes` | Add an attribute to a category. | `create_attribute` | `backend/api/routes/metadata.py:1167` |
-| `GET` | `/api/v1/metadata/categories/{category_id}/series-summary` | Return one-page summary grouped by comic series for Series view. | `get_category_series_summary` | `backend/api/routes/metadata.py:848` |
-| `POST` | `/api/v1/metadata/items` | Assign or update metadata for an item. | `upsert_item_metadata` | `backend/api/routes/metadata.py:1297` |
-| `POST` | `/api/v1/metadata/items/batch-delete` | Remove metadata for multiple items. | `batch_delete_item_metadata` | `backend/api/routes/metadata.py:1563` |
-| `DELETE` | `/api/v1/metadata/items/{account_id}/{item_id}` | Remove metadata from an item. | `delete_item_metadata` | `backend/api/routes/metadata.py:1538` |
-| `GET` | `/api/v1/metadata/items/{account_id}/{item_id}` | Get metadata for a specific item. | `get_item_metadata` | `backend/api/routes/metadata.py:1226` |
-| `PATCH` | `/api/v1/metadata/items/{account_id}/{item_id}/ai-suggestions` | - | `update_item_ai_suggestions` | `backend/api/routes/metadata.py:1424` |
-| `POST` | `/api/v1/metadata/items/{account_id}/{item_id}/ai-suggestions/accept` | - | `accept_item_ai_suggestion` | `backend/api/routes/metadata.py:1457` |
-| `POST` | `/api/v1/metadata/items/{account_id}/{item_id}/ai-suggestions/reject` | - | `reject_item_ai_suggestion` | `backend/api/routes/metadata.py:1508` |
-| `PATCH` | `/api/v1/metadata/items/{account_id}/{item_id}/attributes/{attribute_id}` | Update one metadata attribute value for one item. | `update_item_metadata_attribute` | `backend/api/routes/metadata.py:1241` |
-| `GET` | `/api/v1/metadata/items/{account_id}/{item_id}/history` | List metadata change history for one item. | `get_item_metadata_history` | `backend/api/routes/metadata.py:1597` |
-| `GET` | `/api/v1/metadata/layouts` | - | `list_metadata_form_layouts` | `backend/api/routes/metadata.py:767` |
-| `GET` | `/api/v1/metadata/layouts/{category_id}` | - | `get_metadata_form_layout` | `backend/api/routes/metadata.py:780` |
-| `PUT` | `/api/v1/metadata/layouts/{category_id}` | - | `upsert_metadata_form_layout` | `backend/api/routes/metadata.py:802` |
-| `GET` | `/api/v1/metadata/plugins` | List metadata plugins. | `list_metadata_plugins` | `backend/api/routes/metadata.py:1762` |
-| `POST` | `/api/v1/metadata/plugins/{plugin_key}/activate` | Activate a metadata plugin and ensure managed schema exists. | `activate_metadata_plugin` | `backend/api/routes/metadata.py:1770` |
-| `POST` | `/api/v1/metadata/plugins/{plugin_key}/deactivate` | Deactivate a metadata plugin. | `deactivate_metadata_plugin` | `backend/api/routes/metadata.py:1793` |
-| `GET` | `/api/v1/metadata/rules` | List metadata rules by priority. | `list_metadata_rules` | `backend/api/routes/metadata.py:1628` |
-| `POST` | `/api/v1/metadata/rules` | Create a metadata rule. | `create_metadata_rule` | `backend/api/routes/metadata.py:1636` |
-| `POST` | `/api/v1/metadata/rules/preview` | Preview how many items would be changed by a rule. | `preview_metadata_rule` | `backend/api/routes/metadata.py:1705` |
-| `DELETE` | `/api/v1/metadata/rules/{rule_id}` | Delete a metadata rule. | `delete_metadata_rule` | `backend/api/routes/metadata.py:1692` |
-| `PATCH` | `/api/v1/metadata/rules/{rule_id}` | Update a metadata rule. | `update_metadata_rule` | `backend/api/routes/metadata.py:1655` |
+| `DELETE` | `/api/v1/metadata/attributes/{attribute_id}` | Delete a metadata attribute. | `delete_attribute` | `backend/api/routes/metadata.py:1137` |
+| `PATCH` | `/api/v1/metadata/attributes/{attribute_id}` | Update a metadata attribute. | `update_attribute` | `backend/api/routes/metadata.py:1150` |
+| `POST` | `/api/v1/metadata/batches/{batch_id}/undo` | Undo metadata changes from a batch id. | `undo_metadata_batch_route` | `backend/api/routes/metadata.py:1451` |
+| `GET` | `/api/v1/metadata/categories` | List all metadata categories with their attributes. | `list_categories` | `backend/api/routes/metadata.py:639` |
+| `POST` | `/api/v1/metadata/categories` | Create a new metadata category. | `create_category` | `backend/api/routes/metadata.py:1067` |
+| `GET` | `/api/v1/metadata/categories/stats` | Return each category with its item count. | `get_category_stats` | `backend/api/routes/metadata.py:653` |
+| `DELETE` | `/api/v1/metadata/categories/{category_id}` | Delete a metadata category. | `delete_category` | `backend/api/routes/metadata.py:1095` |
+| `POST` | `/api/v1/metadata/categories/{category_id}/attributes` | Add an attribute to a category. | `create_attribute` | `backend/api/routes/metadata.py:1117` |
+| `GET` | `/api/v1/metadata/categories/{category_id}/series-summary` | Return one-page summary grouped by comic series for Series view. | `get_category_series_summary` | `backend/api/routes/metadata.py:798` |
+| `POST` | `/api/v1/metadata/items` | Assign or update metadata for an item. | `upsert_item_metadata` | `backend/api/routes/metadata.py:1247` |
+| `POST` | `/api/v1/metadata/items/batch-delete` | Remove metadata for multiple items. | `batch_delete_item_metadata` | `backend/api/routes/metadata.py:1397` |
+| `DELETE` | `/api/v1/metadata/items/{account_id}/{item_id}` | Remove metadata from an item. | `delete_item_metadata` | `backend/api/routes/metadata.py:1372` |
+| `GET` | `/api/v1/metadata/items/{account_id}/{item_id}` | Get metadata for a specific item. | `get_item_metadata` | `backend/api/routes/metadata.py:1176` |
+| `PATCH` | `/api/v1/metadata/items/{account_id}/{item_id}/attributes/{attribute_id}` | Update one metadata attribute value for one item. | `update_item_metadata_attribute` | `backend/api/routes/metadata.py:1191` |
+| `GET` | `/api/v1/metadata/items/{account_id}/{item_id}/history` | List metadata change history for one item. | `get_item_metadata_history` | `backend/api/routes/metadata.py:1431` |
+| `GET` | `/api/v1/metadata/layouts` | - | `list_metadata_form_layouts` | `backend/api/routes/metadata.py:717` |
+| `GET` | `/api/v1/metadata/layouts/{category_id}` | - | `get_metadata_form_layout` | `backend/api/routes/metadata.py:730` |
+| `PUT` | `/api/v1/metadata/layouts/{category_id}` | - | `upsert_metadata_form_layout` | `backend/api/routes/metadata.py:752` |
+| `GET` | `/api/v1/metadata/plugins` | List metadata plugins. | `list_metadata_plugins` | `backend/api/routes/metadata.py:1596` |
+| `POST` | `/api/v1/metadata/plugins/{plugin_key}/activate` | Activate a metadata plugin and ensure managed schema exists. | `activate_metadata_plugin` | `backend/api/routes/metadata.py:1604` |
+| `POST` | `/api/v1/metadata/plugins/{plugin_key}/deactivate` | Deactivate a metadata plugin. | `deactivate_metadata_plugin` | `backend/api/routes/metadata.py:1627` |
+| `GET` | `/api/v1/metadata/rules` | List metadata rules by priority. | `list_metadata_rules` | `backend/api/routes/metadata.py:1462` |
+| `POST` | `/api/v1/metadata/rules` | Create a metadata rule. | `create_metadata_rule` | `backend/api/routes/metadata.py:1470` |
+| `POST` | `/api/v1/metadata/rules/preview` | Preview how many items would be changed by a rule. | `preview_metadata_rule` | `backend/api/routes/metadata.py:1539` |
+| `DELETE` | `/api/v1/metadata/rules/{rule_id}` | Delete a metadata rule. | `delete_metadata_rule` | `backend/api/routes/metadata.py:1526` |
+| `PATCH` | `/api/v1/metadata/rules/{rule_id}` | Update a metadata rule. | `update_metadata_rule` | `backend/api/routes/metadata.py:1489` |
 ## SYSTEM
 
 | Method | Path | Summary | Handler | Source |
 |--------|------|---------|---------|--------|
-| `GET` | `/health` | Health check endpoint. | `health_check` | `backend/main.py:119` |
+| `GET` | `/health` | Health check endpoint. | `health_check` | `backend/main.py:118` |

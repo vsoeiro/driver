@@ -78,12 +78,6 @@ class Settings(BaseSettings):
     daily_sync_cron: str | None = Field(default=None, alias="DAILY_SYNC_CRON")
     daily_sync_hour: int | None = Field(default=None, alias="DAILY_SYNC_HOUR")
     daily_sync_minute: int | None = Field(default=None, alias="DAILY_SYNC_MINUTE")
-    ai_enabled: bool = Field(default=True, alias="AI_ENABLED")
-    ai_provider: str = Field(default="ollama", alias="AI_PROVIDER")
-    ai_base_url: str = Field(default="http://localhost:11434", alias="AI_BASE_URL")
-    ai_model: str = Field(default="llama3.1:8b", alias="AI_MODEL")
-    ai_temperature: float = Field(default=0.1, alias="AI_TEMPERATURE")
-    ai_timeout_seconds: int = Field(default=120, alias="AI_TIMEOUT_SECONDS")
     comic_cover_storage_account_id: str | None = Field(default=None, alias="COMIC_COVER_STORAGE_ACCOUNT_ID")
     comic_cover_storage_parent_folder_id: str = Field(default="root", alias="COMIC_COVER_STORAGE_PARENT_FOLDER_ID")
     comic_cover_storage_folder_name: str = Field(
@@ -130,13 +124,6 @@ class Settings(BaseSettings):
             else:
                 self.daily_sync_cron = "0 0 * * *"
         validate_cron_expression(self.daily_sync_cron)
-        allowed_providers = {"ollama", "llama_cpp"}
-        if self.ai_provider not in allowed_providers:
-            raise ValueError(f"AI_PROVIDER must be one of {sorted(allowed_providers)}")
-        if not 0 <= self.ai_temperature <= 2:
-            raise ValueError("AI_TEMPERATURE must be between 0 and 2")
-        if self.ai_timeout_seconds <= 0:
-            raise ValueError("AI_TIMEOUT_SECONDS must be greater than 0")
         if self.comic_cover_storage_parent_folder_id.strip() == "":
             self.comic_cover_storage_parent_folder_id = "root"
         self.comic_cover_storage_folder_name = self.comic_cover_storage_folder_name.strip() or "__driver_comic_covers__"

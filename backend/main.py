@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.api.routes import accounts, admin, ai, auth, drive, jobs, metadata, items
+from backend.api.routes import accounts, admin, auth, drive, jobs, metadata, items
 from backend.core.config import get_settings
 from backend.core.exceptions import DriveOrganizerError
 from backend.db.session import async_session_maker
@@ -105,7 +105,6 @@ def create_app() -> FastAPI:
     app.include_router(metadata.router, prefix="/api/v1")
     app.include_router(items.router, prefix="/api/v1")
     app.include_router(admin.router, prefix="/api/v1")
-    app.include_router(ai.router, prefix="/api/v1")
 
     @app.exception_handler(DriveOrganizerError)
     async def handle_drive_organizer_error(_, exc: DriveOrganizerError) -> JSONResponse:

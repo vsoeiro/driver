@@ -297,7 +297,6 @@ async def list_items(
                 "item_id": metadata.item_id,
                 "category_id": metadata.category_id,
                 "values": metadata.values,
-                "ai_suggestions": metadata.ai_suggestions or {},
                 "version": metadata.version,
                 "updated_at": metadata.updated_at,
                 "category_name": category_name,
