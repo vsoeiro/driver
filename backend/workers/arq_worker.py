@@ -13,6 +13,7 @@ from arq.connections import RedisSettings
 
 from backend.core.config import get_settings
 from backend.db.session import async_session_maker
+from backend.services.job_queue import resolve_queue_name
 from backend.services.jobs import JobCancelledError, JobService
 from backend.workers.dispatcher import get_handler
 from backend.workers.handlers import comics as _comics_handler  # noqa: F401
@@ -147,7 +148,7 @@ class WorkerSettings:
 
     _settings = get_settings()
     redis_settings = RedisSettings.from_dsn(_settings.redis_url)
-    queue_name = _settings.redis_queue_name
+    queue_name = resolve_queue_name(_settings.worker_queue_name, settings=_settings)
     max_jobs = _settings.worker_concurrency
     job_timeout = _settings.worker_job_timeout_seconds
     functions = [process_job]

@@ -9,6 +9,11 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       COMIC_RAR_TOOLS_DIR: /app/.tools
+      # Keep API pool bounded. Each service has its own independent SQLAlchemy pool.
+      DB_POOL_SIZE: 6
+      DB_MAX_OVERFLOW: 0
+      # Route job types into light/default/heavy queues.
+      JOB_TYPE_QUEUE_MAP: '{"sync_items":"driver:jobs:light","apply_metadata_rule":"driver:jobs:light","upload_file":"driver:jobs","move_items":"driver:jobs","update_metadata":"driver:jobs","apply_metadata_recursive":"driver:jobs","remove_metadata_recursive":"driver:jobs","undo_metadata_batch":"driver:jobs","extract_comic_assets":"driver:jobs:heavy","extract_library_comic_assets":"driver:jobs:heavy","reindex_comic_covers":"driver:jobs:heavy"}'
     command: >
       sh -c "uv run alembic upgrade head &&
              uv run uvicorn backend.main:app --host 0.0.0.0 --port 8000"
@@ -19,16 +24,60 @@ services:
       - "8000:8000"
     restart: unless-stopped
 
-  worker:
+  worker-light:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    container_name: onedrive-cbr-worker
+    container_name: onedrive-cbr-worker-light
     env_file:
       - .env
     environment:
       REDIS_URL: redis://redis:6379/0
       COMIC_RAR_TOOLS_DIR: /app/.tools
+      WORKER_QUEUE_NAME: driver:jobs:light
+      WORKER_CONCURRENCY: 8
+      DB_POOL_SIZE: 3
+      DB_MAX_OVERFLOW: 0
+    command: uv run arq backend.workers.arq_worker.WorkerSettings
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker-default:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: onedrive-cbr-worker-default
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      COMIC_RAR_TOOLS_DIR: /app/.tools
+      WORKER_QUEUE_NAME: driver:jobs
+      WORKER_CONCURRENCY: 3
+      DB_POOL_SIZE: 2
+      DB_MAX_OVERFLOW: 0
+    command: uv run arq backend.workers.arq_worker.WorkerSettings
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker-heavy:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: onedrive-cbr-worker-heavy
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      COMIC_RAR_TOOLS_DIR: /app/.tools
+      WORKER_QUEUE_NAME: driver:jobs:heavy
+      WORKER_CONCURRENCY: 1
+      DB_POOL_SIZE: 1
+      DB_MAX_OVERFLOW: 0
     command: uv run arq backend.workers.arq_worker.WorkerSettings
     depends_on:
       redis:

@@ -151,6 +151,9 @@ async def test_reprocess_job_clones_finalized_job():
         max_retries=5,
     )
     session.get.return_value = source
+    no_duplicate = MagicMock()
+    no_duplicate.scalar_one_or_none.return_value = None
+    session.execute.return_value = no_duplicate
 
     async def _refresh(job):
         if getattr(job, "id", None) is None:
@@ -163,7 +166,10 @@ async def test_reprocess_job_clones_finalized_job():
 
     assert created.id == new_id
     assert created.reprocessed_from_job_id == source_id
-    queue.enqueue_job.assert_awaited_once_with(str(new_id))
+    queue.enqueue_job.assert_awaited_once()
+    args, kwargs = queue.enqueue_job.await_args
+    assert args[0] == str(new_id)
+    assert isinstance(kwargs.get("queue_name"), str)
 
 
 @pytest.mark.asyncio

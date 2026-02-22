@@ -5,23 +5,65 @@ import inspect
 import json
 import logging
 import math
+from hashlib import sha256
 from datetime import datetime, UTC, timedelta
 from typing import Any, Sequence
 from uuid import UUID
 
 from sqlalchemy import desc, func, select, update
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.logging_utils import log_event
 from backend.core.config import get_settings
 from backend.db.models import Job, JobAttempt
-from backend.services.job_queue import JobQueue, get_job_queue
+from backend.services.job_queue import JobQueue, get_job_queue, resolve_queue_name
 from backend.schemas.jobs import JobCreate
 
 logger = logging.getLogger(__name__)
 FINALIZED_STATUSES = {"COMPLETED", "FAILED", "DEAD_LETTER", "CANCELLED"}
 QUEUE_PENDING_STATUSES = {"PENDING", "RETRY_SCHEDULED"}
+ACTIVE_DEDUPE_STATUSES = {"PENDING", "RUNNING", "RETRY_SCHEDULED"}
+
+DEFAULT_JOB_QUEUE_ALIAS_BY_TYPE: dict[str, str] = {
+    "sync_items": "sync",
+    "upload_file": "io",
+    "move_items": "io",
+    "update_metadata": "metadata",
+    "apply_metadata_recursive": "metadata",
+    "remove_metadata_recursive": "metadata",
+    "undo_metadata_batch": "metadata",
+    "apply_metadata_rule": "rules",
+    "extract_comic_assets": "comics",
+    "extract_library_comic_assets": "comics",
+    "reindex_comic_covers": "comics",
+}
+
+DEFAULT_JOB_MAX_RETRIES_BY_TYPE: dict[str, int] = {
+    "sync_items": 2,
+    "upload_file": 4,
+    "move_items": 3,
+    "update_metadata": 2,
+    "apply_metadata_recursive": 2,
+    "remove_metadata_recursive": 2,
+    "undo_metadata_batch": 2,
+    "apply_metadata_rule": 2,
+    "extract_comic_assets": 1,
+    "extract_library_comic_assets": 1,
+    "reindex_comic_covers": 1,
+}
+
+DEFAULT_JOB_DEDUPE_KEYS_BY_TYPE: dict[str, tuple[str, ...]] = {
+    "sync_items": ("account_id",),
+    "update_metadata": ("account_id", "root_item_id", "category_name"),
+    "apply_metadata_recursive": ("account_id", "path_prefix", "category_id"),
+    "remove_metadata_recursive": ("account_id", "path_prefix"),
+    "undo_metadata_batch": ("batch_id",),
+    "apply_metadata_rule": ("rule_id",),
+    "extract_comic_assets": ("account_id", "item_ids", "use_indexed_items"),
+    "extract_library_comic_assets": ("account_ids", "chunk_size"),
+    "reindex_comic_covers": ("plugin_key", "library_key"),
+}
 
 
 class JobCancelledError(Exception):
@@ -41,6 +83,79 @@ class JobService:
         """
         self.session = session
         self.queue = queue
+        self.settings = get_settings()
+
+    @staticmethod
+    def _normalize_job_type(job_type: str) -> str:
+        return str(job_type or "").strip().lower()
+
+    def _resolve_job_queue_name(self, job_type: str, requested_queue_name: str | None) -> str:
+        if requested_queue_name is not None and str(requested_queue_name).strip():
+            return resolve_queue_name(str(requested_queue_name), settings=self.settings)
+
+        queue_map = dict(DEFAULT_JOB_QUEUE_ALIAS_BY_TYPE)
+        queue_map.update(self.settings.job_type_queue_map or {})
+        queue_alias_or_name = queue_map.get(job_type, "default")
+        return resolve_queue_name(queue_alias_or_name, settings=self.settings)
+
+    def _resolve_job_max_retries(self, job_type: str, requested_max_retries: int | None) -> int:
+        if requested_max_retries is not None:
+            return max(0, int(requested_max_retries))
+        retry_map = dict(DEFAULT_JOB_MAX_RETRIES_BY_TYPE)
+        retry_map.update(self.settings.job_type_max_retries_map or {})
+        default_retries = max(0, int(self.settings.job_default_max_retries))
+        return max(0, int(retry_map.get(job_type, default_retries)))
+
+    @staticmethod
+    def _normalize_dedupe_key(value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+    @staticmethod
+    def _build_default_dedupe_key(job_type: str, payload: dict[str, Any]) -> str | None:
+        dedupe_fields = DEFAULT_JOB_DEDUPE_KEYS_BY_TYPE.get(job_type)
+        if not dedupe_fields:
+            return None
+        dedupe_payload = {field: payload.get(field) for field in dedupe_fields if field in payload}
+        if not dedupe_payload:
+            return None
+        canonical_payload = json.dumps(
+            dedupe_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            default=str,
+        )
+        digest = sha256(canonical_payload.encode("utf-8")).hexdigest()
+        return f"{job_type}:{digest}"
+
+    def _resolve_job_dedupe_key(
+        self,
+        job_type: str,
+        payload: dict[str, Any],
+        requested_dedupe_key: str | None,
+    ) -> str | None:
+        explicit_key = self._normalize_dedupe_key(requested_dedupe_key)
+        if explicit_key is not None:
+            return explicit_key
+        return self._build_default_dedupe_key(job_type, payload)
+
+    async def _find_active_duplicate_job(self, dedupe_key: str) -> Job | None:
+        stmt = (
+            select(Job)
+            .where(
+                Job.dedupe_key == dedupe_key,
+                Job.status.in_(tuple(ACTIVE_DEDUPE_STATUSES)),
+            )
+            .order_by(Job.created_at.desc())
+            .limit(1)
+        )
+        duplicate = (await self.session.execute(stmt)).scalar_one_or_none()
+        if duplicate is None:
+            return None
+        return self._normalize_job_json_fields(duplicate)
 
     async def recover_stale_running_jobs(self) -> int:
         """Mark stale RUNNING jobs as CANCELLED.
@@ -49,7 +164,7 @@ class JobService:
         worker timeout + grace period, which typically indicates worker crash
         or lost cancellation callback.
         """
-        settings = get_settings()
+        settings = self.settings
         grace_seconds = 120
         stale_after_seconds = max(60, int(settings.worker_job_timeout_seconds) + grace_seconds)
         now = datetime.now(UTC)
@@ -209,43 +324,55 @@ class JobService:
         *,
         target_job_ids: set[UUID] | None = None,
     ) -> dict[UUID, dict[str, Any]]:
-        settings = get_settings()
+        settings = self.settings
         worker_slots = max(1, int(settings.worker_concurrency))
         now = datetime.now(UTC)
         avg_by_type, global_avg = await self._build_avg_duration_by_type()
         pending_targets = set(target_job_ids or set())
+        default_queue_name = resolve_queue_name(None, settings=self.settings)
 
         running_stmt = (
-            select(Job.type, Job.started_at, Job.created_at)
+            select(Job.queue_name, Job.type, Job.started_at, Job.created_at)
             .where(Job.status == "RUNNING")
-            .order_by(Job.started_at.asc().nullslast(), Job.created_at.asc())
+            .order_by(Job.queue_name.asc().nullslast(), Job.started_at.asc().nullslast(), Job.created_at.asc())
         )
         running_rows = (await self.session.execute(running_stmt)).all()
-        slot_available_at = [0.0 for _ in range(worker_slots)]
-        for job_type, started_at, _created_at in running_rows:
+        slot_available_by_queue: dict[str, list[float]] = {}
+        for queue_name, job_type, started_at, _created_at in running_rows:
             avg_duration = avg_by_type.get(str(job_type), global_avg)
             elapsed = max(
                 0.0,
                 (now - started_at).total_seconds() if started_at else 0.0,
             )
             remaining = max(1.0, avg_duration - elapsed)
+            normalized_queue_name = queue_name or default_queue_name
+            slot_available_at = slot_available_by_queue.setdefault(
+                normalized_queue_name,
+                [0.0 for _ in range(worker_slots)],
+            )
             slot_index = min(range(worker_slots), key=lambda i: slot_available_at[i])
             slot_available_at[slot_index] += remaining
 
         queued_stmt = (
-            select(Job.id, Job.type, Job.status, Job.next_retry_at, Job.created_at)
+            select(Job.id, Job.queue_name, Job.type, Job.status, Job.next_retry_at, Job.created_at)
             .where(Job.status.in_(tuple(QUEUE_PENDING_STATUSES)))
-            .order_by(Job.created_at.asc())
+            .order_by(Job.queue_name.asc().nullslast(), Job.created_at.asc())
         )
         queued_rows = (await self.session.execute(queued_stmt)).all()
 
         estimates: dict[UUID, dict[str, Any]] = {}
-        queue_position = 0
-        for row_id, row_type, row_status, row_next_retry_at, row_created_at in queued_rows:
-            queue_position += 1
+        queue_position_by_queue: dict[str, int] = {}
+        for row_id, row_queue_name, row_type, row_status, row_next_retry_at, row_created_at in queued_rows:
+            normalized_queue_name = row_queue_name or default_queue_name
+            queue_position_by_queue[normalized_queue_name] = queue_position_by_queue.get(normalized_queue_name, 0) + 1
+            queue_position = queue_position_by_queue[normalized_queue_name]
             avg_duration = avg_by_type.get(str(row_type), global_avg)
             ready_at = row_next_retry_at if row_status == "RETRY_SCHEDULED" and row_next_retry_at else row_created_at
             ready_delay = max(0.0, (ready_at - now).total_seconds()) if ready_at else 0.0
+            slot_available_at = slot_available_by_queue.setdefault(
+                normalized_queue_name,
+                [0.0 for _ in range(worker_slots)],
+            )
             slot_index = min(range(worker_slots), key=lambda i: slot_available_at[i])
             estimated_wait = max(slot_available_at[slot_index], ready_delay)
             slot_available_at[slot_index] = estimated_wait + avg_duration
@@ -274,14 +401,32 @@ class JobService:
         Job
             Created job instance.
         """
-        payload_json = job_in.payload if job_in.payload else {}
-        
-        max_retries = max(0, job_in.max_retries)
+        normalized_type = self._normalize_job_type(job_in.type)
+        payload_json = job_in.payload if isinstance(job_in.payload, dict) else {}
+
+        max_retries = self._resolve_job_max_retries(normalized_type, job_in.max_retries)
+        queue_name = self._resolve_job_queue_name(normalized_type, job_in.queue_name)
+        dedupe_key = self._resolve_job_dedupe_key(normalized_type, payload_json, job_in.dedupe_key)
+
+        if dedupe_key:
+            duplicate = await self._find_active_duplicate_job(dedupe_key)
+            if duplicate is not None:
+                log_event(
+                    logger,
+                    "job_duplicate_suppressed",
+                    level=logging.INFO,
+                    dedupe_key=dedupe_key,
+                    duplicate_job_id=str(duplicate.id),
+                    job_type=normalized_type,
+                )
+                return duplicate
 
         job = Job(
-            type=job_in.type,
+            type=normalized_type,
             payload=payload_json,
             status="PENDING",
+            queue_name=queue_name,
+            dedupe_key=dedupe_key,
             max_retries=max_retries,
             reprocessed_from_job_id=reprocessed_from_job_id,
             progress_current=0,
@@ -290,16 +435,43 @@ class JobService:
             metrics={},
         )
         self.session.add(job)
-        await self.session.commit()
+
+        try:
+            await self.session.commit()
+        except IntegrityError:
+            await self.session.rollback()
+            if dedupe_key:
+                duplicate = await self._find_active_duplicate_job(dedupe_key)
+                if duplicate is not None:
+                    log_event(
+                        logger,
+                        "job_duplicate_suppressed",
+                        level=logging.INFO,
+                        dedupe_key=dedupe_key,
+                        duplicate_job_id=str(duplicate.id),
+                        job_type=normalized_type,
+                        conflict_recovered=True,
+                    )
+                    return duplicate
+            raise
+
         await self.session.refresh(job)
         queue = self.queue or get_job_queue()
         try:
-            await queue.enqueue_job(str(job.id))
+            await queue.enqueue_job(str(job.id), queue_name=job.queue_name)
         except Exception as exc:
             logger.error("Failed to enqueue job %s: %s", job.id, exc, exc_info=True)
             await self.fail_job(job.id, f"Failed to enqueue job: {exc}")
             raise
-        log_event(logger, "job_created", job_id=str(job.id), job_type=job.type, max_retries=max_retries)
+        log_event(
+            logger,
+            "job_created",
+            job_id=str(job.id),
+            job_type=job.type,
+            queue_name=job.queue_name,
+            max_retries=max_retries,
+            dedupe_key=dedupe_key,
+        )
         return job
 
     async def start_job(self, job_id: UUID) -> Job | None:
@@ -312,6 +484,8 @@ class JobService:
             return self._normalize_job_json_fields(job)
         if job.status == "RUNNING":
             return self._normalize_job_json_fields(job)
+        if not getattr(job, "queue_name", None):
+            job.queue_name = self._resolve_job_queue_name(str(job.type), None)
 
         job.status = "RUNNING"
         job.started_at = datetime.now(UTC)
@@ -499,8 +673,9 @@ class JobService:
         if job.status == "RETRY_SCHEDULED":
             queue = self.queue or get_job_queue()
             delay = max(0, int((job.next_retry_at - now).total_seconds())) if job.next_retry_at else 0
+            queue_name = self._resolve_job_queue_name(str(job.type), getattr(job, "queue_name", None))
             try:
-                await queue.enqueue_job(str(job.id), defer_seconds=delay)
+                await queue.enqueue_job(str(job.id), queue_name=queue_name, defer_seconds=delay)
             except Exception as exc:
                 logger.error(
                     "Failed to enqueue retry for job %s: %s",
@@ -651,6 +826,8 @@ class JobService:
             type=source_job.type,
             payload=payload,
             max_retries=source_job.max_retries or 0,
+            queue_name=source_job.queue_name,
+            dedupe_key=None,
         )
         new_job = await self.create_job(cloned, reprocessed_from_job_id=source_job.id)
         log_event(

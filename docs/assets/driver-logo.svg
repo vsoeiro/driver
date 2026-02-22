@@ -1,0 +1,26 @@
+<svg width="640" height="180" viewBox="0 0 640 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1D4ED8"/>
+      <stop offset="100%" stop-color="#06B6D4"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1E3A8A"/>
+      <stop offset="100%" stop-color="#0E7490"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="16" y="20" width="140" height="140" rx="26" fill="url(#g1)"/>
+  <path d="M47 95C47 81.7 57.7 71 71 71C73.4 71 75.8 71.4 77.9 72.2C82 63.7 90.8 58 101 58C114.8 58 126 69.2 126 83C133.2 84.1 139 90.2 139 97.7C139 106 132.3 112.7 124 112.7H72C58.2 112.7 47 101.5 47 87.7V95Z" fill="white" fill-opacity="0.96"/>
+  <rect x="64" y="103" width="68" height="25" rx="8" fill="url(#g2)"/>
+  <rect x="72" y="111" width="28" height="4" rx="2" fill="#D1FAE5"/>
+  <rect x="72" y="118" width="45" height="4" rx="2" fill="#C7D2FE"/>
+  <circle cx="123" cy="116" r="3.2" fill="#A7F3D0"/>
+
+  <text x="186" y="86" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="60" font-weight="700" fill="#0F172A">
+    Driver
+  </text>
+  <text x="186" y="124" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="24" font-weight="500" fill="#334155">
+    Cloud Operations Manager
+  </text>
+</svg>

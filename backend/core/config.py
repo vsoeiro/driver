@@ -97,6 +97,11 @@ class Settings(BaseSettings):
     comic_rar_tool_download_url: str | None = Field(default=None, alias="COMIC_RAR_TOOL_DOWNLOAD_URL")
     redis_url: str = Field(default="redis://127.0.0.1:6379/0", alias="REDIS_URL")
     redis_queue_name: str = Field(default="driver:jobs", alias="REDIS_QUEUE_NAME")
+    worker_queue_name: str | None = Field(default=None, alias="WORKER_QUEUE_NAME")
+    job_default_max_retries: int = Field(default=3, alias="JOB_DEFAULT_MAX_RETRIES")
+    job_type_queue_map: dict[str, str] = Field(default_factory=dict, alias="JOB_TYPE_QUEUE_MAP")
+    job_type_max_retries_map: dict[str, int] = Field(default_factory=dict, alias="JOB_TYPE_MAX_RETRIES_MAP")
+    job_queue_names: dict[str, str] = Field(default_factory=dict, alias="JOB_QUEUE_NAMES")
     worker_concurrency: int = Field(default=8, alias="WORKER_CONCURRENCY")
     worker_job_timeout_seconds: int = Field(default=1800, alias="WORKER_JOB_TIMEOUT_SECONDS")
 
@@ -146,6 +151,30 @@ class Settings(BaseSettings):
         if self.comic_rar_tool_download_url:
             self.comic_rar_tool_download_url = self.comic_rar_tool_download_url.strip()
         self.redis_queue_name = self.redis_queue_name.strip() or "driver:jobs"
+        if self.worker_queue_name is not None:
+            self.worker_queue_name = self.worker_queue_name.strip() or None
+        if self.job_default_max_retries < 0:
+            raise ValueError("JOB_DEFAULT_MAX_RETRIES must be greater than or equal to 0")
+        self.job_type_queue_map = {
+            str(key).strip().lower(): str(value).strip()
+            for key, value in (self.job_type_queue_map or {}).items()
+            if str(key).strip() and str(value).strip()
+        }
+        normalized_retry_map: dict[str, int] = {}
+        for key, value in (self.job_type_max_retries_map or {}).items():
+            normalized_key = str(key).strip().lower()
+            if not normalized_key:
+                continue
+            retry_value = int(value)
+            if retry_value < 0:
+                raise ValueError("JOB_TYPE_MAX_RETRIES_MAP values must be greater than or equal to 0")
+            normalized_retry_map[normalized_key] = retry_value
+        self.job_type_max_retries_map = normalized_retry_map
+        self.job_queue_names = {
+            str(key).strip().lower(): str(value).strip()
+            for key, value in (self.job_queue_names or {}).items()
+            if str(key).strip() and str(value).strip()
+        }
         if self.worker_concurrency <= 0:
             raise ValueError("WORKER_CONCURRENCY must be greater than 0")
         if self.worker_job_timeout_seconds <= 0:

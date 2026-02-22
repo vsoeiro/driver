@@ -12,7 +12,9 @@ class JobBase(BaseModel):
 
     type: str
     payload: dict | None = None
-    max_retries: int = 3
+    max_retries: int | None = None
+    queue_name: str | None = None
+    dedupe_key: str | None = None
 
 
 class JobCreate(JobBase):
@@ -47,6 +49,8 @@ class Job(JobBase):
     result: dict | None = None
     retry_count: int
     max_retries: int
+    queue_name: str
+    dedupe_key: str | None = None
     progress_current: int
     progress_total: int | None = None
     progress_percent: int
