@@ -18,17 +18,13 @@ No parameters.
 
 ## Output
 
-```json
-{
-  "auth_url": "https://login.microsoftonline.com/...",
-  "state": "abc123..."
-}
-```
+HTTP 302 Redirect to Microsoft authorization URL.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `auth_url` | string | URL to redirect user for Microsoft login |
-| `state` | string | CSRF protection state parameter |
+## Cookies Set
+
+| Cookie | Description |
+|--------|-------------|
+| `oauth_flow` | Encrypted OAuth flow payload used in callback |
 
 ## Microsoft Graph API
 
@@ -41,10 +37,9 @@ None (initiates auth flow).
 ## Flow
 
 1. Client calls this endpoint
-2. Receives `auth_url`
-3. Redirects user to `auth_url`
-4. User authenticates with Microsoft
-5. Microsoft redirects to callback endpoint
+2. Backend redirects user to Microsoft login page
+3. User authenticates with Microsoft
+4. Microsoft redirects to callback endpoint
 
 ## Example
 

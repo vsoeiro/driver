@@ -21,37 +21,21 @@ None required (called by Microsoft redirect).
 
 ## Output
 
-```json
-{
-  "access_token": "eyJ...",
-  "token_type": "bearer",
-  "user_id": "uuid",
-  "microsoft_email": "user@example.com"
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `access_token` | string | JWT token for API authentication |
-| `token_type` | string | Always "bearer" |
-| `user_id` | string | Internal user UUID |
-| `microsoft_email` | string | Microsoft account email |
+HTTP 200 with success HTML page.
 
 ## Microsoft Graph API
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/me` | GET | Get user profile information |
+No Graph endpoint is called directly in this route. MSAL handles token exchange.
 
 ## Permissions Required
 
 - `User.Read` - Read user profile
 
-## Cookies Set
+## Cookies Used/Cleared
 
 | Cookie | Description |
 |--------|-------------|
-| `session` | JWT session token (HttpOnly) |
+| `oauth_flow` | Read for callback validation and deleted on success |
 
 ## Errors
 
@@ -63,9 +47,7 @@ None required (called by Microsoft redirect).
 ## Flow
 
 1. Microsoft redirects here with `code` and `state`
-2. Validates `state` matches original request
+2. Validates and decrypts `oauth_flow` cookie
 3. Exchanges `code` for access/refresh tokens
-4. Calls Graph API `/me` to get user info
-5. Creates or updates user in database
-6. Creates linked account with encrypted tokens
-7. Returns JWT session token
+4. Creates or updates linked account with encrypted tokens
+5. Returns success HTML and clears `oauth_flow`

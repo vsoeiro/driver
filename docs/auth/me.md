@@ -1,6 +1,10 @@
-# Get Current User
+# Get Current User (Legacy)
 
-Returns information about the currently authenticated user.
+Legacy documentation for an endpoint that is not currently exposed by the backend routes.
+
+## Current Status
+
+`GET /api/v1/auth/me` is **not registered** in the current backend application.
 
 ## Endpoint
 

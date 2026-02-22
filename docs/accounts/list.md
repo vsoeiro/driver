@@ -1,6 +1,6 @@
 # List Linked Accounts
 
-Returns all Microsoft accounts linked to the current user.
+Returns all active linked accounts.
 
 ## Endpoint
 
@@ -23,34 +23,34 @@ No parameters.
   "accounts": [
     {
       "id": "uuid",
-      "microsoft_id": "abc123",
-      "email": "user@outlook.com",
+      "email": "user@example.com",
       "display_name": "John Doe",
-      "linked_at": "2024-01-15T10:30:00Z",
-      "is_primary": true
+      "provider": "google",
+      "is_active": true,
+      "created_at": "2024-01-15T10:30:00Z"
     }
   ],
-  "count": 1
+  "total": 1
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `accounts` | array | List of linked accounts |
-| `count` | integer | Total number of accounts |
+| `total` | integer | Total number of accounts |
 
 ### Account Object
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | string | Internal account UUID |
-| `microsoft_id` | string | Microsoft account ID |
-| `email` | string | Microsoft email |
+| `email` | string | Account email |
 | `display_name` | string | Display name |
-| `linked_at` | datetime | When account was linked |
-| `is_primary` | boolean | If this is the primary account |
+| `provider` | string | Provider name (`microsoft` or `google`) |
+| `is_active` | boolean | Whether account is active |
+| `created_at` | datetime | When account was linked |
 
-## Microsoft Graph API
+## Provider API
 
 None called (reads from local database).
 

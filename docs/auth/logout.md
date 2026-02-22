@@ -1,6 +1,10 @@
-# Logout
+# Logout (Legacy)
 
-Logs out the current user by clearing the session cookie.
+Legacy documentation for an endpoint that is not currently exposed by the backend routes.
+
+## Current Status
+
+`POST /api/v1/auth/logout` is **not registered** in the current backend application.
 
 ## Endpoint
 

@@ -1,6 +1,6 @@
 # Disconnect Account
 
-Removes a linked Microsoft account from the user profile.
+Removes a linked account from the user profile.
 
 ## Endpoint
 
@@ -20,13 +20,9 @@ Required (session cookie or Bearer token).
 
 ## Output
 
-```json
-{
-  "message": "Account disconnected successfully"
-}
-```
+HTTP 204 No Content.
 
-## Microsoft Graph API
+## Provider API
 
 None called (local operation only).
 
@@ -37,13 +33,11 @@ None (local operation).
 ## Notes
 
 - Deletes the linked account and all stored tokens
-- Does not revoke tokens on Microsoft side
-- Cannot delete the last/only linked account
+- Does not revoke tokens on provider side
 
 ## Errors
 
 | Status | Description |
 |--------|-------------|
 | 401 | Not authenticated |
-| 403 | Cannot delete primary account |
 | 404 | Account not found |
