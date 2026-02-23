@@ -13,8 +13,8 @@ import httpx
 from backend.core.exceptions import GraphAPIError
 from backend.db.models import LinkedAccount
 from backend.schemas.drive import DriveItem, DriveListResponse
+from backend.security.token_manager import TokenManager
 from backend.services.providers.http_base import OAuthHTTPClientBase
-from backend.services.token_manager import TokenManager
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +104,9 @@ class GraphClient(OAuthHTTPClientBase):
         )
 
         if response.status_code >= 400:
-            error_msg = self.parse_error_message(response, default=response.text or "Graph API request failed")
+            error_msg = self.parse_error_message(
+                response, default=response.text or "Graph API request failed"
+            )
             logger.error("Graph API error: %s - %s", response.status_code, error_msg)
             raise GraphAPIError(error_msg, status_code=response.status_code)
 
@@ -268,7 +270,11 @@ class GraphClient(OAuthHTTPClientBase):
             raise GraphAPIError("Download URL not available for this item")
 
         filename = item_data.get("name", "file")
-        download_timeout = httpx.Timeout(timeout_seconds, connect=10.0) if timeout_seconds else GRAPH_TIMEOUT
+        download_timeout = (
+            httpx.Timeout(timeout_seconds, connect=10.0)
+            if timeout_seconds
+            else GRAPH_TIMEOUT
+        )
 
         try:
             client = await self._get_http_client(timeout=GRAPH_TIMEOUT)
@@ -323,14 +329,23 @@ class GraphClient(OAuthHTTPClientBase):
             raise GraphAPIError("Download URL not available for this item")
 
         filename = item_data.get("name", "file")
-        download_timeout = httpx.Timeout(timeout_seconds, connect=10.0) if timeout_seconds else GRAPH_TIMEOUT
+        download_timeout = (
+            httpx.Timeout(timeout_seconds, connect=10.0)
+            if timeout_seconds
+            else GRAPH_TIMEOUT
+        )
 
         try:
             client = await self._get_http_client(timeout=GRAPH_TIMEOUT)
-            async with client.stream("GET", download_url, timeout=download_timeout) as response:
+            async with client.stream(
+                "GET", download_url, timeout=download_timeout
+            ) as response:
                 if response.status_code >= 400:
                     await response.read()  # Read error body.
-                    raise GraphAPIError(f"Download failed: {response.status_code}", status_code=response.status_code)
+                    raise GraphAPIError(
+                        f"Download failed: {response.status_code}",
+                        status_code=response.status_code,
+                    )
 
                 with open(target_path, "wb") as f:
                     async for chunk in response.aiter_bytes():
@@ -474,7 +489,7 @@ class GraphClient(OAuthHTTPClientBase):
         """
         breadcrumb = []
         current_id = item_id
-        
+
         # Safety limit for depth
         max_depth = 50
 
@@ -495,14 +510,14 @@ class GraphClient(OAuthHTTPClientBase):
             # Check if we reached the root
             if "root" in data:
                 break
-            
+
             # Get parent ID to continue traversal
             parent_ref = data.get("parentReference", {})
             parent_id = parent_ref.get("id")
-            
+
             if not parent_id:
                 break
-                
+
             current_id = parent_id
             max_depth -= 1
 
@@ -572,23 +587,24 @@ class GraphClient(OAuthHTTPClientBase):
             endpoint = f"/me/drive/items/{folder_id}:/{encoded_filename}:/content"
 
         url = f"{GRAPH_BASE_URL}{endpoint}"
-        
+
         # httpx handles bytes, iterables, or file-like objects in 'content'
         # If it's a file-like object from FastAPI (SpooledTemporaryFile), keep it as is.
         # However, AsyncClient requires async iterator for streams, or bytes.
-        
+
         request_content = content
         if hasattr(content, "read"):
-             # It's a file-like object. Wrap it in an async generator.
-             async def file_iterator():
-                 chunk_size = 64 * 1024
-                 while True:
-                     data = content.read(chunk_size)
-                     if not data:
-                         break
-                     yield data
-             request_content = file_iterator()
-        
+            # It's a file-like object. Wrap it in an async generator.
+            async def file_iterator():
+                chunk_size = 64 * 1024
+                while True:
+                    data = content.read(chunk_size)
+                    if not data:
+                        break
+                    yield data
+
+            request_content = file_iterator()
+
         response = await self._perform_oauth_request(
             method="PUT",
             url=url,
@@ -642,7 +658,9 @@ class GraphClient(OAuthHTTPClientBase):
         if folder_id == "root":
             endpoint = f"/me/drive/root:/{encoded_filename}:/createUploadSession"
         else:
-            endpoint = f"/me/drive/items/{folder_id}:/{encoded_filename}:/createUploadSession"
+            endpoint = (
+                f"/me/drive/items/{folder_id}:/{encoded_filename}:/createUploadSession"
+            )
 
         body = {
             "item": {
@@ -703,8 +721,6 @@ class GraphClient(OAuthHTTPClientBase):
             raise GraphAPIError(error_msg, status_code=response.status_code)
 
         return response.json()
-
-
 
     async def create_folder(
         self,
@@ -785,7 +801,9 @@ class GraphClient(OAuthHTTPClientBase):
             # Nothing to update
             return await self.get_item_metadata(account, item_id)
 
-        data = await self._request("PATCH", f"/me/drive/items/{item_id}", account, json=body)
+        data = await self._request(
+            "PATCH", f"/me/drive/items/{item_id}", account, json=body
+        )
         return self._parse_single_item(data)
 
     async def delete_item(
@@ -819,7 +837,7 @@ class GraphClient(OAuthHTTPClientBase):
             List of item IDs to delete.
         """
         import asyncio
-        
+
         # Limit concurrency to avoid hitting rate limits too hard
         # chunks of 5?
         semaphore = asyncio.Semaphore(5)
@@ -831,7 +849,7 @@ class GraphClient(OAuthHTTPClientBase):
                 except Exception as e:
                     logger.error("Failed to delete item %s: %s", iid, e)
                     # We continue even if one fails
-        
+
         tasks = [_delete_safe(iid) for iid in item_ids]
         await asyncio.gather(*tasks)
 
@@ -890,7 +908,9 @@ class GraphClient(OAuthHTTPClientBase):
         if response.status_code != 202:
             error_data = response.json() if response.content else {}
             error_msg = error_data.get("error", {}).get("message", response.text)
-            raise GraphAPIError(f"Copy failed: {error_msg}", status_code=response.status_code)
+            raise GraphAPIError(
+                f"Copy failed: {error_msg}", status_code=response.status_code
+            )
 
         location = response.headers.get("Location")
         if not location:

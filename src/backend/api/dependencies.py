@@ -14,17 +14,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.models import LinkedAccount
 from backend.db.session import async_session_maker, get_db
+from backend.security.token_manager import TokenManager
 from backend.services.jobs import JobService
 from backend.services.providers.base import DriveProviderClient
 from backend.services.providers.factory import build_drive_client
-from backend.services.token_manager import TokenManager
 
 DBSession = Annotated[AsyncSession, Depends(get_db)]
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """Get a database session.
-    
+
     Returns
     -------
     AsyncSession
@@ -43,7 +43,7 @@ async def get_linked_account(
     db: DBSession,
 ) -> LinkedAccount:
     """Get a linked account by ID.
-    
+
     Parameters
     ----------
     account_id : str

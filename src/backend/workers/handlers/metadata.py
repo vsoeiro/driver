@@ -9,14 +9,20 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.common.error_items import ErrorItemsCollector
-from backend.db.models import Item, ItemMetadata, LinkedAccount, MetadataAttribute, MetadataCategory
-from backend.services.metadata_versioning import apply_metadata_change
+from backend.db.models import (
+    Item,
+    ItemMetadata,
+    LinkedAccount,
+    MetadataAttribute,
+    MetadataCategory,
+)
+from backend.security.token_manager import TokenManager
 from backend.services.item_index import upsert_item_record
+from backend.services.metadata_versioning import apply_metadata_change
 from backend.services.providers.base import DriveProviderClient
 from backend.services.providers.factory import build_drive_client
-from backend.services.token_manager import TokenManager
-from backend.workers.job_progress import JobProgressReporter
 from backend.workers.dispatcher import register_handler
+from backend.workers.job_progress import JobProgressReporter
 
 logger = logging.getLogger(__name__)
 ERROR_ITEMS_LIMIT = 50
@@ -39,7 +45,9 @@ async def update_metadata_handler(payload: dict, session: AsyncSession) -> dict:
     metadata_updates = payload["metadata"]
     category_name = payload["category_name"]
     progress = JobProgressReporter.from_payload(session, payload)
-    batch_id = uuid.UUID(payload.get("batch_id")) if payload.get("batch_id") else uuid.uuid4()
+    batch_id = (
+        uuid.UUID(payload.get("batch_id")) if payload.get("batch_id") else uuid.uuid4()
+    )
 
     # 1. Fetch account
     account = await session.get(LinkedAccount, account_id)
@@ -63,7 +71,7 @@ async def update_metadata_handler(payload: dict, session: AsyncSession) -> dict:
     # Resolve attribute names to IDs
     # We need to map payload keys (attribute names) to attribute IDs for storage
     # defined in ItemMetadata.values
-    
+
     # Pre-fetch attributes for this category
     stmt = select(MetadataAttribute).where(MetadataAttribute.category_id == category.id)
     result = await session.execute(stmt)
@@ -77,7 +85,9 @@ async def update_metadata_handler(payload: dict, session: AsyncSession) -> dict:
         if key in attr_map:
             metadata_values_to_set[str(attr_map[key])] = value
         else:
-            logger.warning(f"Attribute {key} not found in category {category_name}, skipping.")
+            logger.warning(
+                f"Attribute {key} not found in category {category_name}, skipping."
+            )
 
     token_manager = TokenManager(session)
     client = build_drive_client(account, token_manager)
@@ -92,27 +102,29 @@ async def update_metadata_handler(payload: dict, session: AsyncSession) -> dict:
         "error_items_truncated": 0,
     }
     error_collector = ErrorItemsCollector(stats, limit=ERROR_ITEMS_LIMIT)
-    
+
     # Check root item type
     root_item = await client.get_item_metadata(account, root_item_id)
-    
+
     # Resolve root path (best effort, or just name if root)
     # We could fetch full path via Graph, but for now let's start with root item name?
     # Or maybe we don't strictly need path for the root if it's too expensive.
     # Actually, `client.get_item_path` exists.
     try:
-         path_data = await client.get_item_path(account, root_item_id)
-         # path_data is list of dicts: [{'id': 'root', 'name': 'Root'}, ...]
-         # Construct path string
-         # Onedrive root name is usually 'root', but path display usually starts after that?
-         # Let's just join names.
-         root_path = "/" + "/".join([p["name"] for p in path_data if p["name"] and p["name"].lower() != "root"])
-         if root_path.endswith("/"):
-             root_path = root_path[:-1] # avoid double slash
-         if not root_path:
-             root_path = "/"
+        path_data = await client.get_item_path(account, root_item_id)
+        # path_data is list of dicts: [{'id': 'root', 'name': 'Root'}, ...]
+        # Construct path string
+        # Onedrive root name is usually 'root', but path display usually starts after that?
+        # Let's just join names.
+        root_path = "/" + "/".join(
+            [p["name"] for p in path_data if p["name"] and p["name"].lower() != "root"]
+        )
+        if root_path.endswith("/"):
+            root_path = root_path[:-1]  # avoid double slash
+        if not root_path:
+            root_path = "/"
     except Exception:
-         root_path = f"/{root_item.name}"
+        root_path = f"/{root_item.name}"
 
     # Upsert root item
     await upsert_item_record(
@@ -123,16 +135,15 @@ async def update_metadata_handler(payload: dict, session: AsyncSession) -> dict:
         path=root_path,
     )
 
-
     if root_item.item_type == "folder":
         await progress.set_total(None)
         await _update_metadata_recursive(
-            client, 
-            session, 
-            account, 
-            root_item.id, 
-            category.id, 
-            metadata_values_to_set, 
+            client,
+            session,
+            account,
+            root_item.id,
+            category.id,
+            metadata_values_to_set,
             stats,
             error_collector=error_collector,
             current_path=root_path,
@@ -141,20 +152,20 @@ async def update_metadata_handler(payload: dict, session: AsyncSession) -> dict:
         )
     else:
         # It's a single file
-         await _update_single_item(
-            session, 
-            account.id, 
-            root_item.id, 
-            category.id, 
+        await _update_single_item(
+            session,
+            account.id,
+            root_item.id,
+            category.id,
             metadata_values_to_set,
             batch_id=batch_id,
             job_id=progress.job_id,
         )
-         stats["processed"] += 1
-         stats["updated"] += 1
-         await progress.set_total(1)
-         await progress.increment()
-         await progress.update_metrics(updated=stats["updated"], errors=stats["errors"])
+        stats["processed"] += 1
+        stats["updated"] += 1
+        await progress.set_total(1)
+        await progress.increment()
+        await progress.update_metrics(updated=stats["updated"], errors=stats["errors"])
 
     return stats
 
@@ -173,7 +184,7 @@ async def _update_metadata_recursive(
     batch_id: uuid.UUID,
 ):
     """Recursively update metadata for all files in a folder."""
-    
+
     # List items in folder
     try:
         children = await client.list_folder_items(account, folder_id)
@@ -194,7 +205,7 @@ async def _update_metadata_recursive(
             await progress.set_total(discovered)
         else:
             await progress.set_total(progress.total + discovered)
-    
+
     while True:
         for item in items_to_process:
             item_path = f"{current_path}/{item.name}"
@@ -250,10 +261,12 @@ async def _update_metadata_recursive(
                             errors=stats["errors"],
                         )
                     await progress.increment()
-        
+
         if children.next_link:
             try:
-                children = await client.list_items_by_next_link(account, children.next_link)
+                children = await client.list_items_by_next_link(
+                    account, children.next_link
+                )
                 items_to_process = children.items
                 discovered = len(items_to_process)
                 if discovered > 0:
@@ -327,7 +340,9 @@ async def apply_metadata_recursive_handler(
     category_id = UUID(payload["category_id"])
     values = payload.get("values", {})
     include_folders = payload.get("include_folders", False)
-    batch_id = UUID(payload.get("batch_id")) if payload.get("batch_id") else uuid.uuid4()
+    batch_id = (
+        UUID(payload.get("batch_id")) if payload.get("batch_id") else uuid.uuid4()
+    )
     progress = JobProgressReporter.from_payload(session, payload)
 
     query = select(Item).where(
@@ -362,7 +377,9 @@ async def apply_metadata_recursive_handler(
             )
             meta_result = await session.execute(stmt)
             existing = meta_result.scalar_one_or_none()
-            merged_values = dict(existing.values) if existing and existing.values else {}
+            merged_values = (
+                dict(existing.values) if existing and existing.values else {}
+            )
             merged_values.update(values)
 
             changed = await apply_metadata_change(
@@ -425,16 +442,22 @@ async def remove_metadata_recursive_handler(
     """
     account_id = UUID(payload["account_id"])
     path_prefix = payload["path_prefix"].rstrip("/")
-    batch_id = UUID(payload.get("batch_id")) if payload.get("batch_id") else uuid.uuid4()
+    batch_id = (
+        UUID(payload.get("batch_id")) if payload.get("batch_id") else uuid.uuid4()
+    )
     progress = JobProgressReporter.from_payload(session, payload)
 
-    sub = select(Item.item_id).where(
-        Item.account_id == account_id,
-        or_(
-            Item.path == path_prefix,
-            Item.path.ilike(f"{path_prefix}/%"),
-        ),
-    ).scalar_subquery()
+    sub = (
+        select(Item.item_id)
+        .where(
+            Item.account_id == account_id,
+            or_(
+                Item.path == path_prefix,
+                Item.path.ilike(f"{path_prefix}/%"),
+            ),
+        )
+        .scalar_subquery()
+    )
 
     stmt = select(ItemMetadata).where(
         ItemMetadata.account_id == account_id,
@@ -463,4 +486,3 @@ async def remove_metadata_recursive_handler(
         await session.commit()
 
     return {"deleted": deleted, "batch_id": str(batch_id)}
-

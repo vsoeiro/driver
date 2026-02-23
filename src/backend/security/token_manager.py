@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.core.exceptions import TokenRefreshError
 from backend.core.security import decrypt_token, encrypt_token
 from backend.db.models import LinkedAccount
-from backend.services.google_auth import get_google_auth_service
-from backend.services.microsoft_auth import get_microsoft_auth_service
+from backend.services.google.auth import get_google_auth_service
+from backend.services.microsoft.auth import get_microsoft_auth_service
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,7 @@ class TokenManager:
         ----------
         db : AsyncSession
             Database session for token operations.
+
         """
         self._db = db
         self._microsoft_auth_service = get_microsoft_auth_service()
@@ -55,6 +56,7 @@ class TokenManager:
         ------
         TokenRefreshError
             If the token cannot be refreshed.
+
         """
         if self._is_token_valid(account):
             token = decrypt_token(account.access_token_encrypted)
@@ -86,6 +88,7 @@ class TokenManager:
         -------
         bool
             True if the token is valid and not expired.
+
         """
         if not account.token_expires_at:
             return False
@@ -103,6 +106,8 @@ class TokenManager:
         ----------
         account : LinkedAccount
             The linked account to refresh.
+        force : bool, optional
+            Whether to force refresh even if the cached token is still valid.
 
         Returns
         -------
@@ -113,6 +118,7 @@ class TokenManager:
         ------
         TokenRefreshError
             If refresh fails.
+
         """
         # Use select with_for_update to lock the row and prevent race conditions
         from sqlalchemy import select
@@ -203,6 +209,7 @@ class TokenManager:
         ----------
         account : LinkedAccount
             The account to mark as inactive.
+
         """
         account.is_active = False
         await self._db.commit()
@@ -227,6 +234,7 @@ class TokenManager:
             The refresh token to encrypt and store.
         expires_at : datetime
             Token expiration timestamp.
+
         """
         account.access_token_encrypted = encrypt_token(access_token)
         if refresh_token:
@@ -234,3 +242,4 @@ class TokenManager:
         account.token_expires_at = expires_at
         account.is_active = True
         await self._db.commit()
+

@@ -10,7 +10,7 @@ import httpx
 import jwt
 
 from backend.core.config import get_settings
-from backend.services.oauth_types import TokenResult
+from backend.security.oauth_types import TokenResult
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ class GoogleAuthService:
     """Service for Google OAuth2 authorization code flow."""
 
     def __init__(self) -> None:
+        """Initialize Google OAuth service with runtime settings."""
         self._settings = get_settings()
 
     def get_auth_url(self, redirect_uri: str, state: str) -> str:
@@ -120,3 +121,4 @@ def get_google_auth_service() -> GoogleAuthService:
     if _auth_service is None:
         _auth_service = GoogleAuthService()
     return _auth_service
+

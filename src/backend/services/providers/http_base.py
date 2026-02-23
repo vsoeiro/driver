@@ -8,7 +8,7 @@ from typing import Any, Callable
 import httpx
 
 from backend.db.models import LinkedAccount
-from backend.services.token_manager import TokenManager
+from backend.security.token_manager import TokenManager
 
 TimeoutErrorFactory = Callable[[Exception], Exception]
 ConnectionErrorFactory = Callable[[Exception], Exception]
@@ -78,7 +78,9 @@ class OAuthHTTPClientBase:
             if response.status_code == 401:
                 if unauthorized_retry_log is not None:
                     unauthorized_retry_log(account)
-                access_token = await self._token_manager.force_refresh_access_token(account)
+                access_token = await self._token_manager.force_refresh_access_token(
+                    account
+                )
                 response = await _send(access_token)
             return response
         except httpx.TimeoutException as exc:
@@ -87,7 +89,9 @@ class OAuthHTTPClientBase:
             raise connection_error_factory(exc) from exc
 
     @staticmethod
-    def parse_error_message(response: httpx.Response, *, default: str = "Request failed") -> str:
+    def parse_error_message(
+        response: httpx.Response, *, default: str = "Request failed"
+    ) -> str:
         """Best-effort parser for structured API errors."""
         try:
             data = response.json()

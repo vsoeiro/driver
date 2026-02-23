@@ -12,11 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.config import get_settings
 from backend.db.models import AppSetting, MetadataPlugin
-from backend.services.metadata_libraries.implementations.comics.schema import COMICS_LIBRARY_KEY
+from backend.services.metadata_libraries.implementations.comics.schema import (
+    COMICS_LIBRARY_KEY,
+)
 
 # Keep persisted setting keys stable for backward compatibility.
 METADATA_LIBRARY_PREFIX = "plugin:"
-PLUGIN_PREFIX = METADATA_LIBRARY_PREFIX  # backward-compatible alias
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,7 +123,6 @@ def _comics_library_setting_spec() -> MetadataLibrarySettingSpec:
 METADATA_LIBRARY_SETTINGS_REGISTRY: dict[str, MetadataLibrarySettingSpec] = {
     COMICS_LIBRARY_KEY: _comics_library_setting_spec(),
 }
-PLUGIN_SETTINGS_REGISTRY = METADATA_LIBRARY_SETTINGS_REGISTRY  # backward-compatible alias
 
 
 def setting_db_key(library_key: str, field_key: str) -> str:
@@ -168,31 +168,47 @@ class MetadataLibrarySettingsService:
                     "plugin_description": library.description or spec.description,
                     "capabilities": {
                         "schema_version": spec.schema_version,
-                        "supported_input_types": sorted({field.input_type for field in spec.fields}),
-                        "actions": ["reindex_covers"] if spec.library_key == COMICS_LIBRARY_KEY else [],
+                        "supported_input_types": sorted(
+                            {field.input_type for field in spec.fields}
+                        ),
+                        "actions": ["reindex_covers"]
+                        if spec.library_key == COMICS_LIBRARY_KEY
+                        else [],
                     },
                     "fields": fields,
                 }
             )
         return output
 
-    async def update_metadata_library_configs(self, payload: dict[str, dict[str, Any]] | None) -> None:
+    async def update_metadata_library_configs(
+        self, payload: dict[str, dict[str, Any]] | None
+    ) -> None:
         if not payload:
             return
-        active_keys = {library.key for library in await self._active_metadata_libraries()}
+        active_keys = {
+            library.key for library in await self._active_metadata_libraries()
+        }
         changed = False
         for library_key, values in payload.items():
             spec = METADATA_LIBRARY_SETTINGS_REGISTRY.get(library_key)
             if spec is None:
-                raise ValueError(f"Unknown metadata library settings key: {library_key}")
+                raise ValueError(
+                    f"Unknown metadata library settings key: {library_key}"
+                )
             if library_key not in active_keys:
-                raise ValueError(f"Metadata library '{library_key}' must be active before updating settings.")
+                raise ValueError(
+                    f"Metadata library '{library_key}' must be active before updating settings."
+                )
 
             rows = await self._ensure_library_defaults(spec)
             for field_key, raw_value in values.items():
-                field_spec = next((field for field in spec.fields if field.key == field_key), None)
+                field_spec = next(
+                    (field for field in spec.fields if field.key == field_key), None
+                )
                 if field_spec is None:
-                    raise ValueError(f"Unknown setting '{field_key}' for metadata library '{library_key}'.")
+                    raise ValueError(
+                        f"Unknown setting '{field_key}' for metadata library '{library_key}'."
+                    )
                 validated = self._validate_value(field_spec, raw_value)
                 row = rows[setting_db_key(library_key, field_key)]
                 row.value = self._serialize_value(field_spec, validated)
@@ -211,8 +227,13 @@ class MetadataLibrarySettingsService:
         target = values["cover_storage_target"] or {}
         account_id = (target.get("account_id") or "").strip() or None
         folder_id = (target.get("folder_id") or "root").strip() or "root"
-        folder_name = str(values["cover_storage_folder_name"]).strip() or "__driver_comic_covers__"
-        quality_steps = self._parse_quality_steps(str(values["cover_jpeg_quality_steps"]))
+        folder_name = (
+            str(values["cover_storage_folder_name"]).strip()
+            or "__driver_comic_covers__"
+        )
+        quality_steps = self._parse_quality_steps(
+            str(values["cover_jpeg_quality_steps"])
+        )
         return ComicsRuntimeSettings(
             storage_account_id=account_id,
             storage_parent_folder_id=folder_id,
@@ -233,9 +254,13 @@ class MetadataLibrarySettingsService:
                 return []
             raise
 
-    async def _ensure_library_defaults(self, spec: MetadataLibrarySettingSpec) -> dict[str, AppSetting]:
+    async def _ensure_library_defaults(
+        self, spec: MetadataLibrarySettingSpec
+    ) -> dict[str, AppSetting]:
         keys = [setting_db_key(spec.library_key, field.key) for field in spec.fields]
-        result = await self.session.execute(select(AppSetting).where(AppSetting.key.in_(keys)))
+        result = await self.session.execute(
+            select(AppSetting).where(AppSetting.key.in_(keys))
+        )
         rows = {row.key: row for row in result.scalars().all()}
         changed = False
         for field in spec.fields:
@@ -254,7 +279,9 @@ class MetadataLibrarySettingsService:
             await self.session.commit()
         return rows
 
-    def _validate_value(self, field: MetadataLibrarySettingFieldSpec, value: Any) -> Any:
+    def _validate_value(
+        self, field: MetadataLibrarySettingFieldSpec, value: Any
+    ) -> Any:
         if field.input_type == "number":
             parsed = int(value)
             if field.minimum is not None and parsed < field.minimum:
@@ -268,7 +295,11 @@ class MetadataLibrarySettingsService:
             folder_id = str(value.get("folder_id") or "root").strip() or "root"
             account_id = str(value.get("account_id") or "").strip()
             folder_path = str(value.get("folder_path") or "Root").strip() or "Root"
-            return {"account_id": account_id, "folder_id": folder_id, "folder_path": folder_path}
+            return {
+                "account_id": account_id,
+                "folder_id": folder_id,
+                "folder_path": folder_path,
+            }
         if field.input_type == "text":
             text = str(value if value is not None else "").strip()
             if field.required and not text:
@@ -313,26 +344,3 @@ class MetadataLibrarySettingsService:
         if not parsed:
             raise ValueError("cover_jpeg_quality_steps cannot be empty")
         return tuple(parsed)
-
-    # Backward-compatible aliases
-    async def list_active_plugin_configs(self) -> list[dict[str, Any]]:
-        return await self.list_active_metadata_library_configs()
-
-    async def update_plugin_configs(self, payload: dict[str, dict[str, Any]] | None) -> None:
-        await self.update_metadata_library_configs(payload)
-
-    async def get_comic_runtime_settings(self) -> ComicsRuntimeSettings:
-        return await self.get_comics_runtime_settings()
-
-    async def _active_plugins(self) -> list[MetadataPlugin]:
-        return await self._active_metadata_libraries()
-
-    async def _ensure_plugin_defaults(self, spec: MetadataLibrarySettingSpec) -> dict[str, AppSetting]:
-        return await self._ensure_library_defaults(spec)
-
-
-# Backward-compatible aliases for legacy imports.
-PluginSettingFieldSpec = MetadataLibrarySettingFieldSpec
-PluginSettingSpec = MetadataLibrarySettingSpec
-ComicRuntimeSettings = ComicsRuntimeSettings
-PluginSettingsService = MetadataLibrarySettingsService

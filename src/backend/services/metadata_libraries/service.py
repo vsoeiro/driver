@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -83,7 +82,9 @@ class MetadataLibraryService:
     async def ensure_active_comics_category(self) -> MetadataCategory:
         category = await self.get_active_comics_category()
         if category is None:
-            raise ValueError("Comics metadata library is not active. Activate comics_core first.")
+            raise ValueError(
+                "Comics metadata library is not active. Activate comics_core first."
+            )
         return await self._ensure_comics_category()
 
     async def comics_attribute_id_map(self) -> dict[str, str]:
@@ -134,10 +135,14 @@ class MetadataLibraryService:
         category = result.scalar_one_or_none()
 
         if category is None:
-            conflict_stmt = select(MetadataCategory).where(MetadataCategory.name == "Comics")
+            conflict_stmt = select(MetadataCategory).where(
+                MetadataCategory.name == "Comics"
+            )
             conflict = (await self.session.execute(conflict_stmt)).scalar_one_or_none()
             if conflict and not conflict.managed_by_plugin:
-                raise ValueError("Category name 'Comics' already exists and is not library-managed.")
+                raise ValueError(
+                    "Category name 'Comics' already exists and is not library-managed."
+                )
 
             category = MetadataCategory(
                 name="Comics",
@@ -155,7 +160,9 @@ class MetadataLibraryService:
         category.plugin_key = COMICS_LIBRARY_KEY
         category.is_locked = True
 
-        attrs_stmt = select(MetadataAttribute).where(MetadataAttribute.category_id == category.id)
+        attrs_stmt = select(MetadataAttribute).where(
+            MetadataAttribute.category_id == category.id
+        )
         attrs_result = await self.session.execute(attrs_stmt)
         category_attrs = attrs_result.scalars().all()
         existing_by_key = {
@@ -211,28 +218,3 @@ class MetadataLibraryService:
         if category_loaded is None:
             raise ValueError("Failed to load metadata library category")
         return category_loaded
-
-    # Backward-compatible aliases
-    async def list_plugins(self) -> list[MetadataPlugin]:
-        return await self.list_libraries()
-
-    async def activate_comic_plugin(self) -> MetadataPlugin:
-        return await self.activate_comics_library()
-
-    async def deactivate_comic_plugin(self) -> MetadataPlugin:
-        return await self.deactivate_comics_library()
-
-    async def get_active_comic_category(self) -> MetadataCategory | None:
-        return await self.get_active_comics_category()
-
-    async def ensure_active_comic_category(self) -> MetadataCategory:
-        return await self.ensure_active_comics_category()
-
-    async def comic_attribute_id_map(self) -> dict[str, str]:
-        return await self.comics_attribute_id_map()
-
-
-# Backward-compatible aliases for legacy imports.
-MetadataPluginService = MetadataLibraryService
-PluginFieldSpec = MetadataLibraryFieldSpec
-

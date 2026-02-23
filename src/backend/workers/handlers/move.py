@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.application.drive.transfer_service import DriveTransferService
 from backend.core.exceptions import DriveOrganizerError
 from backend.db.models import Item, LinkedAccount
+from backend.security.token_manager import TokenManager
 from backend.services.item_index import (
     delete_item_and_descendants,
     parent_id_from_breadcrumb,
@@ -19,7 +20,6 @@ from backend.services.item_index import (
 )
 from backend.services.providers.base import DriveProviderClient
 from backend.services.providers.factory import build_drive_client
-from backend.services.token_manager import TokenManager
 from backend.workers.dispatcher import register_handler
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,9 @@ async def move_items_handler(payload: dict, session: AsyncSession) -> dict:
     dest_account = await session.get(LinkedAccount, destination_account_id)
 
     if not source_account or not dest_account:
-        raise DriveOrganizerError("Source or destination account not found", status_code=404)
+        raise DriveOrganizerError(
+            "Source or destination account not found", status_code=404
+        )
 
     token_manager = TokenManager(session)
     source_client = build_drive_client(source_account, token_manager)
@@ -56,7 +58,9 @@ async def move_items_handler(payload: dict, session: AsyncSession) -> dict:
 
     # 2. Check if accounts are the same
     if source_account_id == destination_account_id:
-        logger.info(f"Moving item {source_item_id} within the same account {source_account_id}")
+        logger.info(
+            f"Moving item {source_item_id} within the same account {source_account_id}"
+        )
         old_path = await session.scalar(
             select(Item.path).where(
                 Item.account_id == source_account_id,
@@ -89,7 +93,9 @@ async def move_items_handler(payload: dict, session: AsyncSession) -> dict:
         return {"moved_item_id": moved_item.id, "method": "move"}
 
     # 3. different accounts -> Download and Upload
-    logger.info(f"Moving item {source_item_id} across accounts {source_account_id} -> {destination_account_id}")
+    logger.info(
+        f"Moving item {source_item_id} across accounts {source_account_id} -> {destination_account_id}"
+    )
 
     # Get item metadata to know if it's a folder or file
     item = await source_client.get_item_metadata(source_account, source_item_id)
@@ -152,14 +158,16 @@ async def _move_folder_recursive(
 ):
     """Recursively move a folder."""
     # 1. Create folder on dest
-    new_folder = await dest_client.create_folder(dest_account, folder_item.name, dest_parent_id)
-    
+    new_folder = await dest_client.create_folder(
+        dest_account, folder_item.name, dest_parent_id
+    )
+
     # 2. List children of source folder
     children = await source_client.list_folder_items(source_account, folder_item.id)
-    
+
     # 3. Iteratively move children
     items_to_process = children.items
-    
+
     # Handle pagination if many items
     while True:
         for child in items_to_process:
@@ -183,9 +191,11 @@ async def _move_folder_recursive(
                     source_item_name=child.name,
                     destination_folder_id=new_folder.id,
                 )
-        
+
         if children.next_link:
-            children = await source_client.list_items_by_next_link(source_account, children.next_link)
+            children = await source_client.list_items_by_next_link(
+                source_account, children.next_link
+            )
             items_to_process = children.items
         else:
             break

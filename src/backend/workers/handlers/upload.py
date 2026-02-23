@@ -10,9 +10,13 @@ from backend.application.drive.transfer_service import DriveTransferService
 from backend.common.upload_policy import is_large_upload
 from backend.core.exceptions import DriveOrganizerError
 from backend.db.models import Job, LinkedAccount
-from backend.services.item_index import parent_id_from_breadcrumb, path_from_breadcrumb, upsert_item_record
+from backend.security.token_manager import TokenManager
+from backend.services.item_index import (
+    parent_id_from_breadcrumb,
+    path_from_breadcrumb,
+    upsert_item_record,
+)
 from backend.services.providers.factory import build_drive_client
-from backend.services.token_manager import TokenManager
 from backend.workers.dispatcher import register_handler
 from backend.workers.job_progress import JobProgressReporter
 
@@ -65,7 +69,9 @@ async def upload_file_handler(payload: dict, session: AsyncSession) -> dict:
 
     # Ensure temp file exists
     if not os.path.exists(temp_path):
-        raise DriveOrganizerError(f"Temporary file not found: {temp_path}", status_code=404)
+        raise DriveOrganizerError(
+            f"Temporary file not found: {temp_path}", status_code=404
+        )
 
     remove_temp_file = True
 
@@ -82,7 +88,12 @@ async def upload_file_handler(payload: dict, session: AsyncSession) -> dict:
         # 2. Upload Logic
         file_size = os.path.getsize(temp_path)
         upload_kind = "large" if is_large_upload(file_size) else "small"
-        logger.info("Starting %s file upload for %s (%s bytes)", upload_kind, filename, file_size)
+        logger.info(
+            "Starting %s file upload for %s (%s bytes)",
+            upload_kind,
+            filename,
+            file_size,
+        )
         uploaded_item_id = await transfer_service.upload_local_file(
             client=client,
             account=account,
@@ -141,7 +152,9 @@ async def upload_file_handler(payload: dict, session: AsyncSession) -> dict:
                 remove_temp_file = False
                 logger.info("Preserving temp file for retry: %s", temp_path)
         except Exception:
-            logger.exception("Failed to evaluate retry state for upload job temp file cleanup")
+            logger.exception(
+                "Failed to evaluate retry state for upload job temp file cleanup"
+            )
 
         progress.current = 1
         reason_text = str(e).strip() or e.__class__.__name__
@@ -161,7 +174,9 @@ async def upload_file_handler(payload: dict, session: AsyncSession) -> dict:
             )
             await progress.flush(force=True)
         except Exception:
-            logger.exception("Failed to persist upload progress metrics for %s", filename)
+            logger.exception(
+                "Failed to persist upload progress metrics for %s", filename
+            )
         logger.error(f"Upload job failed for {filename}: {e}")
         raise
     finally:
@@ -172,4 +187,6 @@ async def upload_file_handler(payload: dict, session: AsyncSession) -> dict:
                     os.remove(temp_path)
                     logger.info(f"Cleaned up temp file {temp_path}")
             except Exception as cleanup_error:
-                logger.warning(f"Failed to cleanup temp file {temp_path}: {cleanup_error}")
+                logger.warning(
+                    f"Failed to cleanup temp file {temp_path}: {cleanup_error}"
+                )

@@ -2,7 +2,7 @@ import zipfile
 
 import pytest
 
-from backend.services import comics
+from backend.services.metadata_libraries.comics import metadata_service as comics
 
 
 def _sample_result(fmt: str) -> comics.ComicExtractionResult:
@@ -19,10 +19,18 @@ def test_cbz_fallback_uses_detected_rar(monkeypatch):
     monkeypatch.setattr(
         comics,
         "_extract_from_zip",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(zipfile.BadZipFile("File is not a zip file")),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            zipfile.BadZipFile("File is not a zip file")
+        ),
     )
-    monkeypatch.setattr(comics, "_detect_archive_container", lambda *_args, **_kwargs: "rar")
-    monkeypatch.setattr(comics, "_run_container_extractor", lambda *_args, **_kwargs: _sample_result("cbz"))
+    monkeypatch.setattr(
+        comics, "_detect_archive_container", lambda *_args, **_kwargs: "rar"
+    )
+    monkeypatch.setattr(
+        comics,
+        "_run_container_extractor",
+        lambda *_args, **_kwargs: _sample_result("cbz"),
+    )
 
     result = comics.extract_comic_asset("dummy.cbz", "cbz")
 
@@ -37,15 +45,25 @@ def test_cbz_fallback_uses_7z_cli_as_last_resort(monkeypatch):
     monkeypatch.setattr(
         comics,
         "_extract_from_zip",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(zipfile.BadZipFile("File is not a zip file")),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            zipfile.BadZipFile("File is not a zip file")
+        ),
     )
-    monkeypatch.setattr(comics, "_detect_archive_container", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        comics, "_detect_archive_container", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(
         comics,
         "_run_container_extractor",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("container extractor failed")),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("container extractor failed")
+        ),
     )
-    monkeypatch.setattr(comics, "_extract_from_rar_with_7z", lambda *_args, **_kwargs: _sample_result("cbz"))
+    monkeypatch.setattr(
+        comics,
+        "_extract_from_rar_with_7z",
+        lambda *_args, **_kwargs: _sample_result("cbz"),
+    )
 
     result = comics.extract_comic_asset("dummy.cbz", "cbz")
 
@@ -58,10 +76,16 @@ def test_cbz_fallback_uses_detected_pdf(monkeypatch):
     monkeypatch.setattr(
         comics,
         "_extract_from_zip",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(zipfile.BadZipFile("File is not a zip file")),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            zipfile.BadZipFile("File is not a zip file")
+        ),
     )
-    monkeypatch.setattr(comics, "_detect_archive_container", lambda *_args, **_kwargs: "pdf")
-    monkeypatch.setattr(comics, "_extract_from_pdf", lambda *_args, **_kwargs: _sample_result("pdf"))
+    monkeypatch.setattr(
+        comics, "_detect_archive_container", lambda *_args, **_kwargs: "pdf"
+    )
+    monkeypatch.setattr(
+        comics, "_extract_from_pdf", lambda *_args, **_kwargs: _sample_result("pdf")
+    )
 
     result = comics.extract_comic_asset("dummy.cbz", "cbz")
 
@@ -75,13 +99,19 @@ def test_cbz_fallback_raises_when_all_extractors_fail(monkeypatch):
     monkeypatch.setattr(
         comics,
         "_extract_from_zip",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(zipfile.BadZipFile("File is not a zip file")),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            zipfile.BadZipFile("File is not a zip file")
+        ),
     )
-    monkeypatch.setattr(comics, "_detect_archive_container", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        comics, "_detect_archive_container", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(
         comics,
         "_run_container_extractor",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("container extractor failed")),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("container extractor failed")
+        ),
     )
     monkeypatch.setattr(
         comics,

@@ -1,53 +1,72 @@
 """Metadata API routes."""
 
 import uuid
-from uuid import UUID
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import OperationalError
-from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from backend.application.metadata.series_query_service import SeriesQueryService
 from backend.api.dependencies import get_session
+from backend.application.metadata.series_query_service import SeriesQueryService
 from backend.db.models import (
     AppSetting,
     Item,
     ItemMetadata,
     ItemMetadataHistory,
+    LinkedAccount,
     MetadataAttribute,
     MetadataCategory,
     MetadataRule,
-    LinkedAccount,
 )
 from backend.domain.errors import NotFoundError
+from backend.schemas.metadata import (
+    ItemMetadata as ItemMetadataSchema,
+)
 from backend.schemas.metadata import (
     ItemMetadataCreate,
     ItemMetadataFieldUpdateRequest,
     MetadataAttributeCreate,
     MetadataAttributeUpdate,
     MetadataCategoryCreate,
-    MetadataCategory as MetadataCategorySchema,
-    ItemMetadata as ItemMetadataSchema,
-    ItemMetadataHistory as ItemMetadataHistorySchema,
-    MetadataAttribute as MetadataAttributeSchema,
-    MetadataLibrary as MetadataLibrarySchema,
-    MetadataRule as MetadataRuleSchema,
+    MetadataFormLayout,
+    MetadataFormLayoutUpdate,
     MetadataRuleCreate,
     MetadataRulePreviewRequest,
     MetadataRulePreviewResponse,
     MetadataRuleUpdate,
-    MetadataFormLayout,
-    MetadataFormLayoutUpdate,
     SeriesSummaryResponse,
 )
-from backend.services.metadata_libraries.service import COMICS_LIBRARY_KEY, MetadataLibraryService
-from backend.services.metadata_versioning import apply_metadata_change, normalize_metadata_values, undo_metadata_batch
+from backend.schemas.metadata import (
+    ItemMetadataHistory as ItemMetadataHistorySchema,
+)
+from backend.schemas.metadata import (
+    MetadataAttribute as MetadataAttributeSchema,
+)
+from backend.schemas.metadata import (
+    MetadataCategory as MetadataCategorySchema,
+)
+from backend.schemas.metadata import (
+    MetadataLibrary as MetadataLibrarySchema,
+)
+from backend.schemas.metadata import (
+    MetadataRule as MetadataRuleSchema,
+)
+from backend.security.token_manager import TokenManager
+from backend.services.metadata_libraries.service import (
+    COMICS_LIBRARY_KEY,
+    MetadataLibraryService,
+)
+from backend.services.metadata_versioning import (
+    apply_metadata_change,
+    normalize_metadata_values,
+    undo_metadata_batch,
+)
 from backend.services.providers.factory import build_drive_client
-from backend.services.token_manager import TokenManager
 
 router = APIRouter(prefix="/metadata", tags=["Metadata"])
 FORM_LAYOUTS_SETTING_KEY = "metadata_form_layouts_v1"
@@ -81,7 +100,9 @@ def _coerce_attribute_value(attribute: MetadataAttribute, raw_value: Any) -> Any
         try:
             number = float(stripped)
         except (TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid number for '{attribute.name}'") from exc
+            raise HTTPException(
+                status_code=400, detail=f"Invalid number for '{attribute.name}'"
+            ) from exc
         if number.is_integer():
             return int(number)
         return number
@@ -96,22 +117,33 @@ def _coerce_attribute_value(attribute: MetadataAttribute, raw_value: Any) -> Any
             return True
         if normalized in {"false", "0", "no", "off"}:
             return False
-        raise HTTPException(status_code=400, detail=f"Invalid boolean for '{attribute.name}'")
+        raise HTTPException(
+            status_code=400, detail=f"Invalid boolean for '{attribute.name}'"
+        )
 
     if data_type == "date":
         text = str(stripped).strip()
         try:
             datetime.fromisoformat(text.replace("Z", "+00:00"))
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid date for '{attribute.name}' (use ISO format)") from exc
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid date for '{attribute.name}' (use ISO format)",
+            ) from exc
         return text
 
     if data_type == "select":
-        options = attribute.options.get("options") if isinstance(attribute.options, dict) else []
+        options = (
+            attribute.options.get("options")
+            if isinstance(attribute.options, dict)
+            else []
+        )
         normalized_options = {str(opt).strip() for opt in options if str(opt).strip()}
         value = str(stripped).strip()
         if normalized_options and value not in normalized_options:
-            raise HTTPException(status_code=400, detail=f"Invalid option for '{attribute.name}'")
+            raise HTTPException(
+                status_code=400, detail=f"Invalid option for '{attribute.name}'"
+            )
         return value
 
     if data_type == "tags":
@@ -138,9 +170,11 @@ def _coerce_attribute_value(attribute: MetadataAttribute, raw_value: Any) -> Any
 async def _reconcile_active_comic_schema(session: AsyncSession) -> None:
     service = MetadataLibraryService(session)
     libraries = await service.list_libraries()
-    if any(library.key == COMICS_LIBRARY_KEY and library.is_active for library in libraries):
+    if any(
+        library.key == COMICS_LIBRARY_KEY and library.is_active for library in libraries
+    ):
         try:
-            await service.ensure_active_comic_category()
+            await service.ensure_active_comics_category()
             await session.commit()
         except ValueError:
             # Library flagged active but category is missing/inactive; keep request resilient.
@@ -152,6 +186,7 @@ async def _load_form_layouts(session: AsyncSession) -> dict[str, dict]:
     if not row or not row.value:
         return {}
     import json
+
     try:
         parsed = json.loads(row.value)
     except Exception:
@@ -161,6 +196,7 @@ async def _load_form_layouts(session: AsyncSession) -> dict[str, dict]:
 
 async def _save_form_layouts(session: AsyncSession, layouts: dict[str, dict]) -> None:
     import json
+
     row = await session.get(AppSetting, FORM_LAYOUTS_SETTING_KEY)
     serialized = json.dumps(layouts, ensure_ascii=True)
     if row is None:
@@ -230,7 +266,10 @@ def _parse_layout_items(raw_items: Any, columns: int) -> list[dict[str, Any]]:
     for index, raw_item in enumerate(raw_items):
         if not isinstance(raw_item, dict):
             continue
-        item_type = str(raw_item.get("item_type") or ("attribute" if raw_item.get("attribute_id") else "section")).lower()
+        item_type = str(
+            raw_item.get("item_type")
+            or ("attribute" if raw_item.get("attribute_id") else "section")
+        ).lower()
 
         if item_type == "section":
             raw_item_id = str(raw_item.get("item_id") or "").strip()
@@ -285,7 +324,9 @@ def _parse_layout_items(raw_items: Any, columns: int) -> list[dict[str, Any]]:
     return items
 
 
-def _build_legacy_layout_items(raw_layout: dict[str, Any], columns: int) -> list[dict[str, Any]]:
+def _build_legacy_layout_items(
+    raw_layout: dict[str, Any], columns: int
+) -> list[dict[str, Any]]:
     ordered = []
     for raw_id in (raw_layout or {}).get("ordered_attribute_ids", []):
         try:
@@ -446,11 +487,14 @@ def _normalize_layout_payload(
             )
             seen_ids.add(attr_id)
 
-    normalized_items.sort(key=lambda item: (_to_int(item.get("y"), 0), _to_int(item.get("x"), 0)))
+    normalized_items.sort(
+        key=lambda item: (_to_int(item.get("y"), 0), _to_int(item.get("x"), 0))
+    )
     ordered_ids = [
         str(item["attribute_id"])
         for item in normalized_items
-        if str(item.get("item_type") or "attribute") == "attribute" and item.get("attribute_id")
+        if str(item.get("item_type") or "attribute") == "attribute"
+        and item.get("attribute_id")
     ]
     half_ids = [
         str(item["attribute_id"])
@@ -469,7 +513,9 @@ def _normalize_layout_payload(
     }
 
 
-def _to_form_layout_response(category_id: UUID, raw_layout: dict[str, Any]) -> MetadataFormLayout:
+def _to_form_layout_response(
+    category_id: UUID, raw_layout: dict[str, Any]
+) -> MetadataFormLayout:
     normalized = _normalize_layout_payload(raw_layout)
     items_payload = []
     for item in normalized["items"]:
@@ -527,16 +573,31 @@ def _can_inline_edit_attribute(attribute: MetadataAttribute) -> bool:
 
 
 async def _validate_rule_configuration(session: AsyncSession, payload: dict) -> None:
-    if payload.get("apply_rename") and not (payload.get("rename_template") or "").strip():
-        raise HTTPException(status_code=400, detail="rename_template is required when apply_rename is true")
+    if (
+        payload.get("apply_rename")
+        and not (payload.get("rename_template") or "").strip()
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="rename_template is required when apply_rename is true",
+        )
 
     if payload.get("apply_move"):
         destination_folder_id = (payload.get("destination_folder_id") or "").strip()
         if not destination_folder_id:
-            raise HTTPException(status_code=400, detail="destination_folder_id is required when apply_move is true")
+            raise HTTPException(
+                status_code=400,
+                detail="destination_folder_id is required when apply_move is true",
+            )
 
-    if not payload.get("apply_metadata", True) and not payload.get("apply_rename") and not payload.get("apply_move"):
-        raise HTTPException(status_code=400, detail="At least one action must be enabled")
+    if (
+        not payload.get("apply_metadata", True)
+        and not payload.get("apply_rename")
+        and not payload.get("apply_move")
+    ):
+        raise HTTPException(
+            status_code=400, detail="At least one action must be enabled"
+        )
 
     destination_account_id = payload.get("destination_account_id")
     if destination_account_id:
@@ -633,7 +694,9 @@ async def list_metadata_form_layouts(session: AsyncSession = Depends(get_session
             cid = UUID(str(category_id))
         except Exception:
             continue
-        result.append(_to_form_layout_response(cid, raw if isinstance(raw, dict) else {}))
+        result.append(
+            _to_form_layout_response(cid, raw if isinstance(raw, dict) else {})
+        )
     return result
 
 
@@ -647,7 +710,9 @@ async def get_metadata_form_layout(
         .where(MetadataAttribute.category_id == category_id)
         .order_by(MetadataAttribute.name.asc(), MetadataAttribute.id.asc())
     )
-    category_attr_ids = [str(attr_id) for attr_id in (await session.execute(attrs_stmt)).scalars().all()]
+    category_attr_ids = [
+        str(attr_id) for attr_id in (await session.execute(attrs_stmt)).scalars().all()
+    ]
 
     layouts = await _load_form_layouts(session)
     raw_layout = layouts.get(str(category_id), {})
@@ -674,7 +739,9 @@ async def upsert_metadata_form_layout(
         .where(MetadataAttribute.category_id == category_id)
         .order_by(MetadataAttribute.name.asc(), MetadataAttribute.id.asc())
     )
-    attr_ids_ordered = [str(attr_id) for attr_id in (await session.execute(attrs_stmt)).scalars().all()]
+    attr_ids_ordered = [
+        str(attr_id) for attr_id in (await session.execute(attrs_stmt)).scalars().all()
+    ]
     attr_ids = set(attr_ids_ordered)
 
     raw_payload = payload.model_dump(mode="json")
@@ -682,9 +749,13 @@ async def upsert_metadata_form_layout(
     if not raw_payload.get("items"):
         raw_payload["items"] = []
     if not raw_payload.get("ordered_attribute_ids"):
-        raw_payload["ordered_attribute_ids"] = [str(attr_id) for attr_id in payload.ordered_attribute_ids]
+        raw_payload["ordered_attribute_ids"] = [
+            str(attr_id) for attr_id in payload.ordered_attribute_ids
+        ]
     if not raw_payload.get("half_width_attribute_ids"):
-        raw_payload["half_width_attribute_ids"] = [str(attr_id) for attr_id in payload.half_width_attribute_ids]
+        raw_payload["half_width_attribute_ids"] = [
+            str(attr_id) for attr_id in payload.half_width_attribute_ids
+        ]
 
     normalized = _normalize_layout_payload(
         raw_payload,
@@ -705,7 +776,9 @@ async def upsert_metadata_form_layout(
     return _to_form_layout_response(category_id, normalized)
 
 
-@router.get("/categories/{category_id}/series-summary", response_model=SeriesSummaryResponse)
+@router.get(
+    "/categories/{category_id}/series-summary", response_model=SeriesSummaryResponse
+)
 async def get_category_series_summary(
     category_id: UUID,
     page: int = Query(1, ge=1),
@@ -738,7 +811,11 @@ async def get_category_series_summary(
         raise HTTPException(status_code=404, detail=exc.message) from exc
 
 
-@router.post("/categories", response_model=MetadataCategorySchema, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/categories",
+    response_model=MetadataCategorySchema,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_category(
     category: MetadataCategoryCreate, session: AsyncSession = Depends(get_session)
 ):
@@ -767,7 +844,9 @@ async def create_category(
 
 
 @router.delete("/categories/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_category(category_id: UUID, session: AsyncSession = Depends(get_session)):
+async def delete_category(
+    category_id: UUID, session: AsyncSession = Depends(get_session)
+):
     """Delete a metadata category."""
     category = await session.get(MetadataCategory, category_id)
     if not category:
@@ -788,7 +867,11 @@ async def delete_category(category_id: UUID, session: AsyncSession = Depends(get
 
 
 # --- Attributes ---
-@router.post("/categories/{category_id}/attributes", response_model=MetadataAttributeSchema, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/categories/{category_id}/attributes",
+    response_model=MetadataAttributeSchema,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_attribute(
     category_id: UUID,
     attribute: MetadataAttributeCreate,
@@ -799,7 +882,9 @@ async def create_attribute(
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
     if not category.is_active:
-        raise HTTPException(status_code=400, detail="Cannot add attributes to an inactive category")
+        raise HTTPException(
+            status_code=400, detail="Cannot add attributes to an inactive category"
+        )
 
     db_attribute = MetadataAttribute(category_id=category_id, **attribute.model_dump())
     session.add(db_attribute)
@@ -809,13 +894,17 @@ async def create_attribute(
 
 
 @router.delete("/attributes/{attribute_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_attribute(attribute_id: UUID, session: AsyncSession = Depends(get_session)):
+async def delete_attribute(
+    attribute_id: UUID, session: AsyncSession = Depends(get_session)
+):
     """Delete a metadata attribute."""
     attribute = await session.get(MetadataAttribute, attribute_id)
     if not attribute:
         raise HTTPException(status_code=404, detail="Attribute not found")
     if attribute.is_locked or attribute.managed_by_plugin:
-        raise HTTPException(status_code=400, detail="Library-managed attribute cannot be deleted")
+        raise HTTPException(
+            status_code=400, detail="Library-managed attribute cannot be deleted"
+        )
 
     await session.delete(attribute)
     await session.commit()
@@ -832,7 +921,9 @@ async def update_attribute(
     if not db_attribute:
         raise HTTPException(status_code=404, detail="Attribute not found")
     if db_attribute.is_locked or db_attribute.managed_by_plugin:
-        raise HTTPException(status_code=400, detail="Library-managed attribute cannot be edited")
+        raise HTTPException(
+            status_code=400, detail="Library-managed attribute cannot be edited"
+        )
 
     updates = attribute.model_dump(exclude_unset=True)
     if "data_type" in updates and updates["data_type"] != "select":
@@ -875,7 +966,9 @@ async def update_item_metadata_attribute(
     if not attribute:
         raise HTTPException(status_code=404, detail="Attribute not found")
     if not _can_inline_edit_attribute(attribute):
-        raise HTTPException(status_code=400, detail="Attribute is locked and cannot be edited")
+        raise HTTPException(
+            status_code=400, detail="Attribute is locked and cannot be edited"
+        )
 
     stmt = select(ItemMetadata).where(
         ItemMetadata.account_id == account_id,
@@ -884,15 +977,24 @@ async def update_item_metadata_attribute(
     existing_row = await session.execute(stmt)
     existing = existing_row.scalar_one_or_none()
 
-    if payload.expected_version is not None and existing and existing.version != payload.expected_version:
-        raise HTTPException(status_code=409, detail="Metadata was updated by another process. Refresh and try again.")
+    if (
+        payload.expected_version is not None
+        and existing
+        and existing.version != payload.expected_version
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Metadata was updated by another process. Refresh and try again.",
+        )
 
     target_category_id = existing.category_id if existing else payload.category_id
     if target_category_id is None:
         target_category_id = attribute.category_id
 
     if target_category_id != attribute.category_id:
-        raise HTTPException(status_code=400, detail="Attribute does not belong to the selected category")
+        raise HTTPException(
+            status_code=400, detail="Attribute does not belong to the selected category"
+        )
 
     coerced_value = _coerce_attribute_value(attribute, payload.value)
     merged_values = normalize_metadata_values(existing.values if existing else {})
@@ -923,9 +1025,9 @@ async def upsert_item_metadata(
     metadata: ItemMetadataCreate, session: AsyncSession = Depends(get_session)
 ):
     """Assign or update metadata for an item.
-    
-    If metadata exists for this item, it updates it. 
-    However, since we allow only one category per item, if the category changes, 
+
+    If metadata exists for this item, it updates it.
+    However, since we allow only one category per item, if the category changes,
     we essentially replace the record.
     """
     # 1. Check if account exists
@@ -944,19 +1046,18 @@ async def upsert_item_metadata(
     # We need to fetch details from Graph API to populate Item table
     token_manager = TokenManager(session)
     client = build_drive_client(account, token_manager)
-    
+
     try:
         # Get item details and path so index state stays aligned before metadata write.
         drive_item = await client.get_item_metadata(account, metadata.item_id)
-        
+
         # Check if Item exists
         stmt = select(Item).where(
-            Item.account_id == account.id,
-            Item.item_id == metadata.item_id
+            Item.account_id == account.id, Item.item_id == metadata.item_id
         )
         result = await session.execute(stmt)
         db_item = result.scalar_one_or_none()
-        
+
         # Extension extraction
         extension = None
         if drive_item.item_type == "file" and "." in drive_item.name:
@@ -981,14 +1082,18 @@ async def upsert_item_metadata(
                 # Parent is the second to last item
                 parent_id = None
                 path_str = "/"
-                
+
                 if len(path_data) >= 2:
                     parent_id = path_data[-2]["id"]
-                
+
                 # Construct path string
-                path_names = [p["name"] for p in path_data if p["name"] and p["name"].lower() != "root"]
+                path_names = [
+                    p["name"]
+                    for p in path_data
+                    if p["name"] and p["name"].lower() != "root"
+                ]
                 path_str = "/" + "/".join(path_names)
-                
+
             except Exception:
                 parent_id = None
                 path_str = None
@@ -1008,12 +1113,13 @@ async def upsert_item_metadata(
                 last_synced_at=datetime.now(UTC),
             )
             session.add(db_item)
-            
+
     except Exception as e:
         # Don't fail the metadata update just because item sync failed?
-        # User requested "always register the item", so maybe we should log error but proceed, 
+        # User requested "always register the item", so maybe we should log error but proceed,
         # or fail? Let's log and proceed to avoid blocking metadata save if Graph is flaky.
         import logging
+
         logger = logging.getLogger(__name__)
         logger.error(f"Failed to sync Item record for {metadata.item_id}: {e}")
 
@@ -1043,8 +1149,7 @@ async def delete_item_metadata(
 ):
     """Remove metadata from an item."""
     query = select(ItemMetadata).where(
-        ItemMetadata.account_id == account_id,
-        ItemMetadata.item_id == item_id
+        ItemMetadata.account_id == account_id, ItemMetadata.item_id == item_id
     )
     result = await session.execute(query)
     metadata = result.scalar_one_or_none()
@@ -1064,14 +1169,11 @@ async def delete_item_metadata(
 
 @router.post("/items/batch-delete", status_code=status.HTTP_204_NO_CONTENT)
 async def batch_delete_item_metadata(
-    account_id: UUID,
-    item_ids: list[str],
-    session: AsyncSession = Depends(get_session)
+    account_id: UUID, item_ids: list[str], session: AsyncSession = Depends(get_session)
 ):
     """Remove metadata for multiple items."""
     query = select(ItemMetadata).where(
-        ItemMetadata.account_id == account_id,
-        ItemMetadata.item_id.in_(item_ids)
+        ItemMetadata.account_id == account_id, ItemMetadata.item_id.in_(item_ids)
     )
     result = await session.execute(query)
     metadata_list = result.scalars().all()
@@ -1089,7 +1191,7 @@ async def batch_delete_item_metadata(
             values=None,
             batch_id=batch_id,
         )
-    
+
     await session.commit()
 
 
@@ -1130,12 +1232,16 @@ async def undo_metadata_batch_route(
 @router.get("/rules", response_model=list[MetadataRuleSchema])
 async def list_metadata_rules(session: AsyncSession = Depends(get_session)):
     """List metadata rules by priority."""
-    stmt = select(MetadataRule).order_by(MetadataRule.priority.asc(), MetadataRule.created_at.asc())
+    stmt = select(MetadataRule).order_by(
+        MetadataRule.priority.asc(), MetadataRule.created_at.asc()
+    )
     result = await session.execute(stmt)
     return result.scalars().all()
 
 
-@router.post("/rules", response_model=MetadataRuleSchema, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/rules", response_model=MetadataRuleSchema, status_code=status.HTTP_201_CREATED
+)
 async def create_metadata_rule(
     rule: MetadataRuleCreate,
     session: AsyncSession = Depends(get_session),
@@ -1183,7 +1289,9 @@ async def update_metadata_rule(
         "destination_folder_id": db_rule.destination_folder_id,
         "destination_path_template": db_rule.destination_path_template,
     }
-    effective_payload.update({k: v for k, v in updates.items() if k in effective_payload})
+    effective_payload.update(
+        {k: v for k, v in updates.items() if k in effective_payload}
+    )
     await _validate_rule_configuration(session, effective_payload)
 
     await session.commit()
@@ -1270,7 +1378,9 @@ async def list_metadata_libraries(session: AsyncSession = Depends(get_session)):
 
 
 @router.post("/libraries/{library_key}/activate", response_model=MetadataLibrarySchema)
-async def activate_metadata_library(library_key: str, session: AsyncSession = Depends(get_session)):
+async def activate_metadata_library(
+    library_key: str, session: AsyncSession = Depends(get_session)
+):
     """Activate a metadata library and ensure managed schema exists."""
     if library_key != COMICS_LIBRARY_KEY:
         raise HTTPException(status_code=404, detail="Unknown metadata library")
@@ -1284,7 +1394,10 @@ async def activate_metadata_library(library_key: str, session: AsyncSession = De
     except OperationalError as exc:
         await session.rollback()
         if "no such table: metadata_plugins" in str(exc).lower():
-            raise HTTPException(status_code=409, detail="Database migration required: run alembic upgrade head") from exc
+            raise HTTPException(
+                status_code=409,
+                detail="Database migration required: run alembic upgrade head",
+            ) from exc
         raise
 
     await session.commit()
@@ -1292,8 +1405,12 @@ async def activate_metadata_library(library_key: str, session: AsyncSession = De
     return library
 
 
-@router.post("/libraries/{library_key}/deactivate", response_model=MetadataLibrarySchema)
-async def deactivate_metadata_library(library_key: str, session: AsyncSession = Depends(get_session)):
+@router.post(
+    "/libraries/{library_key}/deactivate", response_model=MetadataLibrarySchema
+)
+async def deactivate_metadata_library(
+    library_key: str, session: AsyncSession = Depends(get_session)
+):
     """Deactivate a metadata library."""
     if library_key != COMICS_LIBRARY_KEY:
         raise HTTPException(status_code=404, detail="Unknown metadata library")
@@ -1304,7 +1421,10 @@ async def deactivate_metadata_library(library_key: str, session: AsyncSession = 
     except OperationalError as exc:
         await session.rollback()
         if "no such table: metadata_plugins" in str(exc).lower():
-            raise HTTPException(status_code=409, detail="Database migration required: run alembic upgrade head") from exc
+            raise HTTPException(
+                status_code=409,
+                detail="Database migration required: run alembic upgrade head",
+            ) from exc
         raise
     await session.commit()
     await session.refresh(library)

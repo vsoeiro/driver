@@ -6,12 +6,13 @@ import secrets
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
+
 from backend.api.dependencies import DBSession
 from backend.core.config import get_settings
 from backend.core.security import decrypt_token, encrypt_token
 from backend.db.models import LinkedAccount
-from backend.services.google_auth import get_google_auth_service
-from backend.services.microsoft_auth import get_microsoft_auth_service
+from backend.services.google.auth import get_google_auth_service
+from backend.services.microsoft.auth import get_microsoft_auth_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -73,7 +74,9 @@ async def google_callback(
             detail="Invalid session state.",
         )
 
-    token_result = auth_service.exchange_code_for_tokens(code, settings.google_redirect_uri)
+    token_result = auth_service.exchange_code_for_tokens(
+        code, settings.google_redirect_uri
+    )
     if not token_result:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -118,22 +121,23 @@ async def microsoft_login(request: Request) -> RedirectResponse:
 
     flow = auth_service.get_auth_flow(settings.redirect_uri)
     auth_url = flow.get("auth_uri")
-    
+
     if not auth_url:
-         raise HTTPException(status_code=500, detail="Failed to generate auth URL")
+        raise HTTPException(status_code=500, detail="Failed to generate auth URL")
 
     logger.info("Redirecting to Microsoft OAuth")
 
     response = RedirectResponse(url=auth_url, status_code=status.HTTP_302_FOUND)
-    
+
     # Store the entire flow in a secure, encrypted cookie
     # In a real production app, we might want to sign this or store just an ID pointing to a DB record
     # But for "no external services", we can store the state in the cookie if it's small enough.
     # However, 'flow' contains the code_verifier which is sensitive.
     # Ideally we encrypt this. Since we have Fernet, let's use it.
-    from backend.core.security import encrypt_token
     import json
-    
+
+    from backend.core.security import encrypt_token
+
     flow_json = json.dumps(flow)
     encrypted_flow = encrypt_token(flow_json)
 
@@ -142,7 +146,7 @@ async def microsoft_login(request: Request) -> RedirectResponse:
         key="oauth_flow",
         value=encrypted_flow,
         httponly=True,
-        secure=False, # Set to True in production with HTTPS
+        secure=False,  # Set to True in production with HTTPS
         samesite="lax",
         max_age=600,  # 10 minutes
         path="/",
@@ -163,7 +167,7 @@ async def microsoft_callback(
     Exchanges the authorization code for tokens.
     """
     auth_service = get_microsoft_auth_service()
-    
+
     logger.info("Callback received. Cookies: %s", request.cookies.keys())
     encrypted_flow = request.cookies.get("oauth_flow")
     if not encrypted_flow:
@@ -171,14 +175,14 @@ async def microsoft_callback(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Session expired or invalid. Please try logging in again.",
         )
-        
+
     try:
         import json
 
         flow_json = decrypt_token(encrypted_flow)
         if not flow_json:
-             raise ValueError("Decryption failed")
-             
+            raise ValueError("Decryption failed")
+
         flow = json.loads(flow_json)
     except Exception:
         logger.error("Failed to decrypt oauth flow cookie")
@@ -187,7 +191,9 @@ async def microsoft_callback(
             detail="Invalid session state.",
         )
 
-    token_result = auth_service.exchange_code_for_tokens(flow, dict(request.query_params))
+    token_result = auth_service.exchange_code_for_tokens(
+        flow, dict(request.query_params)
+    )
     if not token_result:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -254,7 +260,9 @@ async def _upsert_linked_account(
                 email=email,
                 display_name=name,
                 access_token_encrypted=encrypt_token(access_token),
-                refresh_token_encrypted=(encrypt_token(refresh_token) if refresh_token else None),
+                refresh_token_encrypted=(
+                    encrypt_token(refresh_token) if refresh_token else None
+                ),
                 token_expires_at=expires_at,
             )
         )
@@ -316,6 +324,3 @@ def _success_html_response() -> HTMLResponse:
     </html>
     """
     return HTMLResponse(content=html_content, status_code=200)
-
-
-

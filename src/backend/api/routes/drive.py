@@ -7,30 +7,23 @@ import logging
 import mimetypes
 import zipfile
 from datetime import UTC, datetime
-from fastapi import APIRouter, Query, UploadFile, File, HTTPException
-from fastapi.responses import RedirectResponse, FileResponse, Response
+
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, RedirectResponse, Response
+from sqlalchemy import select
 from starlette.background import BackgroundTask
 
-from backend.application.drive.transfer_service import DriveTransferService
 from backend.api.dependencies import (
-    LinkedAccountDep,
-    DriveClientDep,
     DBSession,
+    DriveClientDep,
+    LinkedAccountDep,
 )
+from backend.application.drive.transfer_service import DriveTransferService
 from backend.common.upload_policy import MAX_SIMPLE_UPLOAD_SIZE
-from sqlalchemy import select
 from backend.core.exceptions import DriveOrganizerError
 from backend.db.models import Item, LinkedAccount
-from backend.services.item_index import (
-    delete_item_and_descendants,
-    parent_id_from_breadcrumb,
-    path_from_breadcrumb,
-    update_descendant_paths,
-    upsert_item_record,
-)
-from backend.services.providers.factory import build_drive_client
-from backend.services.token_manager import TokenManager
 from backend.schemas.drive import (
+    BatchDeleteRequest,
     BreadcrumbItem,
     BulkDownloadRequest,
     CopyItemRequest,
@@ -42,8 +35,16 @@ from backend.schemas.drive import (
     UpdateItemRequest,
     UploadSession,
     UploadSessionRequest,
-    BatchDeleteRequest,
 )
+from backend.security.token_manager import TokenManager
+from backend.services.item_index import (
+    delete_item_and_descendants,
+    parent_id_from_breadcrumb,
+    path_from_breadcrumb,
+    update_descendant_paths,
+    upsert_item_record,
+)
+from backend.services.providers.factory import build_drive_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/drive")
@@ -96,7 +97,9 @@ async def _refresh_index_from_provider(
 async def list_root_files(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
-    next_link: str | None = Query(None, description="Provider pagination cursor/next link"),
+    next_link: str | None = Query(
+        None, description="Provider pagination cursor/next link"
+    ),
 ) -> DriveListResponse:
     """List files in the root of OneDrive."""
     if next_link:
@@ -104,12 +107,16 @@ async def list_root_files(
     return await graph_client.list_root_items(account)
 
 
-@router.get("/{account_id}/files/{item_id}", response_model=DriveListResponse, tags=["Files"])
+@router.get(
+    "/{account_id}/files/{item_id}", response_model=DriveListResponse, tags=["Files"]
+)
 async def list_folder_files(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
     item_id: str,
-    next_link: str | None = Query(None, description="Provider pagination cursor/next link"),
+    next_link: str | None = Query(
+        None, description="Provider pagination cursor/next link"
+    ),
 ) -> DriveListResponse:
     """List files in a specific folder."""
     if next_link:
@@ -155,7 +162,9 @@ async def get_download_url(
         for candidate in other_accounts:
             try:
                 candidate_client = build_drive_client(candidate, token_manager)
-                download_url = await candidate_client.get_download_url(candidate, item_id)
+                download_url = await candidate_client.get_download_url(
+                    candidate, item_id
+                )
                 return {"download_url": download_url}
             except DriveOrganizerError:
                 continue
@@ -193,7 +202,9 @@ async def download_content(
         for candidate in other_accounts:
             try:
                 candidate_client = build_drive_client(candidate, token_manager)
-                filename, content = await candidate_client.download_file_bytes(candidate, item_id)
+                filename, content = await candidate_client.download_file_bytes(
+                    candidate, item_id
+                )
                 resolved = True
                 break
             except DriveOrganizerError:
@@ -228,20 +239,22 @@ async def download_zip(
     request: BulkDownloadRequest,
 ) -> FileResponse:
     """Download multiple selected files as a ZIP archive.
-    
+
     Files are downloaded to a temporary directory on the server before being zipped
     and streamed to the client, preventing memory exhaustion.
     """
-    import tempfile
     import os
     import shutil
+    import tempfile
 
     if not request.item_ids:
-        raise HTTPException(status_code=400, detail="No files selected for ZIP download")
+        raise HTTPException(
+            status_code=400, detail="No files selected for ZIP download"
+        )
 
     # Create a temporary directory to store files
     temp_dir = tempfile.mkdtemp()
-    
+
     try:
         files_to_zip = []
         used_names: set[str] = set()
@@ -252,11 +265,13 @@ async def download_zip(
                 # We need a unique placeholder name for the download first
                 # The actual filename will be returned by download_file_to_path
                 temp_file_path = os.path.join(temp_dir, f"temp_{item_id}")
-                filename = await graph_client.download_file_to_path(account, item_id, temp_file_path)
-                
+                filename = await graph_client.download_file_to_path(
+                    account, item_id, temp_file_path
+                )
+
                 safe_name = _sanitize_zip_name(filename)
                 unique_name = _ensure_unique_name(safe_name, used_names)
-                
+
                 files_to_zip.append((temp_file_path, unique_name))
             except Exception as e:
                 logger.error("Failed to download item %s for ZIP: %s", item_id, e)
@@ -264,17 +279,22 @@ async def download_zip(
                 continue
 
         if not files_to_zip:
-             shutil.rmtree(temp_dir)
-             raise HTTPException(status_code=400, detail="Failed to download any of the selected files")
+            shutil.rmtree(temp_dir)
+            raise HTTPException(
+                status_code=400, detail="Failed to download any of the selected files"
+            )
 
         # Create ZIP file in a separate thread to avoid blocking the event loop
         def create_zip_sync(path: str, files: list[tuple[str, str]]):
-            with zipfile.ZipFile(path, mode="w", compression=zipfile.ZIP_DEFLATED) as zip_file:
+            with zipfile.ZipFile(
+                path, mode="w", compression=zipfile.ZIP_DEFLATED
+            ) as zip_file:
                 for f_path, arcname in files:
                     zip_file.write(f_path, arcname=arcname)
 
         zip_path = os.path.join(temp_dir, "archive.zip")
         from starlette.concurrency import run_in_threadpool
+
         await run_in_threadpool(create_zip_sync, zip_path, files_to_zip)
 
         if request.archive_name:
@@ -296,16 +316,18 @@ async def download_zip(
             path=zip_path,
             filename=archive_name,
             media_type="application/zip",
-            background=BackgroundTask(cleanup)
+            background=BackgroundTask(cleanup),
         )
-        
+
     except Exception:
         # If something crashes before we return the response, clean up
         shutil.rmtree(temp_dir)
         raise
 
 
-@router.get("/{account_id}/search", response_model=DriveListResponse, tags=["Search & Organize"])
+@router.get(
+    "/{account_id}/search", response_model=DriveListResponse, tags=["Search & Organize"]
+)
 async def search_files(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
@@ -325,7 +347,9 @@ async def get_quota(
     return DriveQuota(**quota_data)
 
 
-@router.get("/{account_id}/recent", response_model=DriveListResponse, tags=["Search & Organize"])
+@router.get(
+    "/{account_id}/recent", response_model=DriveListResponse, tags=["Search & Organize"]
+)
 async def get_recent_files(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
@@ -334,7 +358,9 @@ async def get_recent_files(
     return await graph_client.get_recent_items(account)
 
 
-@router.get("/{account_id}/shared", response_model=DriveListResponse, tags=["Search & Organize"])
+@router.get(
+    "/{account_id}/shared", response_model=DriveListResponse, tags=["Search & Organize"]
+)
 async def get_shared_files(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
@@ -364,19 +390,19 @@ async def upload_file(
     folder_id: str = Query("root", description="Target folder ID"),
 ) -> DriveItem:
     """Upload a file (up to 4MB). For larger files, use the upload session endpoint."""
-    
+
     try:
         # Check file size without reading entire content into memory
         file.file.seek(0, 2)
         size = file.file.tell()
         file.file.seek(0)
-        
+
         logger.info("Uploading file %s, size: %s bytes", file.filename, size)
 
         if size > MAX_SIMPLE_UPLOAD_SIZE:
-             raise HTTPException(
+            raise HTTPException(
                 status_code=413,
-                detail=f"File too large. Max size is {MAX_SIMPLE_UPLOAD_SIZE // (1024*1024)}MB. Use /upload/session for larger files.",
+                detail=f"File too large. Max size is {MAX_SIMPLE_UPLOAD_SIZE // (1024 * 1024)}MB. Use /upload/session for larger files.",
             )
 
         transfer_service = DriveTransferService()
@@ -388,7 +414,9 @@ async def upload_file(
             folder_id=folder_id,
         )
         if not uploaded_item_id:
-            raise HTTPException(status_code=502, detail="Upload did not return an item id")
+            raise HTTPException(
+                status_code=502, detail="Upload did not return an item id"
+            )
         uploaded = await graph_client.get_item_metadata(
             account,
             uploaded_item_id,
@@ -408,7 +436,9 @@ async def upload_file(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/{account_id}/upload/session", response_model=UploadSession, tags=["Uploads"])
+@router.post(
+    "/{account_id}/upload/session", response_model=UploadSession, tags=["Uploads"]
+)
 async def create_upload_session(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
@@ -459,7 +489,12 @@ async def upload_chunk(
     return result
 
 
-@router.post("/{account_id}/folders", response_model=DriveItem, status_code=201, tags=["File Management"])
+@router.post(
+    "/{account_id}/folders",
+    response_model=DriveItem,
+    status_code=201,
+    tags=["File Management"],
+)
 async def create_folder(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
@@ -483,7 +518,9 @@ async def create_folder(
     return created
 
 
-@router.patch("/{account_id}/items/{item_id}", response_model=DriveItem, tags=["File Management"])
+@router.patch(
+    "/{account_id}/items/{item_id}", response_model=DriveItem, tags=["File Management"]
+)
 async def update_item(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
@@ -517,7 +554,12 @@ async def update_item(
             Item.item_id == item_id,
         )
     )
-    if refreshed.item_type == "folder" and old_path and new_path and old_path != new_path:
+    if (
+        refreshed.item_type == "folder"
+        and old_path
+        and new_path
+        and old_path != new_path
+    ):
         await update_descendant_paths(
             db,
             account_id=account.id,
@@ -528,7 +570,9 @@ async def update_item(
     return updated
 
 
-@router.post("/{account_id}/items/{item_id}/copy", status_code=202, tags=["File Management"])
+@router.post(
+    "/{account_id}/items/{item_id}/copy", status_code=202, tags=["File Management"]
+)
 async def copy_item(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
@@ -545,7 +589,9 @@ async def copy_item(
     return {"monitor_url": monitor_url}
 
 
-@router.delete("/{account_id}/items/{item_id}", status_code=204, tags=["File Management"])
+@router.delete(
+    "/{account_id}/items/{item_id}", status_code=204, tags=["File Management"]
+)
 async def delete_item(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
@@ -558,7 +604,9 @@ async def delete_item(
     await db.commit()
 
 
-@router.post("/{account_id}/items/batch-delete", status_code=204, tags=["File Management"])
+@router.post(
+    "/{account_id}/items/batch-delete", status_code=204, tags=["File Management"]
+)
 async def batch_delete_items(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
@@ -573,4 +621,3 @@ async def batch_delete_items(
     for item_id in request.item_ids:
         await delete_item_and_descendants(db, account_id=account.id, item_id=item_id)
     await db.commit()
-

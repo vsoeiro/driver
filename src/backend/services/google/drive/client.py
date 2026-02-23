@@ -7,15 +7,15 @@ import json
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import urlencode, urlparse, parse_qs
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
 from backend.core.exceptions import DriveOrganizerError
 from backend.db.models import LinkedAccount
 from backend.schemas.drive import DriveItem, DriveListResponse
+from backend.security.token_manager import TokenManager
 from backend.services.providers.http_base import OAuthHTTPClientBase
-from backend.services.token_manager import TokenManager
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +24,7 @@ GOOGLE_UPLOAD_BASE_URL = "https://www.googleapis.com/upload/drive/v3"
 GOOGLE_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 GOOGLE_FOLDER_MIME = "application/vnd.google-apps.folder"
 
-FILE_FIELDS = (
-    "id,name,mimeType,size,quotaBytesUsed,createdTime,modifiedTime,webViewLink,webContentLink,parents"
-)
+FILE_FIELDS = "id,name,mimeType,size,quotaBytesUsed,createdTime,modifiedTime,webViewLink,webContentLink,parents"
 
 
 class GoogleDriveClient(OAuthHTTPClientBase):
@@ -76,8 +74,12 @@ class GoogleDriveClient(OAuthHTTPClientBase):
         )
 
         if response.status_code >= 400 and response.status_code != 308:
-            msg = self.parse_error_message(response, default=response.text or "Google Drive request failed")
-            raise DriveOrganizerError(f"Google Drive API error: {msg}", status_code=response.status_code)
+            msg = self.parse_error_message(
+                response, default=response.text or "Google Drive request failed"
+            )
+            raise DriveOrganizerError(
+                f"Google Drive API error: {msg}", status_code=response.status_code
+            )
 
         return response
 
@@ -105,15 +107,21 @@ class GoogleDriveClient(OAuthHTTPClientBase):
         )
 
     @staticmethod
-    def _build_next_link(query_params: dict[str, Any], next_page_token: str | None) -> str | None:
+    def _build_next_link(
+        query_params: dict[str, Any], next_page_token: str | None
+    ) -> str | None:
         if not next_page_token:
             return None
         params = {k: v for k, v in query_params.items() if v is not None}
         params["pageToken"] = next_page_token
         return f"{GOOGLE_DRIVE_BASE_URL}/files?{urlencode(params, doseq=True)}"
 
-    def _parse_list(self, data: dict, folder_path: str, query_params: dict[str, Any] | None = None) -> DriveListResponse:
-        items = [self._parse_single_item(file_data) for file_data in data.get("files", [])]
+    def _parse_list(
+        self, data: dict, folder_path: str, query_params: dict[str, Any] | None = None
+    ) -> DriveListResponse:
+        items = [
+            self._parse_single_item(file_data) for file_data in data.get("files", [])
+        ]
         next_page_token = data.get("nextPageToken")
         next_link = self._build_next_link(query_params or {}, next_page_token)
         return DriveListResponse(
@@ -147,7 +155,9 @@ class GoogleDriveClient(OAuthHTTPClientBase):
         )
         return self._parse_list(response.json(), "/", params)
 
-    async def list_folder_items(self, account: LinkedAccount, item_id: str) -> DriveListResponse:
+    async def list_folder_items(
+        self, account: LinkedAccount, item_id: str
+    ) -> DriveListResponse:
         params = {
             "q": f"'{item_id}' in parents and trashed=false",
             "fields": f"nextPageToken,files({FILE_FIELDS})",
@@ -163,12 +173,16 @@ class GoogleDriveClient(OAuthHTTPClientBase):
         )
         return self._parse_list(response.json(), item_id, params)
 
-    async def list_items_by_next_link(self, account: LinkedAccount, next_link: str) -> DriveListResponse:
+    async def list_items_by_next_link(
+        self, account: LinkedAccount, next_link: str
+    ) -> DriveListResponse:
         if next_link.startswith("http"):
             response = await self._request("GET", next_link, account)
             parsed = urlparse(next_link)
             query_params_raw = parse_qs(parsed.query)
-            query_params: dict[str, Any] = {k: v if len(v) > 1 else v[0] for k, v in query_params_raw.items()}
+            query_params: dict[str, Any] = {
+                k: v if len(v) > 1 else v[0] for k, v in query_params_raw.items()
+            }
             query_params.pop("pageToken", None)
             return self._parse_list(response.json(), "/", query_params)
         else:
@@ -188,7 +202,9 @@ class GoogleDriveClient(OAuthHTTPClientBase):
             )
             return self._parse_list(response.json(), "/", params)
 
-    async def get_item_metadata(self, account: LinkedAccount, item_id: str) -> DriveItem:
+    async def get_item_metadata(
+        self, account: LinkedAccount, item_id: str
+    ) -> DriveItem:
         response = await self._request(
             "GET",
             f"/files/{item_id}",
@@ -212,11 +228,16 @@ class GoogleDriveClient(OAuthHTTPClientBase):
         )
         data = response.json()
         if data.get("mimeType", "").startswith("application/vnd.google-apps."):
-            raise DriveOrganizerError("Google Docs native files do not provide direct download URL", status_code=400)
+            raise DriveOrganizerError(
+                "Google Docs native files do not provide direct download URL",
+                status_code=400,
+            )
 
         download_url = data.get("webContentLink")
         if not download_url:
-            raise DriveOrganizerError("Download URL not available for this item", status_code=404)
+            raise DriveOrganizerError(
+                "Download URL not available for this item", status_code=404
+            )
         return download_url
 
     async def download_file_bytes(
@@ -234,9 +255,14 @@ class GoogleDriveClient(OAuthHTTPClientBase):
         metadata = metadata_response.json()
         mime_type = metadata.get("mimeType", "")
         if mime_type.startswith("application/vnd.google-apps."):
-            raise DriveOrganizerError("Downloading Google Docs native files is not supported yet", status_code=400)
+            raise DriveOrganizerError(
+                "Downloading Google Docs native files is not supported yet",
+                status_code=400,
+            )
 
-        download_timeout = httpx.Timeout(timeout_seconds, connect=10.0) if timeout_seconds else None
+        download_timeout = (
+            httpx.Timeout(timeout_seconds, connect=10.0) if timeout_seconds else None
+        )
         file_response = await self._request(
             "GET",
             f"/files/{item_id}",
@@ -253,12 +279,16 @@ class GoogleDriveClient(OAuthHTTPClientBase):
         target_path: str,
         timeout_seconds: float | None = None,
     ) -> str:
-        filename, content = await self.download_file_bytes(account, item_id, timeout_seconds=timeout_seconds)
+        filename, content = await self.download_file_bytes(
+            account, item_id, timeout_seconds=timeout_seconds
+        )
         with open(target_path, "wb") as f:
             f.write(content)
         return filename
 
-    async def search_items(self, account: LinkedAccount, query: str) -> DriveListResponse:
+    async def search_items(
+        self, account: LinkedAccount, query: str
+    ) -> DriveListResponse:
         escaped = query.replace("\\", "\\\\").replace("'", "\\'")
         params = {
             "q": f"name contains '{escaped}' and trashed=false",
@@ -375,19 +405,27 @@ class GoogleDriveClient(OAuthHTTPClientBase):
 
         boundary = "----drive-organizer-google-upload"
         body = (
-            f"--{boundary}\r\n"
-            "Content-Type: application/json; charset=UTF-8\r\n\r\n"
-            f"{json.dumps(metadata)}\r\n"
-            f"--{boundary}\r\n"
-            "Content-Type: application/octet-stream\r\n\r\n"
-        ).encode("utf-8") + bytes(content) + f"\r\n--{boundary}--".encode("utf-8")
+            (
+                f"--{boundary}\r\n"
+                "Content-Type: application/json; charset=UTF-8\r\n\r\n"
+                f"{json.dumps(metadata)}\r\n"
+                f"--{boundary}\r\n"
+                "Content-Type: application/octet-stream\r\n\r\n"
+            ).encode("utf-8")
+            + bytes(content)
+            + f"\r\n--{boundary}--".encode("utf-8")
+        )
 
         response = await self._request(
             "POST",
             "/files",
             account,
             use_upload_api=True,
-            params={"uploadType": "multipart", "fields": FILE_FIELDS, "supportsAllDrives": "true"},
+            params={
+                "uploadType": "multipart",
+                "fields": FILE_FIELDS,
+                "supportsAllDrives": "true",
+            },
             headers={"Content-Type": f"multipart/related; boundary={boundary}"},
             content=body,
         )
@@ -418,7 +456,9 @@ class GoogleDriveClient(OAuthHTTPClientBase):
         )
         upload_url = response.headers.get("Location")
         if not upload_url:
-            raise DriveOrganizerError("Upload session URL was not returned by Google Drive", status_code=502)
+            raise DriveOrganizerError(
+                "Upload session URL was not returned by Google Drive", status_code=502
+            )
 
         return {
             "upload_url": upload_url,
@@ -506,7 +546,9 @@ class GoogleDriveClient(OAuthHTTPClientBase):
             current_parents = current_meta.json().get("parents") or []
             params["addParents"] = parent_id
             if current_parents:
-                params["removeParents"] = ",".join([pid for pid in current_parents if pid != parent_id])
+                params["removeParents"] = ",".join(
+                    [pid for pid in current_parents if pid != parent_id]
+                )
 
         if not body and "addParents" not in params:
             return await self.get_item_metadata(account, item_id)
@@ -528,7 +570,9 @@ class GoogleDriveClient(OAuthHTTPClientBase):
             params={"supportsAllDrives": "true"},
         )
 
-    async def batch_delete_items(self, account: LinkedAccount, item_ids: list[str]) -> None:
+    async def batch_delete_items(
+        self, account: LinkedAccount, item_ids: list[str]
+    ) -> None:
         semaphore = asyncio.Semaphore(5)
 
         async def _delete_one(iid: str) -> None:
@@ -536,7 +580,9 @@ class GoogleDriveClient(OAuthHTTPClientBase):
                 try:
                     await self.delete_item(account, iid)
                 except Exception as exc:  # noqa: BLE001
-                    logger.error("Failed to delete item %s on Google Drive: %s", iid, exc)
+                    logger.error(
+                        "Failed to delete item %s on Google Drive: %s", iid, exc
+                    )
 
         await asyncio.gather(*[_delete_one(item_id) for item_id in item_ids])
 

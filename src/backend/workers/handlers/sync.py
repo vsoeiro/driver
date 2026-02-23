@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.common.error_items import ErrorItemsCollector
 from backend.core.config import get_settings
 from backend.db.models import LinkedAccount
+from backend.security.token_manager import TokenManager
 from backend.services.item_index import (
     build_item_payload,
     build_item_signature_from_payload,
@@ -21,7 +22,6 @@ from backend.services.item_index import (
 )
 from backend.services.providers.base import DriveProviderClient
 from backend.services.providers.factory import build_drive_client
-from backend.services.token_manager import TokenManager
 from backend.workers.dispatcher import register_handler
 from backend.workers.job_progress import JobProgressReporter
 
@@ -52,7 +52,9 @@ async def _collect_provider_snapshot(
     worker_count: int,
 ) -> tuple[list[SnapshotEntry], int, int, list[dict[str, str]], int]:
     """Collect remote tree with concurrent folder listing workers."""
-    entries: list[SnapshotEntry] = [SnapshotEntry(item=root_item, parent_id=None, path="/")]
+    entries: list[SnapshotEntry] = [
+        SnapshotEntry(item=root_item, parent_id=None, path="/")
+    ]
     errors = 0
     pages_fetched = 0
     error_stats: dict[str, object] = {
@@ -89,7 +91,9 @@ async def _collect_provider_snapshot(
                             queue.put_nowait((child.id, child_path))
                     if not children.next_link:
                         break
-                    children = await client.list_items_by_next_link(account, children.next_link)
+                    children = await client.list_items_by_next_link(
+                        account, children.next_link
+                    )
                     pages_fetched += 1
             except Exception as exc:  # noqa: BLE001
                 logger.error("Failed to list folder %s: %s", folder_id, exc)
@@ -138,7 +142,13 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
     settings = get_settings()
 
     root_item = await client.get_item_metadata(account, "root")
-    entries, list_errors, pages_fetched, list_error_items, list_error_items_truncated = await _collect_provider_snapshot(
+    (
+        entries,
+        list_errors,
+        pages_fetched,
+        list_error_items,
+        list_error_items_truncated,
+    ) = await _collect_provider_snapshot(
         client,
         account,
         root_item,

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import uuid
 import logging
 import re
 import unicodedata
+import uuid
 from typing import Any
 from uuid import UUID
 
@@ -14,7 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.application.drive.transfer_service import DriveTransferService
 from backend.common.error_items import ErrorItemsCollector
-from backend.db.models import Item, ItemMetadata, LinkedAccount, MetadataAttribute, MetadataRule
+from backend.db.models import (
+    Item,
+    ItemMetadata,
+    LinkedAccount,
+    MetadataAttribute,
+    MetadataRule,
+)
+from backend.security.token_manager import TokenManager
 from backend.services.item_index import (
     delete_item_and_descendants,
     parent_id_from_breadcrumb,
@@ -24,7 +31,6 @@ from backend.services.item_index import (
 )
 from backend.services.metadata_versioning import apply_metadata_change
 from backend.services.providers.factory import build_drive_client
-from backend.services.token_manager import TokenManager
 from backend.workers.dispatcher import register_handler
 from backend.workers.job_progress import JobProgressReporter
 
@@ -130,7 +136,9 @@ async def _find_or_create_folder(
             break
         listing = await client.list_items_by_next_link(account, listing.next_link)
 
-    created = await client.create_folder(account, folder_name, parent_id=parent_id, conflict_behavior="rename")
+    created = await client.create_folder(
+        account, folder_name, parent_id=parent_id, conflict_behavior="rename"
+    )
     return created.id
 
 
@@ -174,7 +182,9 @@ async def _resolve_destination_folder_id(
 async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> dict:
     """Apply a metadata rule to matching items."""
     rule_id = UUID(payload["rule_id"])
-    batch_id = UUID(payload.get("batch_id")) if payload.get("batch_id") else uuid.uuid4()
+    batch_id = (
+        UUID(payload.get("batch_id")) if payload.get("batch_id") else uuid.uuid4()
+    )
     progress = JobProgressReporter.from_payload(session, payload)
 
     rule = await session.get(MetadataRule, rule_id)
@@ -205,7 +215,9 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
     folder_cache: dict[tuple[str, str, str], str] = {}
 
     attr_rows = await session.execute(
-        select(MetadataAttribute).where(MetadataAttribute.category_id == rule.target_category_id)
+        select(MetadataAttribute).where(
+            MetadataAttribute.category_id == rule.target_category_id
+        )
     )
     attributes_by_id = {str(attr.id): attr for attr in attr_rows.scalars().all()}
 
@@ -237,21 +249,30 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
                 )
             )
 
-            change = await apply_metadata_change(
-                session,
-                account_id=item.account_id,
-                item_id=item.item_id,
-                category_id=rule.target_category_id,
-                values=normalized_rule_values if rule.apply_metadata else (current_metadata.values if current_metadata else {}),
-                batch_id=batch_id,
-                job_id=progress.job_id,
-            ) if rule.apply_metadata else {"changed": False}
+            change = (
+                await apply_metadata_change(
+                    session,
+                    account_id=item.account_id,
+                    item_id=item.item_id,
+                    category_id=rule.target_category_id,
+                    values=normalized_rule_values
+                    if rule.apply_metadata
+                    else (current_metadata.values if current_metadata else {}),
+                    batch_id=batch_id,
+                    job_id=progress.job_id,
+                )
+                if rule.apply_metadata
+                else {"changed": False}
+            )
 
             if change.get("changed"):
                 item_changed = True
 
             if rule.apply_rename or rule.apply_move:
-                if current_metadata is None or current_metadata.category_id != rule.target_category_id:
+                if (
+                    current_metadata is None
+                    or current_metadata.category_id != rule.target_category_id
+                ):
                     stats["skipped"] += 1
                     continue
 
@@ -270,7 +291,11 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
                     rendered_name = _sanitize_name(rendered_name)
                     if not rendered_name:
                         raise ValueError("Rendered rename template is empty")
-                    if item.item_type == "file" and "." not in rendered_name and item.extension:
+                    if (
+                        item.item_type == "file"
+                        and "." not in rendered_name
+                        and item.extension
+                    ):
                         rendered_name = f"{rendered_name}.{item.extension}"
                     new_name = rendered_name
 
@@ -290,13 +315,17 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
 
                 if rule.apply_move and destination_account_id != item.account_id:
                     if item.item_type != "file":
-                        raise ValueError("Cross-account move is only supported for files")
+                        raise ValueError(
+                            "Cross-account move is only supported for files"
+                        )
 
                     source_account = await _get_account(item.account_id)
                     source_client = await _get_client(item.account_id)
                     destination_account = await _get_account(destination_account_id)
                     destination_client = await _get_client(destination_account_id)
-                    source_item = await source_client.get_item_metadata(source_account, item.item_id)
+                    source_item = await source_client.get_item_metadata(
+                        source_account, item.item_id
+                    )
                     new_item_id = await transfer_service.transfer_file_between_accounts(
                         source_client=source_client,
                         destination_client=destination_client,
@@ -312,14 +341,18 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
                         item_id=item.item_id,
                     )
                     if new_item_id:
-                        updated_meta = await destination_client.get_item_metadata(destination_account, new_item_id)
+                        updated_meta = await destination_client.get_item_metadata(
+                            destination_account, new_item_id
+                        )
                         if new_name and updated_meta.name != new_name:
                             updated_meta = await destination_client.update_item(
                                 destination_account,
                                 updated_meta.id,
                                 name=new_name,
                             )
-                        breadcrumb = await destination_client.get_item_path(destination_account, updated_meta.id)
+                        breadcrumb = await destination_client.get_item_path(
+                            destination_account, updated_meta.id
+                        )
                         await upsert_item_record(
                             session,
                             account_id=destination_account.id,
@@ -338,7 +371,9 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
                         name=new_name if rule.apply_rename else None,
                         parent_id=destination_parent_id if rule.apply_move else None,
                     )
-                    breadcrumb = await source_client.get_item_path(source_account, updated_item.id)
+                    breadcrumb = await source_client.get_item_path(
+                        source_account, updated_item.id
+                    )
                     new_path = path_from_breadcrumb(breadcrumb)
                     await upsert_item_record(
                         session,
@@ -347,7 +382,11 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
                         parent_id=parent_id_from_breadcrumb(breadcrumb),
                         path=new_path,
                     )
-                    if updated_item.item_type == "folder" and old_path and old_path != new_path:
+                    if (
+                        updated_item.item_type == "folder"
+                        and old_path
+                        and old_path != new_path
+                    ):
                         await update_descendant_paths(
                             session,
                             account_id=source_account.id,

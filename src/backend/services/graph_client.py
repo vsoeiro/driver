@@ -1,8 +1,0 @@
-"""Compatibility facade for legacy Graph client imports.
-
-Prefer importing from ``backend.services.microsoft.onedrive.client``.
-"""
-
-from backend.services.microsoft.onedrive.client import GraphClient, close_graph_http_client
-
-__all__ = ["GraphClient", "close_graph_http_client"]

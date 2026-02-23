@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 import msal
 
 from backend.core.config import get_settings
-from backend.services.oauth_types import TokenResult
+from backend.security.oauth_types import TokenResult
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,7 @@ class MicrosoftAuthService:
         -------
         dict
             The authentication flow dictionary containing state and auth URI.
+
         """
         return self._app.initiate_auth_code_flow(
             scopes=self._settings.microsoft_scopes,
@@ -68,6 +69,7 @@ class MicrosoftAuthService:
         -------
         TokenResult or None
             Token result if successful, None otherwise.
+
         """
         result = self._app.acquire_token_by_auth_code_flow(
             auth_code_flow=auth_flow,
@@ -102,6 +104,7 @@ class MicrosoftAuthService:
         -------
         TokenResult or None
             New token result if successful, None otherwise.
+
         """
         result = self._app.acquire_token_by_refresh_token(
             refresh_token=refresh_token,
@@ -134,8 +137,10 @@ def get_microsoft_auth_service() -> MicrosoftAuthService:
     -------
     MicrosoftAuthService
         The authentication service instance.
+
     """
     global _auth_service
     if _auth_service is None:
         _auth_service = MicrosoftAuthService()
     return _auth_service
+
