@@ -13,12 +13,12 @@ RUN apt-get update \
 
 RUN pip install --no-cache-dir uv
 
-COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev
+COPY src/backend/pyproject.toml src/backend/README.md uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
 
 COPY src/backend ./src/backend
 COPY src/alembic ./src/alembic
-COPY alembic.ini ./alembic.ini
+COPY src/alembic.ini ./alembic.ini
 
 EXPOSE 8000
 
