@@ -2,7 +2,8 @@ FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    UV_PROJECT_ENVIRONMENT=/app/.venv
+    UV_PROJECT_ENVIRONMENT=/app/.venv \
+    PYTHONPATH=/app/src
 
 WORKDIR /app
 
@@ -15,8 +16,8 @@ RUN pip install --no-cache-dir uv
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
-COPY backend ./backend
-COPY alembic ./alembic
+COPY src/backend ./src/backend
+COPY src/alembic ./src/alembic
 COPY alembic.ini ./alembic.ini
 
 EXPOSE 8000

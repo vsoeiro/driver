@@ -14,8 +14,8 @@ database.db
 .tools
 
 # Frontend artifacts
-frontend/node_modules
-frontend/dist
+src/frontend/node_modules
+src/frontend/dist
 
 # Python build/cache artifacts
 build

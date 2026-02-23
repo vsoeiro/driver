@@ -5,17 +5,12 @@ and the application's database models.
 """
 
 import asyncio
-import sys
 from logging.config import fileConfig
-from pathlib import Path
 
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
-
-# Add project root to sys.path
-sys.path.append(str(Path(__file__).resolve().parents[3]))
 
 from backend.core.config import get_settings
 from backend.db.models import Base
