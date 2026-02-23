@@ -25,7 +25,7 @@ from backend.schemas.jobs import (
     JobExtractLibraryComicAssetsRequest,
     JobReindexComicCoversRequest,
 )
-from backend.services.metadata_plugins import COMICS_LIBRARY_KEY, MetadataPluginService
+from backend.services.metadata_libraries.service import COMICS_LIBRARY_KEY, MetadataLibraryService
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 
@@ -56,7 +56,7 @@ async def _filter_unmapped_comic_items(
     if not by_account:
         return by_account
 
-    library_service = MetadataPluginService(db)
+    library_service = MetadataLibraryService(db)
     try:
         category = await library_service.ensure_active_comic_category()
     except Exception:

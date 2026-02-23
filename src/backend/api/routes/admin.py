@@ -11,8 +11,8 @@ from backend.schemas.admin import (
     RuntimeSettingsUpdateRequest,
 )
 from backend.services.app_settings import AppSettingsService
+from backend.services.metadata_libraries.settings import MetadataLibrarySettingsService
 from backend.services.observability import ObservabilityService, clear_observability_cache
-from backend.services.plugin_settings import PluginSettingsService
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -30,9 +30,9 @@ async def get_observability_snapshot(
 @router.get("/settings", response_model=RuntimeSettingsResponse)
 async def get_runtime_settings(db: DBSession) -> RuntimeSettingsResponse:
     service = AppSettingsService(db)
-    plugin_service = PluginSettingsService(db)
+    library_service = MetadataLibrarySettingsService(db)
     settings = await service.get_runtime_settings()
-    plugin_groups = await plugin_service.list_active_plugin_configs()
+    plugin_groups = await library_service.list_active_metadata_library_configs()
     return RuntimeSettingsResponse(
         enable_daily_sync_scheduler=settings.enable_daily_sync_scheduler,
         daily_sync_cron=settings.daily_sync_cron,
@@ -56,18 +56,18 @@ async def update_runtime_settings(
     db: DBSession,
 ) -> RuntimeSettingsResponse:
     service = AppSettingsService(db)
-    plugin_service = PluginSettingsService(db)
+    library_service = MetadataLibrarySettingsService(db)
     settings = await service.update_runtime_settings(
         enable_daily_sync_scheduler=payload.enable_daily_sync_scheduler,
         daily_sync_cron=payload.daily_sync_cron,
         worker_job_timeout_seconds=payload.worker_job_timeout_seconds,
     )
     try:
-        await plugin_service.update_plugin_configs(payload.plugin_settings)
+        await library_service.update_metadata_library_configs(payload.plugin_settings)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     await clear_observability_cache()
-    plugin_groups = await plugin_service.list_active_plugin_configs()
+    plugin_groups = await library_service.list_active_metadata_library_configs()
     return RuntimeSettingsResponse(
         enable_daily_sync_scheduler=settings.enable_daily_sync_scheduler,
         daily_sync_cron=settings.daily_sync_cron,

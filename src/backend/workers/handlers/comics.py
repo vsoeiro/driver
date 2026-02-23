@@ -9,8 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.common.error_items import ErrorItemsCollector
 from backend.db.models import Item
-from backend.services.comics import ComicMetadataService, IndexedComicItem
-from backend.services.metadata_plugins import COMICS_LIBRARY_KEY
+from backend.services.metadata_libraries.comics.metadata_service import ComicMetadataService, IndexedComicItem
+from backend.services.metadata_libraries.implementations.comics.schema import COMICS_LIBRARY_KEY
 from backend.workers.dispatcher import register_handler
 from backend.workers.job_progress import JobProgressReporter
 

@@ -24,8 +24,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.common.error_items import ErrorItemsCollector
 from backend.core.config import get_settings
 from backend.db.models import ItemMetadata, LinkedAccount
-from backend.services.metadata_plugins import MetadataPluginService
-from backend.services.plugin_settings import ComicRuntimeSettings, PluginSettingsService
+from backend.services.metadata_libraries.service import MetadataLibraryService
+from backend.services.metadata_libraries.settings import (
+    ComicsRuntimeSettings,
+    MetadataLibrarySettingsService,
+)
 from backend.services.rar_tools import ensure_rar_backend
 from backend.services.metadata_versioning import apply_metadata_change
 from backend.services.providers.base import DriveProviderClient
@@ -660,10 +663,10 @@ class ComicMetadataService:
         if not account:
             raise ValueError("Account not found")
 
-        plugin_service = MetadataPluginService(self.session)
-        category = await plugin_service.ensure_active_comic_category()
-        attr_ids = await plugin_service.comic_attribute_id_map()
-        plugin_settings = await PluginSettingsService(self.session).get_comic_runtime_settings()
+        library_service = MetadataLibraryService(self.session)
+        category = await library_service.ensure_active_comics_category()
+        attr_ids = await library_service.comics_attribute_id_map()
+        plugin_settings = await MetadataLibrarySettingsService(self.session).get_comics_runtime_settings()
 
         token_manager = TokenManager(self.session)
         client = build_drive_client(account, token_manager)
@@ -715,10 +718,10 @@ class ComicMetadataService:
         if not account:
             raise ValueError("Account not found")
 
-        plugin_service = MetadataPluginService(self.session)
-        category = await plugin_service.ensure_active_comic_category()
-        attr_ids = await plugin_service.comic_attribute_id_map()
-        plugin_settings = await PluginSettingsService(self.session).get_comic_runtime_settings()
+        library_service = MetadataLibraryService(self.session)
+        category = await library_service.ensure_active_comics_category()
+        attr_ids = await library_service.comics_attribute_id_map()
+        plugin_settings = await MetadataLibrarySettingsService(self.session).get_comics_runtime_settings()
 
         token_manager = TokenManager(self.session)
         client = build_drive_client(account, token_manager)
@@ -756,8 +759,8 @@ class ComicMetadataService:
         )
 
     async def reindex_mapped_comics(self, *, job_id=None, batch_id=None) -> dict[str, Any]:
-        plugin_service = MetadataPluginService(self.session)
-        category = await plugin_service.ensure_active_comic_category()
+        library_service = MetadataLibraryService(self.session)
+        category = await library_service.ensure_active_comics_category()
         stmt = select(ItemMetadata.account_id, ItemMetadata.item_id).where(ItemMetadata.category_id == category.id)
         result = await self.session.execute(stmt)
         rows = result.all()
@@ -767,7 +770,7 @@ class ComicMetadataService:
         if not by_account:
             return self._init_stats(0, accounts=0)
 
-        plugin_settings = await PluginSettingsService(self.session).get_comic_runtime_settings()
+        plugin_settings = await MetadataLibrarySettingsService(self.session).get_comics_runtime_settings()
         overall = self._init_stats(0, accounts=len(by_account))
         for account_id, item_ids in by_account.items():
             account = await self._get_linked_account(account_id)
@@ -781,8 +784,8 @@ class ComicMetadataService:
                 )
                 continue
 
-            plugin_service = MetadataPluginService(self.session)
-            attr_ids = await plugin_service.comic_attribute_id_map()
+            library_service = MetadataLibraryService(self.session)
+            attr_ids = await library_service.comics_attribute_id_map()
             token_manager = TokenManager(self.session)
             source_client = build_drive_client(account, token_manager)
             target_account = account
@@ -824,7 +827,7 @@ class ComicMetadataService:
         target_client: DriveProviderClient,
         category_id,
         attr_ids: dict[str, str],
-        plugin_settings: ComicRuntimeSettings,
+        plugin_settings: ComicsRuntimeSettings,
         stats: dict[str, Any],
         job_id,
         batch_id,
@@ -1003,7 +1006,7 @@ class ComicMetadataService:
         cover_folder_id: str,
         category_id,
         attr_ids: dict[str, str],
-        cover_settings: ComicRuntimeSettings,
+        cover_settings: ComicsRuntimeSettings,
         job_id,
         batch_id,
         force_remap: bool,

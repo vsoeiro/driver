@@ -44,7 +44,7 @@ from backend.schemas.metadata import (
     MetadataFormLayoutUpdate,
     SeriesSummaryResponse,
 )
-from backend.services.metadata_plugins import COMICS_LIBRARY_KEY, MetadataPluginService
+from backend.services.metadata_libraries.service import COMICS_LIBRARY_KEY, MetadataLibraryService
 from backend.services.metadata_versioning import apply_metadata_change, normalize_metadata_values, undo_metadata_batch
 from backend.services.providers.factory import build_drive_client
 from backend.services.token_manager import TokenManager
@@ -136,7 +136,7 @@ def _coerce_attribute_value(attribute: MetadataAttribute, raw_value: Any) -> Any
 
 
 async def _reconcile_active_comic_schema(session: AsyncSession) -> None:
-    service = MetadataPluginService(session)
+    service = MetadataLibraryService(session)
     libraries = await service.list_libraries()
     if any(library.key == COMICS_LIBRARY_KEY and library.is_active for library in libraries):
         try:
@@ -942,8 +942,6 @@ async def upsert_item_metadata(
 
     # 3. Upsert Item record
     # We need to fetch details from Graph API to populate Item table
-    from datetime import datetime, UTC
-    
     token_manager = TokenManager(session)
     client = build_drive_client(account, token_manager)
     
@@ -1266,7 +1264,7 @@ async def preview_metadata_rule(
 @router.get("/libraries", response_model=list[MetadataLibrarySchema])
 async def list_metadata_libraries(session: AsyncSession = Depends(get_session)):
     """List metadata libraries."""
-    service = MetadataPluginService(session)
+    service = MetadataLibraryService(session)
     libraries = await service.list_libraries()
     return libraries
 
@@ -1277,7 +1275,7 @@ async def activate_metadata_library(library_key: str, session: AsyncSession = De
     if library_key != COMICS_LIBRARY_KEY:
         raise HTTPException(status_code=404, detail="Unknown metadata library")
 
-    service = MetadataPluginService(session)
+    service = MetadataLibraryService(session)
     try:
         library = await service.activate_comics_library()
     except ValueError as exc:
@@ -1300,7 +1298,7 @@ async def deactivate_metadata_library(library_key: str, session: AsyncSession = 
     if library_key != COMICS_LIBRARY_KEY:
         raise HTTPException(status_code=404, detail="Unknown metadata library")
 
-    service = MetadataPluginService(session)
+    service = MetadataLibraryService(session)
     try:
         library = await service.deactivate_comics_library()
     except OperationalError as exc:

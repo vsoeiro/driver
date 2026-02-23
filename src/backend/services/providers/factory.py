@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from backend.core.exceptions import DriveOrganizerError
 from backend.db.models import LinkedAccount
-from backend.services.google_drive_client import GoogleDriveClient
-from backend.services.graph_client import GraphClient
+from backend.services.google.drive.client import GoogleDriveClient
+from backend.services.microsoft.onedrive.client import GraphClient
 from backend.services.providers.base import DriveProviderClient
 from backend.services.token_manager import TokenManager
 
