@@ -11,11 +11,13 @@ from fastapi import APIRouter, Query, UploadFile, File, HTTPException
 from fastapi.responses import RedirectResponse, FileResponse, Response
 from starlette.background import BackgroundTask
 
+from backend.application.drive.transfer_service import DriveTransferService
 from backend.api.dependencies import (
     LinkedAccountDep,
     DriveClientDep,
     DBSession,
 )
+from backend.common.upload_policy import MAX_SIMPLE_UPLOAD_SIZE
 from sqlalchemy import select
 from backend.core.exceptions import DriveOrganizerError
 from backend.db.models import Item, LinkedAccount
@@ -45,8 +47,6 @@ from backend.schemas.drive import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/drive")
-
-MAX_SIMPLE_UPLOAD_SIZE = 4 * 1024 * 1024  # 4MB
 
 
 def _sanitize_zip_name(name: str) -> str:
@@ -379,11 +379,19 @@ async def upload_file(
                 detail=f"File too large. Max size is {MAX_SIMPLE_UPLOAD_SIZE // (1024*1024)}MB. Use /upload/session for larger files.",
             )
 
-        uploaded = await graph_client.upload_small_file(
+        transfer_service = DriveTransferService()
+        uploaded_item_id = await transfer_service.upload_file_object(
+            client=graph_client,
+            account=account,
+            file_obj=file.file,
+            filename=file.filename or "unnamed_file",
+            folder_id=folder_id,
+        )
+        if not uploaded_item_id:
+            raise HTTPException(status_code=502, detail="Upload did not return an item id")
+        uploaded = await graph_client.get_item_metadata(
             account,
-            file.filename or "unnamed_file",
-            file.file, # Pass file-like object directly
-            folder_id,
+            uploaded_item_id,
         )
         await _refresh_index_from_provider(
             db=db,

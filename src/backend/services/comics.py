@@ -21,6 +21,7 @@ from pypdf import PdfReader
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.common.error_items import ErrorItemsCollector
 from backend.core.config import get_settings
 from backend.db.models import ItemMetadata, LinkedAccount
 from backend.services.metadata_plugins import MetadataPluginService
@@ -621,42 +622,18 @@ class ComicMetadataService:
         item_name: str | None = None,
         account_id: str | None = None,
     ) -> None:
-        error_items = stats.get("error_items")
-        if not isinstance(error_items, list):
-            error_items = []
-            stats["error_items"] = error_items
-
-        if len(error_items) >= COMIC_ERROR_ITEMS_LIMIT:
-            stats["error_items_truncated"] = int(stats.get("error_items_truncated", 0) or 0) + 1
-            return
-
-        reason_text = str(reason or "Unknown error").strip() or "Unknown error"
-        entry: dict[str, str] = {"reason": reason_text[:2000]}
-        if item_id:
-            entry["item_id"] = str(item_id)
-        if item_name:
-            entry["item_name"] = str(item_name)
-        if account_id:
-            entry["account_id"] = str(account_id)
-        error_items.append(entry)
+        collector = ErrorItemsCollector(stats, limit=COMIC_ERROR_ITEMS_LIMIT)
+        collector.record(
+            reason=reason,
+            item_id=item_id,
+            item_name=item_name,
+            account_id=account_id,
+        )
 
     @classmethod
     def _merge_error_items(cls, target: dict[str, Any], source: dict[str, Any]) -> None:
-        source_items = source.get("error_items")
-        if isinstance(source_items, list):
-            for entry in source_items:
-                if not isinstance(entry, dict):
-                    continue
-                cls._record_error_item(
-                    target,
-                    reason=str(entry.get("reason") or "Unknown error"),
-                    item_id=str(entry.get("item_id")) if entry.get("item_id") else None,
-                    item_name=str(entry.get("item_name")) if entry.get("item_name") else None,
-                    account_id=str(entry.get("account_id")) if entry.get("account_id") else None,
-                )
-        target["error_items_truncated"] = int(target.get("error_items_truncated", 0) or 0) + int(
-            source.get("error_items_truncated", 0) or 0
-        )
+        collector = ErrorItemsCollector(target, limit=COMIC_ERROR_ITEMS_LIMIT)
+        collector.merge(source)
 
     async def _get_linked_account(self, account_id: str | UUID | None) -> LinkedAccount | None:
         if account_id is None:

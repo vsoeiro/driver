@@ -9,6 +9,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.common.error_items import ErrorItemsCollector
 from backend.core.config import get_settings
 from backend.db.models import LinkedAccount
 from backend.services.item_index import (
@@ -54,25 +55,13 @@ async def _collect_provider_snapshot(
     entries: list[SnapshotEntry] = [SnapshotEntry(item=root_item, parent_id=None, path="/")]
     errors = 0
     pages_fetched = 0
-    error_items: list[dict[str, str]] = []
-    error_items_truncated = 0
+    error_stats: dict[str, object] = {
+        "error_items": [],
+        "error_items_truncated": 0,
+    }
+    error_collector = ErrorItemsCollector(error_stats, limit=SYNC_ERROR_ITEMS_LIMIT)
     queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
     queue.put_nowait((getattr(root_item, "id"), "/"))
-
-    def _record_error_item(*, reason: str, item_id: str | None = None, item_name: str | None = None, stage: str | None = None) -> None:
-        nonlocal error_items_truncated
-        if len(error_items) >= SYNC_ERROR_ITEMS_LIMIT:
-            error_items_truncated += 1
-            return
-        reason_text = str(reason or "Unknown error").strip() or "Unknown error"
-        entry: dict[str, str] = {"reason": reason_text[:2000]}
-        if item_id:
-            entry["item_id"] = str(item_id)
-        if item_name:
-            entry["item_name"] = str(item_name)
-        if stage:
-            entry["stage"] = stage
-        error_items.append(entry)
 
     async def _worker() -> None:
         nonlocal errors
@@ -105,7 +94,7 @@ async def _collect_provider_snapshot(
             except Exception as exc:  # noqa: BLE001
                 logger.error("Failed to list folder %s: %s", folder_id, exc)
                 errors += 1
-                _record_error_item(
+                error_collector.record(
                     reason=str(exc),
                     item_id=str(folder_id),
                     stage="list_folder",
@@ -118,7 +107,13 @@ async def _collect_provider_snapshot(
     for _ in workers:
         queue.put_nowait(("__STOP__", ""))
     await asyncio.gather(*workers)
-    return entries, errors, pages_fetched, error_items, error_items_truncated
+    return (
+        entries,
+        errors,
+        pages_fetched,
+        error_stats.get("error_items", []),
+        int(error_stats.get("error_items_truncated", 0) or 0),
+    )
 
 
 @register_handler("sync_items")
@@ -169,20 +164,7 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
         "error_items_truncated": list_error_items_truncated,
     }
     await progress.set_total(len(entries))
-
-    def _record_error_item(*, reason: str, item_id: str | None = None, item_name: str | None = None, stage: str | None = None) -> None:
-        if len(stats["error_items"]) >= SYNC_ERROR_ITEMS_LIMIT:
-            stats["error_items_truncated"] += 1
-            return
-        reason_text = str(reason or "Unknown error").strip() or "Unknown error"
-        entry: dict[str, str] = {"reason": reason_text[:2000]}
-        if item_id:
-            entry["item_id"] = str(item_id)
-        if item_name:
-            entry["item_name"] = str(item_name)
-        if stage:
-            entry["stage"] = stage
-        stats["error_items"].append(entry)
+    error_collector = ErrorItemsCollector(stats, limit=SYNC_ERROR_ITEMS_LIMIT)
 
     existing_signatures = await fetch_item_signatures_by_item_id(
         session,
@@ -217,7 +199,7 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to upsert item %s during sync: %s", item_id, exc)
             stats["errors"] += 1
-            _record_error_item(
+            error_collector.record(
                 reason=str(exc),
                 item_id=str(item_id),
                 item_name=getattr(entry.item, "name", None),

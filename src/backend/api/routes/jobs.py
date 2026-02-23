@@ -10,10 +10,12 @@ from fastapi import APIRouter, HTTPException, Query, Request, status, UploadFile
 from starlette.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 
+from backend.application.jobs.commands import enqueue_job_command
 from backend.api.dependencies import DBSession, JobServiceDep
 from backend.db.models import Item, ItemMetadata
+from backend.domain.errors import DomainError, NotFoundError
 from backend.schemas.jobs import (
-    Job, JobAttempt, JobCreate, JobMoveRequest, JobMetadataUpdateRequest,
+    Job, JobAttempt, JobMoveRequest, JobMetadataUpdateRequest,
     JobSyncRequest, JobApplyMetadataRecursiveRequest,
     JobRemoveMetadataRecursiveRequest,
     JobUndoMetadataBatchRequest,
@@ -23,10 +25,15 @@ from backend.schemas.jobs import (
     JobExtractLibraryComicAssetsRequest,
     JobReindexComicCoversRequest,
 )
-from backend.services.jobs import JobService
 from backend.services.metadata_plugins import COMICS_LIBRARY_KEY, MetadataPluginService
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
+
+
+def _map_domain_error_to_http(exc: DomainError) -> None:
+    if isinstance(exc, NotFoundError):
+        raise HTTPException(status_code=404, detail=exc.message) from exc
+    raise HTTPException(status_code=400, detail=exc.message) from exc
 
 
 def _is_comic_item_already_mapped(values: dict | None, attr_ids: dict[str, str]) -> bool:
@@ -95,14 +102,12 @@ async def create_move_job(
     This endpoint initiates a background job to move a file or folder from a source account
     to a destination account. The operation happens asynchronously.
     """
-    payload = request.model_dump(mode='json')
-    
-    job_in = JobCreate(
-        type="move_items",
+    payload = request.model_dump(mode="json")
+    return await enqueue_job_command(
+        job_service.session,
+        job_type="move_items",
         payload=payload,
     )
-    
-    return await job_service.create_job(job_in)
 
 
 @router.get("/", response_model=list[Job])
@@ -188,15 +193,12 @@ async def create_upload_job(
         "filename": file.filename,
         "temp_path": temp_path,
     }
-    
-    
-    job_in = JobCreate(
-        type="upload_file",
-        payload=payload,
-    )
-    
     try:
-        return await job_service.create_job(job_in)
+        return await enqueue_job_command(
+            job_service.session,
+            job_type="upload_file",
+            payload=payload,
+        )
     except Exception:
         # If job creation fails, avoid leaking temp files.
         try:
@@ -214,14 +216,12 @@ async def create_metadata_update_job(
 ) -> Job:
     """Create a new job to bulk update metadata."""
     
-    payload = request.model_dump(mode='json')
-    
-    job_in = JobCreate(
-        type="update_metadata",
+    payload = request.model_dump(mode="json")
+    return await enqueue_job_command(
+        job_service.session,
+        job_type="update_metadata",
         payload=payload,
     )
-    
-    return await job_service.create_job(job_in)
 
 
 @router.post("/sync", response_model=Job, status_code=status.HTTP_201_CREATED)
@@ -231,14 +231,12 @@ async def create_sync_job(
 ) -> Job:
     """Create a new job to sync items for an account."""
     
-    payload = request.model_dump(mode='json')
-    
-    job_in = JobCreate(
-        type="sync_items",
+    payload = request.model_dump(mode="json")
+    return await enqueue_job_command(
+        job_service.session,
+        job_type="sync_items",
         payload=payload,
     )
-    
-    return await job_service.create_job(job_in)
 
 
 @router.post("/apply-metadata-recursive", response_model=Job, status_code=status.HTTP_201_CREATED)
@@ -250,14 +248,12 @@ async def create_apply_metadata_recursive_job(
 
     Uses the local items table — no Graph API calls needed.
     """
-    payload = request.model_dump(mode='json')
-
-    job_in = JobCreate(
-        type="apply_metadata_recursive",
+    payload = request.model_dump(mode="json")
+    return await enqueue_job_command(
+        job_service.session,
+        job_type="apply_metadata_recursive",
         payload=payload,
     )
-
-    return await job_service.create_job(job_in)
 
 
 @router.post("/remove-metadata-recursive", response_model=Job, status_code=status.HTTP_201_CREATED)
@@ -266,14 +262,12 @@ async def create_remove_metadata_recursive_job(
     job_service: JobServiceDep,
 ) -> Job:
     """Remove metadata from all items under a path prefix."""
-    payload = request.model_dump(mode='json')
-
-    job_in = JobCreate(
-        type="remove_metadata_recursive",
+    payload = request.model_dump(mode="json")
+    return await enqueue_job_command(
+        job_service.session,
+        job_type="remove_metadata_recursive",
         payload=payload,
     )
-
-    return await job_service.create_job(job_in)
 
 
 @router.post("/metadata-undo", response_model=Job, status_code=status.HTTP_201_CREATED)
@@ -282,11 +276,11 @@ async def create_metadata_undo_job(
     job_service: JobServiceDep,
 ) -> Job:
     """Create a job that undoes metadata changes from a batch."""
-    job_in = JobCreate(
-        type="undo_metadata_batch",
+    return await enqueue_job_command(
+        job_service.session,
+        job_type="undo_metadata_batch",
         payload=request.model_dump(mode="json"),
     )
-    return await job_service.create_job(job_in)
 
 
 @router.post("/apply-rule", response_model=Job, status_code=status.HTTP_201_CREATED)
@@ -295,11 +289,11 @@ async def create_apply_rule_job(
     job_service: JobServiceDep,
 ) -> Job:
     """Create a job that applies one metadata rule."""
-    job_in = JobCreate(
-        type="apply_metadata_rule",
+    return await enqueue_job_command(
+        job_service.session,
+        job_type="apply_metadata_rule",
         payload=request.model_dump(mode="json"),
     )
-    return await job_service.create_job(job_in)
 
 
 @router.post("/comics/extract", response_model=Job, status_code=status.HTTP_201_CREATED)
@@ -309,11 +303,11 @@ async def create_extract_comic_assets_job(
 ) -> Job:
     """Create a job that extracts comic cover/page metadata for selected items/folders."""
     payload = request.model_dump(mode="json")
-    job_in = JobCreate(
-        type="extract_comic_assets",
+    return await enqueue_job_command(
+        job_service.session,
+        job_type="extract_comic_assets",
         payload=payload,
     )
-    return await job_service.create_job(job_in)
 
 
 @router.post("/comics/reindex-covers", response_model=Job, status_code=status.HTTP_201_CREATED)
@@ -324,11 +318,11 @@ async def create_reindex_comic_covers_job(
     """Create a background job that re-indexes mapped comic covers using current library settings."""
     if request.library_key != COMICS_LIBRARY_KEY:
         raise HTTPException(status_code=404, detail="Unknown metadata library key for cover re-index")
-    job_in = JobCreate(
-        type="reindex_comic_covers",
+    return await enqueue_job_command(
+        job_service.session,
+        job_type="reindex_comic_covers",
         payload=request.model_dump(mode="json"),
     )
-    return await job_service.create_job(job_in)
 
 
 @router.post("/comics/extract-library", response_model=JobExtractLibraryComicAssetsResponse, status_code=status.HTTP_201_CREATED)
@@ -369,20 +363,18 @@ async def create_extract_library_comic_assets_job(
             job_ids=[],
         )
 
-    job_service = JobService(db)
     created_job_ids: list[UUID] = []
     for account_id, item_ids in by_account.items():
         for i in range(0, len(item_ids), chunk_size):
             chunk_ids = item_ids[i : i + chunk_size]
-            job = await job_service.create_job(
-                JobCreate(
-                    type="extract_comic_assets",
-                    payload={
-                        "account_id": str(account_id),
-                        "item_ids": chunk_ids,
-                        "use_indexed_items": True,
-                    },
-                )
+            job = await enqueue_job_command(
+                db,
+                job_type="extract_comic_assets",
+                payload={
+                    "account_id": str(account_id),
+                    "item_ids": chunk_ids,
+                    "use_indexed_items": True,
+                },
             )
             created_job_ids.append(job.id)
 
@@ -402,11 +394,8 @@ async def delete_job(
     """Delete one finalized job from history."""
     try:
         await job_service.delete_job(job_id)
-    except ValueError as exc:
-        message = str(exc)
-        if "not found" in message.lower():
-            raise HTTPException(status_code=404, detail=message) from exc
-        raise HTTPException(status_code=400, detail=message) from exc
+    except DomainError as exc:
+        _map_domain_error_to_http(exc)
 
 
 @router.post("/{job_id}/cancel", response_model=Job, status_code=status.HTTP_200_OK)
@@ -417,11 +406,8 @@ async def cancel_job(
     """Request cancellation for a job."""
     try:
         return await job_service.request_cancel(job_id)
-    except ValueError as exc:
-        message = str(exc)
-        if "not found" in message.lower():
-            raise HTTPException(status_code=404, detail=message) from exc
-        raise HTTPException(status_code=400, detail=message) from exc
+    except DomainError as exc:
+        _map_domain_error_to_http(exc)
 
 
 @router.post("/{job_id}/reprocess", response_model=Job, status_code=status.HTTP_201_CREATED)
@@ -432,11 +418,8 @@ async def reprocess_job(
     """Clone a finalized job and queue it again."""
     try:
         return await job_service.reprocess_job(job_id)
-    except ValueError as exc:
-        message = str(exc)
-        if "not found" in message.lower():
-            raise HTTPException(status_code=404, detail=message) from exc
-        raise HTTPException(status_code=400, detail=message) from exc
+    except DomainError as exc:
+        _map_domain_error_to_http(exc)
 
 
 @router.get("/{job_id}/attempts", response_model=list[JobAttempt], status_code=status.HTTP_200_OK)
@@ -448,8 +431,5 @@ async def list_job_attempts(
     """Return execution attempt history for one job."""
     try:
         return await job_service.get_job_attempts(job_id, limit=limit)
-    except ValueError as exc:
-        message = str(exc)
-        if "not found" in message.lower():
-            raise HTTPException(status_code=404, detail=message) from exc
-        raise HTTPException(status_code=400, detail=message) from exc
+    except DomainError as exc:
+        _map_domain_error_to_http(exc)

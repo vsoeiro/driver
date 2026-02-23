@@ -4,7 +4,6 @@ This module provides an async client for interacting with Microsoft Graph API
 to access OneDrive files and user information.
 """
 
-import asyncio
 import logging
 from typing import Any
 from urllib.parse import quote
@@ -14,6 +13,7 @@ import httpx
 from backend.core.exceptions import GraphAPIError
 from backend.db.models import LinkedAccount
 from backend.schemas.drive import DriveItem, DriveListResponse
+from backend.services.providers.http_base import OAuthHTTPClientBase
 from backend.services.token_manager import TokenManager
 
 logger = logging.getLogger(__name__)
@@ -27,14 +27,11 @@ def _encode_drive_path_component(value: str) -> str:
     return quote(value, safe="")
 
 
-class GraphClient:
+class GraphClient(OAuthHTTPClientBase):
     """Async client for Microsoft Graph API.
 
     Provides methods to access OneDrive files and user information.
     """
-
-    _shared_client: httpx.AsyncClient | None = None
-    _shared_client_lock: asyncio.Lock | None = None
 
     def __init__(self, token_manager: TokenManager) -> None:
         """Initialize the Graph client.
@@ -44,29 +41,7 @@ class GraphClient:
         token_manager : TokenManager
             Token manager for obtaining valid access tokens.
         """
-        self._token_manager = token_manager
-
-    @classmethod
-    async def _get_http_client(cls) -> httpx.AsyncClient:
-        if cls._shared_client is not None:
-            return cls._shared_client
-        if cls._shared_client_lock is None:
-            cls._shared_client_lock = asyncio.Lock()
-        async with cls._shared_client_lock:
-            if cls._shared_client is None:
-                cls._shared_client = httpx.AsyncClient(timeout=GRAPH_TIMEOUT)
-        return cls._shared_client
-
-    @classmethod
-    async def close_http_client(cls) -> None:
-        if cls._shared_client is None:
-            return
-        if cls._shared_client_lock is None:
-            cls._shared_client_lock = asyncio.Lock()
-        async with cls._shared_client_lock:
-            if cls._shared_client is not None:
-                await cls._shared_client.aclose()
-                cls._shared_client = None
+        super().__init__(token_manager)
 
     async def _request(
         self,
@@ -104,46 +79,32 @@ class GraphClient:
             url = f"{GRAPH_BASE_URL}{endpoint}"
         request_timeout = kwargs.pop("timeout", GRAPH_TIMEOUT)
 
-        async def _send_request(access_token: str) -> httpx.Response:
-            client = await self._get_http_client()
-            headers = {
-                "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/json",
-            }
-            return await client.request(
-                method=method,
-                url=url,
-                headers=headers,
-                timeout=request_timeout,
-                **kwargs,
+        def _log_unauthorized_retry(linked_account: LinkedAccount) -> None:
+            logger.warning(
+                "Graph returned 401 for account %s; forcing token refresh and retrying once.",
+                linked_account.id,
             )
 
-        try:
-            access_token = await self._token_manager.get_valid_access_token(account)
-            response = await _send_request(access_token)
-            if response.status_code == 401:
-                logger.warning(
-                    "Graph returned 401 for account %s; forcing token refresh and retrying once.",
-                    account.id,
-                )
-                access_token = await self._token_manager.force_refresh_access_token(account)
-                response = await _send_request(access_token)
-        except httpx.TimeoutException as exc:
-            logger.error("Graph API timeout: %s %s", method, endpoint)
-            raise GraphAPIError(
+        response = await self._perform_oauth_request(
+            method=method,
+            url=url,
+            account=account,
+            timeout=request_timeout,
+            request_headers={"Content-Type": "application/json"},
+            timeout_error_factory=lambda exc: GraphAPIError(
                 "Microsoft Graph request timed out. Please try again.",
                 status_code=504,
-            ) from exc
-        except httpx.HTTPError as exc:
-            logger.error("Graph API connection error: %s %s - %s", method, endpoint, exc)
-            raise GraphAPIError(
+            ),
+            connection_error_factory=lambda exc: GraphAPIError(
                 "Failed to reach Microsoft Graph. Please try again.",
                 status_code=502,
-            ) from exc
+            ),
+            unauthorized_retry_log=_log_unauthorized_retry,
+            **kwargs,
+        )
 
         if response.status_code >= 400:
-            error_data = response.json() if response.content else {}
-            error_msg = error_data.get("error", {}).get("message", response.text)
+            error_msg = self.parse_error_message(response, default=response.text or "Graph API request failed")
             logger.error("Graph API error: %s - %s", response.status_code, error_msg)
             raise GraphAPIError(error_msg, status_code=response.status_code)
 
@@ -310,7 +271,7 @@ class GraphClient:
         download_timeout = httpx.Timeout(timeout_seconds, connect=10.0) if timeout_seconds else GRAPH_TIMEOUT
 
         try:
-            client = await self._get_http_client()
+            client = await self._get_http_client(timeout=GRAPH_TIMEOUT)
             response = await client.get(download_url, timeout=download_timeout)
         except httpx.TimeoutException as exc:
             raise GraphAPIError(
@@ -365,7 +326,7 @@ class GraphClient:
         download_timeout = httpx.Timeout(timeout_seconds, connect=10.0) if timeout_seconds else GRAPH_TIMEOUT
 
         try:
-            client = await self._get_http_client()
+            client = await self._get_http_client(timeout=GRAPH_TIMEOUT)
             async with client.stream("GET", download_url, timeout=download_timeout) as response:
                 if response.status_code >= 400:
                     await response.read()  # Read error body.
@@ -604,8 +565,6 @@ class GraphClient:
         DriveItem
             The created file item.
         """
-        access_token = await self._token_manager.get_valid_access_token(account)
-
         encoded_filename = _encode_drive_path_component(filename)
         if folder_id == "root":
             endpoint = f"/me/drive/root:/{encoded_filename}:/content"
@@ -630,15 +589,21 @@ class GraphClient:
                      yield data
              request_content = file_iterator()
         
-        client = await self._get_http_client()
-        response = await client.put(
-            url,
-            content=request_content,
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/octet-stream",
-            },
+        response = await self._perform_oauth_request(
+            method="PUT",
+            url=url,
+            account=account,
             timeout=GRAPH_TIMEOUT,
+            request_headers={"Content-Type": "application/octet-stream"},
+            timeout_error_factory=lambda exc: GraphAPIError(
+                "Microsoft Graph request timed out. Please try again.",
+                status_code=504,
+            ),
+            connection_error_factory=lambda exc: GraphAPIError(
+                "Failed to reach Microsoft Graph. Please try again.",
+                status_code=502,
+            ),
+            content=request_content,
         )
 
         if response.status_code >= 400:
@@ -721,7 +686,7 @@ class GraphClient:
         dict
             Upload progress or completed item.
         """
-        client = await self._get_http_client()
+        client = await self._get_http_client(timeout=GRAPH_TIMEOUT)
         response = await client.put(
             upload_url,
             content=chunk,
@@ -903,18 +868,23 @@ class GraphClient:
         # Copy returns 202 Accepted with Location header
         # We need to access the response headers, so we handle this manually
         # instead of using self._request which returns JSON body.
-        access_token = await self._token_manager.get_valid_access_token(account)
         url = f"{GRAPH_BASE_URL}/me/drive/items/{item_id}/copy"
 
-        client = await self._get_http_client()
-        response = await client.post(
-            url,
-            json=body,
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/json",
-            },
+        response = await self._perform_oauth_request(
+            method="POST",
+            url=url,
+            account=account,
             timeout=GRAPH_TIMEOUT,
+            request_headers={"Content-Type": "application/json"},
+            timeout_error_factory=lambda exc: GraphAPIError(
+                "Microsoft Graph request timed out. Please try again.",
+                status_code=504,
+            ),
+            connection_error_factory=lambda exc: GraphAPIError(
+                "Failed to reach Microsoft Graph. Please try again.",
+                status_code=502,
+            ),
+            json=body,
         )
 
         if response.status_code != 202:

@@ -12,6 +12,8 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.application.drive.transfer_service import DriveTransferService
+from backend.common.error_items import ErrorItemsCollector
 from backend.db.models import Item, ItemMetadata, LinkedAccount, MetadataAttribute, MetadataRule
 from backend.services.item_index import (
     delete_item_and_descendants,
@@ -30,34 +32,6 @@ logger = logging.getLogger(__name__)
 ERROR_ITEMS_LIMIT = 50
 
 TOKEN_PATTERN = re.compile(r"\[([^\[\]]+)\]")
-
-
-def _record_error_item(
-    stats: dict[str, Any],
-    *,
-    reason: str,
-    item_id: str | None = None,
-    item_name: str | None = None,
-    stage: str | None = None,
-) -> None:
-    error_items = stats.get("error_items")
-    if not isinstance(error_items, list):
-        error_items = []
-        stats["error_items"] = error_items
-
-    if len(error_items) >= ERROR_ITEMS_LIMIT:
-        stats["error_items_truncated"] = int(stats.get("error_items_truncated", 0) or 0) + 1
-        return
-
-    reason_text = str(reason or "Unknown error").strip() or "Unknown error"
-    entry: dict[str, str] = {"reason": reason_text[:2000]}
-    if item_id:
-        entry["item_id"] = str(item_id)
-    if item_name:
-        entry["item_name"] = str(item_name)
-    if stage:
-        entry["stage"] = stage
-    error_items.append(entry)
 
 
 def _build_rule_item_query(rule: MetadataRule):
@@ -222,6 +196,8 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
         "error_items": [],
         "error_items_truncated": 0,
     }
+    error_collector = ErrorItemsCollector(stats, limit=ERROR_ITEMS_LIMIT)
+    transfer_service = DriveTransferService()
     batch_count = 0
     token_manager = TokenManager(session)
     account_cache: dict[UUID, LinkedAccount] = {}
@@ -315,20 +291,20 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
                 if rule.apply_move and destination_account_id != item.account_id:
                     if item.item_type != "file":
                         raise ValueError("Cross-account move is only supported for files")
-                    from backend.workers.handlers.move import _move_single_file
 
                     source_account = await _get_account(item.account_id)
                     source_client = await _get_client(item.account_id)
                     destination_account = await _get_account(destination_account_id)
                     destination_client = await _get_client(destination_account_id)
                     source_item = await source_client.get_item_metadata(source_account, item.item_id)
-                    new_item_id = await _move_single_file(
-                        source_client,
-                        destination_client,
-                        source_account,
-                        destination_account,
-                        source_item,
-                        destination_parent_id or "root",
+                    new_item_id = await transfer_service.transfer_file_between_accounts(
+                        source_client=source_client,
+                        destination_client=destination_client,
+                        source_account=source_account,
+                        destination_account=destination_account,
+                        source_item_id=source_item.id,
+                        source_item_name=source_item.name,
+                        destination_folder_id=destination_parent_id or "root",
                     )
                     await delete_item_and_descendants(
                         session,
@@ -391,8 +367,7 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
         except Exception as exc:
             logger.error("Rule %s failed for item %s: %s", rule_id, item.item_id, exc)
             stats["errors"] += 1
-            _record_error_item(
-                stats,
+            error_collector.record(
                 reason=str(exc),
                 item_id=item.item_id,
                 item_name=item.name,

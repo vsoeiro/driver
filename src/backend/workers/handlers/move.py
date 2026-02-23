@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.application.drive.transfer_service import DriveTransferService
 from backend.core.exceptions import DriveOrganizerError
 from backend.db.models import Item, LinkedAccount
 from backend.services.item_index import (
@@ -51,6 +52,7 @@ async def move_items_handler(payload: dict, session: AsyncSession) -> dict:
     token_manager = TokenManager(session)
     source_client = build_drive_client(source_account, token_manager)
     dest_client = build_drive_client(dest_account, token_manager)
+    transfer_service = DriveTransferService()
 
     # 2. Check if accounts are the same
     if source_account_id == destination_account_id:
@@ -93,12 +95,6 @@ async def move_items_handler(payload: dict, session: AsyncSession) -> dict:
     item = await source_client.get_item_metadata(source_account, source_item_id)
 
     if item.item_type == "folder":
-        # Recursive move
-        # For MVP, we might limit this or handle it recursively
-        # Here is a simple implementation: Create folder on dest, then list children and move them
-        # BUT: Doing this in one job might timeout.
-        # Ideally, we should create a new job for each child or loop.
-        # For now, let's implement a simple recursive function that runs within this job.
         await _move_folder_recursive(
             source_client,
             dest_client,
@@ -106,6 +102,7 @@ async def move_items_handler(payload: dict, session: AsyncSession) -> dict:
             dest_account,
             item,
             destination_folder_id,
+            transfer_service=transfer_service,
         )
         await delete_item_and_descendants(
             session,
@@ -116,13 +113,14 @@ async def move_items_handler(payload: dict, session: AsyncSession) -> dict:
         return {"moved_item_id": "folder_moved_recursively", "method": "copy_delete"}
     else:
         # It's a file
-        new_id = await _move_single_file(
-            source_client,
-            dest_client,
-            source_account,
-            dest_account,
-            item,
-            destination_folder_id,
+        new_id = await transfer_service.transfer_file_between_accounts(
+            source_client=source_client,
+            destination_client=dest_client,
+            source_account=source_account,
+            destination_account=dest_account,
+            source_item_id=item.id,
+            source_item_name=item.name,
+            destination_folder_id=destination_folder_id,
         )
         await delete_item_and_descendants(
             session,
@@ -143,59 +141,6 @@ async def move_items_handler(payload: dict, session: AsyncSession) -> dict:
         return {"moved_item_id": new_id, "method": "copy_delete"}
 
 
-async def _move_single_file(
-    source_client: DriveProviderClient,
-    dest_client: DriveProviderClient,
-    source_account: LinkedAccount,
-    dest_account: LinkedAccount,
-    item: Any,  # DriveItem
-    dest_folder_id: str,
-) -> str | None:
-    """Download from source and upload to dest, then delete from source."""
-    
-    # 1. Download
-    filename, content = await source_client.download_file_bytes(source_account, item.id)
-    
-    # 2. Upload
-    # Check size for upload session? For now assume small files or use upload_small_file
-    # which supports bytes. If content is large, we should use streaming, but 
-    # DriveProviderClient.download_file_bytes loads into memory.
-    # To improve, we should stream. But let's stick to what we have for MVP.
-    
-    # If size > 4MB, we should use upload session.
-    # But download_file_bytes already loaded it in RAM.
-    
-    if item.size > 4 * 1024 * 1024:
-        # Large file flow
-        session_data = await dest_client.create_upload_session(dest_account, filename, dest_folder_id)
-        upload_url = session_data["upload_url"]
-        
-        # Upload in chunks
-        chunk_size = 327680 * 10  # ~3MB
-        total_size = len(content) # We already have it in memory :( 
-        
-        upload_result: dict[str, Any] | None = None
-        for i in range(0, total_size, chunk_size):
-            chunk = content[i : i + chunk_size]
-            upload_result = await dest_client.upload_chunk(
-                upload_url,
-                chunk,
-                i,
-                min(i + chunk_size, total_size) - 1,
-                total_size
-            )
-        uploaded_item_id = upload_result.get("id") if isinstance(upload_result, dict) else None
-    else:
-        # Small file
-        uploaded = await dest_client.upload_small_file(dest_account, filename, content, dest_folder_id)
-        uploaded_item_id = uploaded.id
-
-    # 3. Delete from source
-    await source_client.delete_item(source_account, item.id)
-    
-    return uploaded_item_id
-
-
 async def _move_folder_recursive(
     source_client: DriveProviderClient,
     dest_client: DriveProviderClient,
@@ -203,6 +148,7 @@ async def _move_folder_recursive(
     dest_account: LinkedAccount,
     folder_item: Any,
     dest_parent_id: str,
+    transfer_service: DriveTransferService,
 ):
     """Recursively move a folder."""
     # 1. Create folder on dest
@@ -225,15 +171,17 @@ async def _move_folder_recursive(
                     dest_account,
                     child,
                     new_folder.id,
+                    transfer_service=transfer_service,
                 )
             else:
-                await _move_single_file(
-                    source_client,
-                    dest_client,
-                    source_account,
-                    dest_account,
-                    child,
-                    new_folder.id,
+                await transfer_service.transfer_file_between_accounts(
+                    source_client=source_client,
+                    destination_client=dest_client,
+                    source_account=source_account,
+                    destination_account=dest_account,
+                    source_item_id=child.id,
+                    source_item_name=child.name,
+                    destination_folder_id=new_folder.id,
                 )
         
         if children.next_link:

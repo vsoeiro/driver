@@ -14,6 +14,7 @@ import httpx
 from backend.core.exceptions import DriveOrganizerError
 from backend.db.models import LinkedAccount
 from backend.schemas.drive import DriveItem, DriveListResponse
+from backend.services.providers.http_base import OAuthHTTPClientBase
 from backend.services.token_manager import TokenManager
 
 logger = logging.getLogger(__name__)
@@ -28,36 +29,11 @@ FILE_FIELDS = (
 )
 
 
-class GoogleDriveClient:
+class GoogleDriveClient(OAuthHTTPClientBase):
     """Async client for Google Drive API."""
 
-    _shared_client: httpx.AsyncClient | None = None
-    _shared_client_lock: asyncio.Lock | None = None
-
     def __init__(self, token_manager: TokenManager) -> None:
-        self._token_manager = token_manager
-
-    @classmethod
-    async def _get_http_client(cls) -> httpx.AsyncClient:
-        if cls._shared_client is not None:
-            return cls._shared_client
-        if cls._shared_client_lock is None:
-            cls._shared_client_lock = asyncio.Lock()
-        async with cls._shared_client_lock:
-            if cls._shared_client is None:
-                cls._shared_client = httpx.AsyncClient(timeout=GOOGLE_TIMEOUT)
-        return cls._shared_client
-
-    @classmethod
-    async def close_http_client(cls) -> None:
-        if cls._shared_client is None:
-            return
-        if cls._shared_client_lock is None:
-            cls._shared_client_lock = asyncio.Lock()
-        async with cls._shared_client_lock:
-            if cls._shared_client is not None:
-                await cls._shared_client.aclose()
-                cls._shared_client = None
+        super().__init__(token_manager)
 
     async def _request(
         self,
@@ -73,48 +49,34 @@ class GoogleDriveClient:
         url = endpoint if endpoint.startswith("http") else f"{base}{endpoint}"
 
         request_headers = kwargs.pop("headers", {})
+        effective_timeout = timeout or GOOGLE_TIMEOUT
 
-        async def _send_request(access_token: str) -> httpx.Response:
-            headers = dict(request_headers)
-            headers["Authorization"] = f"Bearer {access_token}"
-            effective_timeout = timeout or GOOGLE_TIMEOUT
-            client = await self._get_http_client()
-            return await client.request(
-                method=method,
-                url=url,
-                headers=headers,
-                timeout=effective_timeout,
-                **kwargs,
+        def _log_unauthorized_retry(linked_account: LinkedAccount) -> None:
+            logger.warning(
+                "Google Drive returned 401 for account %s; forcing token refresh and retrying once.",
+                linked_account.id,
             )
 
-        try:
-            access_token = await self._token_manager.get_valid_access_token(account)
-            response = await _send_request(access_token)
-            if response.status_code == 401:
-                logger.warning(
-                    "Google Drive returned 401 for account %s; forcing token refresh and retrying once.",
-                    account.id,
-                )
-                access_token = await self._token_manager.force_refresh_access_token(account)
-                response = await _send_request(access_token)
-        except httpx.TimeoutException as exc:
-            raise DriveOrganizerError(
+        response = await self._perform_oauth_request(
+            method=method,
+            url=url,
+            account=account,
+            timeout=effective_timeout,
+            request_headers=request_headers,
+            timeout_error_factory=lambda exc: DriveOrganizerError(
                 "Google Drive request timed out. Please try again.",
                 status_code=504,
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise DriveOrganizerError(
+            ),
+            connection_error_factory=lambda exc: DriveOrganizerError(
                 "Failed to reach Google Drive. Please try again.",
                 status_code=502,
-            ) from exc
+            ),
+            unauthorized_retry_log=_log_unauthorized_retry,
+            **kwargs,
+        )
 
         if response.status_code >= 400 and response.status_code != 308:
-            msg = response.text
-            try:
-                data = response.json()
-                msg = data.get("error", {}).get("message", msg)
-            except Exception:
-                pass
+            msg = self.parse_error_message(response, default=response.text or "Google Drive request failed")
             raise DriveOrganizerError(f"Google Drive API error: {msg}", status_code=response.status_code)
 
         return response
@@ -471,7 +433,7 @@ class GoogleDriveClient:
         end_byte: int,
         total_size: int,
     ) -> dict:
-        client = await self._get_http_client()
+        client = await self._get_http_client(timeout=GOOGLE_TIMEOUT)
         response = await client.put(
             upload_url,
             content=chunk,

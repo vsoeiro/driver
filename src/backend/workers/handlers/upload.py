@@ -6,6 +6,8 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.application.drive.transfer_service import DriveTransferService
+from backend.common.upload_policy import is_large_upload
 from backend.core.exceptions import DriveOrganizerError
 from backend.db.models import Job, LinkedAccount
 from backend.services.item_index import parent_id_from_breadcrumb, path_from_breadcrumb, upsert_item_record
@@ -75,54 +77,20 @@ async def upload_file_handler(payload: dict, session: AsyncSession) -> dict:
 
         token_manager = TokenManager(session)
         client = build_drive_client(account, token_manager)
+        transfer_service = DriveTransferService()
 
         # 2. Upload Logic
         file_size = os.path.getsize(temp_path)
-        
-        # Open file in binary mode
-        with open(temp_path, "rb") as f:
-            uploaded_item_id: str | None = None
-            if file_size > 4 * 1024 * 1024:
-                # Large file (> 4MB) -> Upload Session
-                logger.info(f"Starting large file upload for {filename} ({file_size} bytes)")
-                
-                # Create session
-                session_data = await client.create_upload_session(account, filename, folder_id)
-                upload_url = session_data["upload_url"]
-                
-                # Chunked upload
-                chunk_size = 327680 * 10  # ~3.2MB chunks
-                
-                # Upload chunks
-                offset = 0
-                while offset < file_size:
-                    chunk = f.read(chunk_size)
-                    if not chunk:
-                        break
-                        
-                    end = min(offset + len(chunk), file_size) - 1
-                    
-                    upload_result = await client.upload_chunk(
-                        upload_url,
-                        chunk,
-                        offset,
-                        end,
-                        file_size
-                    )
-                    if isinstance(upload_result, dict) and upload_result.get("id"):
-                        uploaded_item_id = upload_result["id"]
-                    
-                    offset += len(chunk)
-                
-                msg = "Large file upload completed"
-            else:
-                # Small file (< 4MB) -> Simple Upload
-                logger.info(f"Starting small file upload for {filename} ({file_size} bytes)")
-                # Read content for small upload
-                content = f.read()
-                uploaded = await client.upload_small_file(account, filename, content, folder_id)
-                uploaded_item_id = uploaded.id
-                msg = "Small file upload completed"
+        upload_kind = "large" if is_large_upload(file_size) else "small"
+        logger.info("Starting %s file upload for %s (%s bytes)", upload_kind, filename, file_size)
+        uploaded_item_id = await transfer_service.upload_local_file(
+            client=client,
+            account=account,
+            local_path=temp_path,
+            filename=filename,
+            folder_id=folder_id,
+        )
+        msg = f"{upload_kind.capitalize()} file upload completed"
 
         if uploaded_item_id:
             uploaded_item = await client.get_item_metadata(account, uploaded_item_id)

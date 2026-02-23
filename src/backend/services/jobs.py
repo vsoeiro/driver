@@ -5,7 +5,6 @@ import inspect
 import json
 import logging
 import math
-from hashlib import sha256
 from datetime import datetime, UTC, timedelta
 from typing import Any, Sequence
 from uuid import UUID
@@ -17,52 +16,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.core.logging_utils import log_event
 from backend.core.config import get_settings
 from backend.db.models import Job, JobAttempt
+from backend.domain.errors import NotFoundError, ValidationError
+from backend.domain.jobs.policies import (
+    resolve_job_dedupe_key,
+    resolve_job_max_retries,
+    resolve_job_queue_alias,
+)
+from backend.domain.jobs.types import JobStatus, normalize_job_type
 from backend.services.job_queue import JobQueue, get_job_queue, resolve_queue_name
 from backend.schemas.jobs import JobCreate
 
 logger = logging.getLogger(__name__)
-FINALIZED_STATUSES = {"COMPLETED", "FAILED", "DEAD_LETTER", "CANCELLED"}
-QUEUE_PENDING_STATUSES = {"PENDING", "RETRY_SCHEDULED"}
-ACTIVE_DEDUPE_STATUSES = {"PENDING", "RUNNING", "RETRY_SCHEDULED"}
-
-DEFAULT_JOB_QUEUE_ALIAS_BY_TYPE: dict[str, str] = {
-    "sync_items": "sync",
-    "upload_file": "io",
-    "move_items": "io",
-    "update_metadata": "metadata",
-    "apply_metadata_recursive": "metadata",
-    "remove_metadata_recursive": "metadata",
-    "undo_metadata_batch": "metadata",
-    "apply_metadata_rule": "rules",
-    "extract_comic_assets": "comics",
-    "extract_library_comic_assets": "comics",
-    "reindex_comic_covers": "comics",
+FINALIZED_STATUSES = {
+    JobStatus.COMPLETED.value,
+    JobStatus.FAILED.value,
+    JobStatus.DEAD_LETTER.value,
+    JobStatus.CANCELLED.value,
 }
-
-DEFAULT_JOB_MAX_RETRIES_BY_TYPE: dict[str, int] = {
-    "sync_items": 2,
-    "upload_file": 4,
-    "move_items": 3,
-    "update_metadata": 2,
-    "apply_metadata_recursive": 2,
-    "remove_metadata_recursive": 2,
-    "undo_metadata_batch": 2,
-    "apply_metadata_rule": 2,
-    "extract_comic_assets": 1,
-    "extract_library_comic_assets": 1,
-    "reindex_comic_covers": 1,
-}
-
-DEFAULT_JOB_DEDUPE_KEYS_BY_TYPE: dict[str, tuple[str, ...]] = {
-    "sync_items": ("account_id",),
-    "update_metadata": ("account_id", "root_item_id", "category_name"),
-    "apply_metadata_recursive": ("account_id", "path_prefix", "category_id"),
-    "remove_metadata_recursive": ("account_id", "path_prefix"),
-    "undo_metadata_batch": ("batch_id",),
-    "apply_metadata_rule": ("rule_id",),
-    "extract_comic_assets": ("account_id", "item_ids", "use_indexed_items"),
-    "extract_library_comic_assets": ("account_ids", "chunk_size"),
-    "reindex_comic_covers": ("plugin_key", "library_key"),
+QUEUE_PENDING_STATUSES = {JobStatus.PENDING.value, JobStatus.RETRY_SCHEDULED.value}
+ACTIVE_DEDUPE_STATUSES = {
+    JobStatus.PENDING.value,
+    JobStatus.RUNNING.value,
+    JobStatus.RETRY_SCHEDULED.value,
 }
 
 
@@ -85,51 +60,12 @@ class JobService:
         self.queue = queue
         self.settings = get_settings()
 
-    @staticmethod
-    def _normalize_job_type(job_type: str) -> str:
-        return str(job_type or "").strip().lower()
-
     def _resolve_job_queue_name(self, job_type: str, requested_queue_name: str | None) -> str:
-        if requested_queue_name is not None and str(requested_queue_name).strip():
-            return resolve_queue_name(str(requested_queue_name), settings=self.settings)
-
-        queue_map = dict(DEFAULT_JOB_QUEUE_ALIAS_BY_TYPE)
-        queue_map.update(self.settings.job_type_queue_map or {})
-        queue_alias_or_name = queue_map.get(job_type, "default")
+        queue_alias_or_name = resolve_job_queue_alias(job_type, self.settings, requested_queue_name)
         return resolve_queue_name(queue_alias_or_name, settings=self.settings)
 
     def _resolve_job_max_retries(self, job_type: str, requested_max_retries: int | None) -> int:
-        if requested_max_retries is not None:
-            return max(0, int(requested_max_retries))
-        retry_map = dict(DEFAULT_JOB_MAX_RETRIES_BY_TYPE)
-        retry_map.update(self.settings.job_type_max_retries_map or {})
-        default_retries = max(0, int(self.settings.job_default_max_retries))
-        return max(0, int(retry_map.get(job_type, default_retries)))
-
-    @staticmethod
-    def _normalize_dedupe_key(value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized = str(value).strip()
-        return normalized or None
-
-    @staticmethod
-    def _build_default_dedupe_key(job_type: str, payload: dict[str, Any]) -> str | None:
-        dedupe_fields = DEFAULT_JOB_DEDUPE_KEYS_BY_TYPE.get(job_type)
-        if not dedupe_fields:
-            return None
-        dedupe_payload = {field: payload.get(field) for field in dedupe_fields if field in payload}
-        if not dedupe_payload:
-            return None
-        canonical_payload = json.dumps(
-            dedupe_payload,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=True,
-            default=str,
-        )
-        digest = sha256(canonical_payload.encode("utf-8")).hexdigest()
-        return f"{job_type}:{digest}"
+        return resolve_job_max_retries(job_type, self.settings, requested_max_retries)
 
     def _resolve_job_dedupe_key(
         self,
@@ -137,10 +73,11 @@ class JobService:
         payload: dict[str, Any],
         requested_dedupe_key: str | None,
     ) -> str | None:
-        explicit_key = self._normalize_dedupe_key(requested_dedupe_key)
-        if explicit_key is not None:
-            return explicit_key
-        return self._build_default_dedupe_key(job_type, payload)
+        return resolve_job_dedupe_key(
+            job_type=job_type,
+            payload=payload,
+            requested_dedupe_key=requested_dedupe_key,
+        )
 
     async def _find_active_duplicate_job(self, dedupe_key: str) -> Job | None:
         stmt = (
@@ -175,7 +112,7 @@ class JobService:
         )
 
         stmt = select(Job).where(
-            Job.status == "RUNNING",
+            Job.status == JobStatus.RUNNING.value,
             Job.started_at.is_not(None),
             Job.started_at < cutoff,
         )
@@ -187,7 +124,7 @@ class JobService:
         stale_job_ids = [job.id for job in stale_jobs]
         for job in stale_jobs:
             current_result = self._coerce_json_dict(job.result, default_empty=True) or {}
-            job.status = "CANCELLED"
+            job.status = JobStatus.CANCELLED.value
             job.completed_at = now
             job.last_error = stale_reason
             job.result = {
@@ -228,7 +165,7 @@ class JobService:
         attempt = JobAttempt(
             job_id=job_id,
             attempt_number=(max_attempt or 0) + 1,
-            status="RUNNING",
+            status=JobStatus.RUNNING.value,
             triggered_by=triggered_by,
         )
         self.session.add(attempt)
@@ -285,7 +222,7 @@ class JobService:
         stmt = (
             select(Job.type, Job.started_at, Job.completed_at)
             .where(
-                Job.status == "COMPLETED",
+                Job.status == JobStatus.COMPLETED.value,
                 Job.started_at.is_not(None),
                 Job.completed_at.is_not(None),
             )
@@ -401,7 +338,7 @@ class JobService:
         Job
             Created job instance.
         """
-        normalized_type = self._normalize_job_type(job_in.type)
+        normalized_type = normalize_job_type(job_in.type)
         payload_json = job_in.payload if isinstance(job_in.payload, dict) else {}
 
         max_retries = self._resolve_job_max_retries(normalized_type, job_in.max_retries)
@@ -424,7 +361,7 @@ class JobService:
         job = Job(
             type=normalized_type,
             payload=payload_json,
-            status="PENDING",
+            status=JobStatus.PENDING.value,
             queue_name=queue_name,
             dedupe_key=dedupe_key,
             max_retries=max_retries,
@@ -480,14 +417,14 @@ class JobService:
         job = await self.session.get(Job, job_id)
         if not job:
             return None
-        if job.status in {"COMPLETED", "FAILED", "DEAD_LETTER", "CANCELLED"}:
+        if job.status in FINALIZED_STATUSES:
             return self._normalize_job_json_fields(job)
-        if job.status == "RUNNING":
+        if job.status == JobStatus.RUNNING.value:
             return self._normalize_job_json_fields(job)
         if not getattr(job, "queue_name", None):
             job.queue_name = self._resolve_job_queue_name(str(job.type), None)
 
-        job.status = "RUNNING"
+        job.status = JobStatus.RUNNING.value
         job.started_at = datetime.now(UTC)
         job.last_error = None
         job.next_retry_at = None
@@ -526,7 +463,7 @@ class JobService:
         )
         result = await self.session.execute(stmt)
         job = result.scalar_one()
-        await self._finalize_latest_attempt(job_id, status="COMPLETED")
+        await self._finalize_latest_attempt(job_id, status=JobStatus.COMPLETED.value)
         await self.session.commit()
         log_event(logger, "job_completed", job_id=str(job_id))
         return job
@@ -535,21 +472,20 @@ class JobService:
         """Request cancellation for a job.
 
         - PENDING/RETRY_SCHEDULED/RUNNING/CANCEL_REQUESTED: cancelled immediately
-        - finalized jobs: raises ValueError
+        - finalized jobs: raises ValidationError
         """
         job = await self.session.get(Job, job_id)
         if not job:
-            raise ValueError(f"Job {job_id} not found")
-        if job.status == "CANCELLED":
+            raise NotFoundError(f"Job {job_id} not found")
+        if job.status == JobStatus.CANCELLED.value:
             logger.info("Job %s failure ignored because it was cancelled", job_id)
             return job
 
-        finalized_statuses = {"COMPLETED", "FAILED", "DEAD_LETTER", "CANCELLED"}
-        if job.status in finalized_statuses:
-            raise ValueError("Finalized jobs cannot be cancelled")
+        if job.status in FINALIZED_STATUSES:
+            raise ValidationError("Finalized jobs cannot be cancelled")
 
         now = datetime.now(UTC)
-        job.status = "CANCELLED"
+        job.status = JobStatus.CANCELLED.value
         job.completed_at = now
         current_result = self._coerce_json_dict(job.result, default_empty=True) or {}
         job.result = {
@@ -559,7 +495,7 @@ class JobService:
         }
 
         self.session.add(job)
-        await self._finalize_latest_attempt(job.id, status="CANCELLED", error="Cancelled by user")
+        await self._finalize_latest_attempt(job.id, status=JobStatus.CANCELLED.value, error="Cancelled by user")
         await self.session.commit()
         await self.session.refresh(job)
         return job
@@ -567,16 +503,16 @@ class JobService:
     async def is_cancel_requested(self, job_id: UUID) -> bool:
         """Check whether a running job has a cancellation request."""
         status = await self.session.scalar(select(Job.status).where(Job.id == job_id))
-        return status in {"CANCEL_REQUESTED", "CANCELLED"}
+        return status in {"CANCEL_REQUESTED", JobStatus.CANCELLED.value}
 
     async def cancel_running_job(self, job_id: UUID, message: str = "Cancelled by user") -> Job:
         """Finalize a running/cancel-requested job as cancelled."""
         now = datetime.now(UTC)
         current_status = await self.session.scalar(select(Job.status).where(Job.id == job_id))
-        if current_status == "CANCELLED":
+        if current_status == JobStatus.CANCELLED.value:
             existing = await self.session.get(Job, job_id)
             if existing is None:
-                raise ValueError(f"Job {job_id} not found")
+                raise NotFoundError(f"Job {job_id} not found")
             logger.info("Job %s completion ignored because it was cancelled", job_id)
             return existing
 
@@ -584,7 +520,7 @@ class JobService:
             update(Job)
             .where(Job.id == job_id)
             .values(
-                status="CANCELLED",
+                status=JobStatus.CANCELLED.value,
                 completed_at=now,
                 result={
                     "cancelled": True,
@@ -595,7 +531,7 @@ class JobService:
         )
         result = await self.session.execute(stmt)
         job = result.scalar_one()
-        await self._finalize_latest_attempt(job_id, status="CANCELLED", error=message)
+        await self._finalize_latest_attempt(job_id, status=JobStatus.CANCELLED.value, error=message)
         await self.session.commit()
         return self._normalize_job_json_fields(job)
 
@@ -616,7 +552,7 @@ class JobService:
         """
         job = await self.session.get(Job, job_id)
         if not job:
-            raise ValueError(f"Job {job_id} not found")
+            raise NotFoundError(f"Job {job_id} not found")
 
         now = datetime.now(UTC)
         next_retry_count = (job.retry_count or 0) + 1
@@ -625,7 +561,7 @@ class JobService:
         if retry_allowed:
             # Exponential backoff: 2, 4, 8, ... capped to 300 seconds.
             delay_seconds = min(300, int(math.pow(2, next_retry_count)))
-            job.status = "RETRY_SCHEDULED"
+            job.status = JobStatus.RETRY_SCHEDULED.value
             job.retry_count = next_retry_count
             job.last_error = error
             job.next_retry_at = now + timedelta(seconds=delay_seconds)
@@ -647,10 +583,10 @@ class JobService:
                 max_retries=job.max_retries,
                 retry_in_seconds=delay_seconds,
             )
-            await self._finalize_latest_attempt(job.id, status="RETRY_SCHEDULED", error=error)
+            await self._finalize_latest_attempt(job.id, status=JobStatus.RETRY_SCHEDULED.value, error=error)
         else:
             dead_lettered = (job.max_retries or 0) > 0
-            job.status = "DEAD_LETTER" if dead_lettered else "FAILED"
+            job.status = JobStatus.DEAD_LETTER.value if dead_lettered else JobStatus.FAILED.value
             job.retry_count = next_retry_count
             job.last_error = error
             job.result = {"error": error}
@@ -670,7 +606,7 @@ class JobService:
 
         self.session.add(job)
         await self.session.commit()
-        if job.status == "RETRY_SCHEDULED":
+        if job.status == JobStatus.RETRY_SCHEDULED.value:
             queue = self.queue or get_job_queue()
             delay = max(0, int((job.next_retry_at - now).total_seconds())) if job.next_retry_at else 0
             queue_name = self._resolve_job_queue_name(str(job.type), getattr(job, "queue_name", None))
@@ -801,7 +737,7 @@ class JobService:
         """Return attempt history for one job ordered by latest attempt first."""
         job_exists = await self.session.scalar(select(func.count(Job.id)).where(Job.id == job_id))
         if not job_exists:
-            raise ValueError(f"Job {job_id} not found")
+            raise NotFoundError(f"Job {job_id} not found")
         stmt = (
             select(JobAttempt)
             .where(JobAttempt.job_id == job_id)
@@ -815,11 +751,10 @@ class JobService:
         """Create a new PENDING job cloned from a finalized job."""
         source_job = await self.session.get(Job, job_id)
         if source_job is None:
-            raise ValueError(f"Job {job_id} not found")
+            raise NotFoundError(f"Job {job_id} not found")
 
-        finalized_statuses = {"COMPLETED", "FAILED", "DEAD_LETTER", "CANCELLED"}
-        if source_job.status not in finalized_statuses:
-            raise ValueError("Only finalized jobs can be reprocessed")
+        if source_job.status not in FINALIZED_STATUSES:
+            raise ValidationError("Only finalized jobs can be reprocessed")
 
         payload = self._coerce_json_dict(source_job.payload, default_empty=True) or {}
         cloned = JobCreate(
@@ -843,11 +778,10 @@ class JobService:
         """Delete a finalized job from history."""
         job = await self.session.get(Job, job_id)
         if not job:
-            raise ValueError(f"Job {job_id} not found")
+            raise NotFoundError(f"Job {job_id} not found")
 
-        finalized_statuses = {"COMPLETED", "FAILED", "DEAD_LETTER", "CANCELLED"}
-        if job.status not in finalized_statuses:
-            raise ValueError("Only finalized jobs can be deleted")
+        if job.status not in FINALIZED_STATUSES:
+            raise ValidationError("Only finalized jobs can be deleted")
 
         await self.session.delete(job)
         await self.session.commit()

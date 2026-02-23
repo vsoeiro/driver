@@ -5,6 +5,7 @@ and current user authentication.
 """
 
 import uuid
+from collections.abc import AsyncGenerator
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
@@ -21,7 +22,7 @@ from backend.services.token_manager import TokenManager
 DBSession = Annotated[AsyncSession, Depends(get_db)]
 
 
-async def get_session() -> AsyncSession:
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """Get a database session.
     
     Returns

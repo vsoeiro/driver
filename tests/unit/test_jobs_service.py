@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 
 from backend.db.models import Job, JobAttempt
+from backend.domain.errors import ValidationError
 from backend.services.jobs import JobService
 
 
@@ -31,7 +32,7 @@ async def test_delete_job_rejects_running_status():
 
     service = JobService(session)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError):
         await service.delete_job(job_id)
 
 
