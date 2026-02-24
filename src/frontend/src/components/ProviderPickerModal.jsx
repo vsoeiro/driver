@@ -5,6 +5,7 @@ export default function ProviderPickerModal({ isOpen, onClose, onSelect }) {
     const providers = [
         { id: 'microsoft', label: 'OneDrive' },
         { id: 'google', label: 'Google Drive' },
+        { id: 'dropbox', label: 'Dropbox' },
     ];
 
     return (
