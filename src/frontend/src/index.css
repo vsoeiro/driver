@@ -137,8 +137,7 @@
     }
 
     .app-panel {
-        @apply rounded-[0.95rem] border backdrop-blur-xl shadow-[0_18px_45px_-35px_rgba(13,38,76,0.5)];
-        border-color: hsl(var(--border) / 0.6);
+        @apply rounded-[0.95rem] backdrop-blur-xl shadow-[0_18px_45px_-35px_rgba(13,38,76,0.5)];
         background-color: hsl(var(--card) / 0.75);
     }
 

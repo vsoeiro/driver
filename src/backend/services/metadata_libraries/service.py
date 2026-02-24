@@ -39,7 +39,7 @@ class MetadataLibraryService:
         library = await self._get_or_create_library_row(
             COMICS_LIBRARY_KEY,
             "Comics Core",
-            "Managed comics metadata schema with locked attributes.",
+            "Managed comics metadata schema.",
         )
         category = await self._ensure_comics_category()
         library.is_active = True
@@ -55,7 +55,7 @@ class MetadataLibraryService:
             library = await self._get_or_create_library_row(
                 COMICS_LIBRARY_KEY,
                 "Comics Core",
-                "Managed comics metadata schema with locked attributes.",
+                "Managed comics metadata schema.",
             )
         library.is_active = False
 
