@@ -75,6 +75,7 @@ export default function FileBrowser() {
     const [actionLoading, setActionLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
     const [isNavDropActive, setIsNavDropActive] = useState(false);
+    const [isComicsLibraryActive, setIsComicsLibraryActive] = useState(false);
     const { showToast } = useToast();
 
     // Reset selection on folder change
@@ -82,6 +83,16 @@ export default function FileBrowser() {
         setSelectedItems(new Set());
         setLastSelectedIndex(null);
     }, [folderId, accountId]);
+
+    useEffect(() => {
+        metadataService
+            .listMetadataLibraries()
+            .then((rows) => {
+                const comicsLibrary = (rows || []).find((library) => library.key === 'comics_core');
+                setIsComicsLibraryActive(Boolean(comicsLibrary?.is_active));
+            })
+            .catch(() => setIsComicsLibraryActive(false));
+    }, []);
 
     // Helper to format date
     const formatDate = (dateString) => {
@@ -193,6 +204,7 @@ export default function FileBrowser() {
     };
 
     const executeMapComics = async () => {
+        if (!isComicsLibraryActive) return;
         setActionLoading(true);
         try {
             await jobsService.createExtractComicAssetsJob(accountId, Array.from(selectedItems));
@@ -491,14 +503,16 @@ export default function FileBrowser() {
                                     >
                                         <XCircle size={14} /> Remove Metadata
                                     </button>
-                                    <button
-                                        onClick={executeMapComics}
-                                        disabled={!canMapComics || actionLoading}
-                                        className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
-                                    >
-                                        {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
-                                        Map Comics
-                                    </button>
+                                    {isComicsLibraryActive && (
+                                        <button
+                                            onClick={executeMapComics}
+                                            disabled={!canMapComics || actionLoading}
+                                            className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
+                                        >
+                                            {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
+                                            Map Comics
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         )}

@@ -16,6 +16,7 @@ from backend.db.models import LinkedAccount
 from backend.schemas.drive import DriveItem, DriveListResponse
 from backend.security.token_manager import TokenManager
 from backend.services.providers.http_base import OAuthHTTPClientBase
+from backend.services.provider_request_usage import provider_request_usage_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -474,15 +475,38 @@ class GoogleDriveClient(OAuthHTTPClientBase):
         total_size: int,
     ) -> dict:
         client = await self._get_http_client(timeout=GOOGLE_TIMEOUT)
-        response = await client.put(
-            upload_url,
-            content=chunk,
-            headers={
-                "Content-Length": str(len(chunk)),
-                "Content-Range": f"bytes {start_byte}-{end_byte}/{total_size}",
-            },
-            timeout=GOOGLE_TIMEOUT,
-        )
+        try:
+            response = await client.put(
+                upload_url,
+                content=chunk,
+                headers={
+                    "Content-Length": str(len(chunk)),
+                    "Content-Range": f"bytes {start_byte}-{end_byte}/{total_size}",
+                },
+                timeout=GOOGLE_TIMEOUT,
+            )
+            await provider_request_usage_tracker.record_response(
+                provider="google",
+                status_code=response.status_code,
+            )
+        except httpx.TimeoutException as exc:
+            await provider_request_usage_tracker.record_transport_error(
+                provider="google",
+                kind="timeout",
+            )
+            raise DriveOrganizerError(
+                "Google Drive chunk upload timed out",
+                status_code=504,
+            ) from exc
+        except httpx.HTTPError as exc:
+            await provider_request_usage_tracker.record_transport_error(
+                provider="google",
+                kind="connection",
+            )
+            raise DriveOrganizerError(
+                "Failed to upload chunk to Google Drive",
+                status_code=502,
+            ) from exc
 
         if response.status_code == 308:
             range_header = response.headers.get("Range")

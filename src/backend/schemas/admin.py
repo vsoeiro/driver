@@ -84,6 +84,25 @@ class DeadLetterJobSummary(BaseModel):
     max_retries: int
 
 
+class ProviderRequestUsage(BaseModel):
+    provider: str
+    provider_label: str
+    window_seconds: int
+    max_requests: int
+    requests_in_window: int
+    utilization_ratio: float
+    docs_url: str | None = None
+    notes: str | None = None
+    total_requests_since_start: int = 0
+    successful_responses: int = 0
+    throttled_responses: int = 0
+    client_error_responses: int = 0
+    server_error_responses: int = 0
+    timeout_errors: int = 0
+    connection_errors: int = 0
+    last_request_at: datetime | None = None
+
+
 class ObservabilitySnapshot(BaseModel):
     generated_at: datetime
     period_key: str = "24h"
@@ -118,3 +137,4 @@ class ObservabilitySnapshot(BaseModel):
     recent_alerts: list[ObservabilityAlert] = []
     integration_health: list[IntegrationHealthStatus] = []
     dead_letter_jobs: list[DeadLetterJobSummary] = []
+    provider_request_usage: list[ProviderRequestUsage] = []

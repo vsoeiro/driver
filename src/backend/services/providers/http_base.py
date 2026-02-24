@@ -9,6 +9,7 @@ import httpx
 
 from backend.db.models import LinkedAccount
 from backend.security.token_manager import TokenManager
+from backend.services.provider_request_usage import provider_request_usage_tracker
 
 TimeoutErrorFactory = Callable[[Exception], Exception]
 ConnectionErrorFactory = Callable[[Exception], Exception]
@@ -64,13 +65,18 @@ class OAuthHTTPClientBase:
             client = await self._get_http_client(timeout=timeout)
             auth_headers = dict(headers)
             auth_headers["Authorization"] = f"Bearer {access_token}"
-            return await client.request(
+            response = await client.request(
                 method=method,
                 url=url,
                 headers=auth_headers,
                 timeout=timeout,
                 **kwargs,
             )
+            await provider_request_usage_tracker.record_response(
+                provider=account.provider,
+                status_code=response.status_code,
+            )
+            return response
 
         try:
             access_token = await self._token_manager.get_valid_access_token(account)
@@ -84,8 +90,16 @@ class OAuthHTTPClientBase:
                 response = await _send(access_token)
             return response
         except httpx.TimeoutException as exc:
+            await provider_request_usage_tracker.record_transport_error(
+                provider=account.provider,
+                kind="timeout",
+            )
             raise timeout_error_factory(exc) from exc
         except httpx.HTTPError as exc:
+            await provider_request_usage_tracker.record_transport_error(
+                provider=account.provider,
+                kind="connection",
+            )
             raise connection_error_factory(exc) from exc
 
     @staticmethod

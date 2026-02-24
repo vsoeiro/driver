@@ -153,6 +153,11 @@ export default function AdminDashboard() {
         ];
     }, [snapshot]);
 
+    const providerUsageRows = useMemo(
+        () => snapshot?.provider_request_usage || [],
+        [snapshot],
+    );
+
     const successRateWindow = snapshot?.success_rate_window ?? snapshot?.success_rate_last_24h ?? 0;
     const deadLetterWindow = snapshot?.dead_letter_jobs_window ?? snapshot?.dead_letter_jobs_24h ?? 0;
 
@@ -269,6 +274,48 @@ export default function AdminDashboard() {
                         </div>
 
                         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                            <div className="surface-card p-4">
+                                <h2 className="font-medium mb-3">Provider API Usage</h2>
+                                <div className="space-y-3">
+                                    {providerUsageRows.length === 0 ? (
+                                        <div className="text-sm text-muted-foreground">No provider request telemetry yet.</div>
+                                    ) : providerUsageRows.map((row) => {
+                                        const pct = (Number(row.utilization_ratio) || 0) * 100;
+                                        return (
+                                            <div key={row.provider} className="rounded-lg border border-border/70 bg-card/70 p-2.5">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <div className="text-sm font-medium">{row.provider_label}</div>
+                                                    <div className="text-xs text-muted-foreground">
+                                                        {row.requests_in_window}/{row.max_requests} in {row.window_seconds}s
+                                                    </div>
+                                                </div>
+                                                <div className="mt-2 h-2 rounded bg-muted overflow-hidden">
+                                                    <div
+                                                        className={`h-full rounded ${pct >= 90 ? 'bg-destructive' : pct >= 75 ? 'bg-amber-500' : 'bg-primary'}`}
+                                                        style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                                                    />
+                                                </div>
+                                                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                                                    <span>Usage: {pct.toFixed(2)}%</span>
+                                                    <span>Total since start: {row.total_requests_since_start}</span>
+                                                    <span>429: {row.throttled_responses}</span>
+                                                </div>
+                                                {row.docs_url && (
+                                                    <a
+                                                        href={row.docs_url}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="mt-1 inline-flex text-xs text-primary hover:underline"
+                                                    >
+                                                        Docs
+                                                    </a>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
                             <div className="surface-card p-4">
                                 <h2 className="font-medium mb-3">Integration Health</h2>
                                 <div className="space-y-2">

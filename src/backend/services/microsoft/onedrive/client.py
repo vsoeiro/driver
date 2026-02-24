@@ -15,6 +15,7 @@ from backend.db.models import LinkedAccount
 from backend.schemas.drive import DriveItem, DriveListResponse
 from backend.security.token_manager import TokenManager
 from backend.services.providers.http_base import OAuthHTTPClientBase
+from backend.services.provider_request_usage import provider_request_usage_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -279,12 +280,24 @@ class GraphClient(OAuthHTTPClientBase):
         try:
             client = await self._get_http_client(timeout=GRAPH_TIMEOUT)
             response = await client.get(download_url, timeout=download_timeout)
+            await provider_request_usage_tracker.record_response(
+                provider=account.provider,
+                status_code=response.status_code,
+            )
         except httpx.TimeoutException as exc:
+            await provider_request_usage_tracker.record_transport_error(
+                provider=account.provider,
+                kind="timeout",
+            )
             raise GraphAPIError(
                 f"Timed out downloading file {filename}",
                 status_code=504,
             ) from exc
         except httpx.HTTPError as exc:
+            await provider_request_usage_tracker.record_transport_error(
+                provider=account.provider,
+                kind="connection",
+            )
             raise GraphAPIError(
                 f"Failed to download file {filename}",
                 status_code=502,
@@ -340,6 +353,10 @@ class GraphClient(OAuthHTTPClientBase):
             async with client.stream(
                 "GET", download_url, timeout=download_timeout
             ) as response:
+                await provider_request_usage_tracker.record_response(
+                    provider=account.provider,
+                    status_code=response.status_code,
+                )
                 if response.status_code >= 400:
                     await response.read()  # Read error body.
                     raise GraphAPIError(
@@ -352,11 +369,19 @@ class GraphClient(OAuthHTTPClientBase):
                         f.write(chunk)
 
         except httpx.TimeoutException as exc:
+            await provider_request_usage_tracker.record_transport_error(
+                provider=account.provider,
+                kind="timeout",
+            )
             raise GraphAPIError(
                 f"Timed out downloading file {filename}",
                 status_code=504,
             ) from exc
         except httpx.HTTPError as exc:
+            await provider_request_usage_tracker.record_transport_error(
+                provider=account.provider,
+                kind="connection",
+            )
             raise GraphAPIError(
                 f"Failed to download file {filename}",
                 status_code=502,
@@ -713,6 +738,10 @@ class GraphClient(OAuthHTTPClientBase):
                 "Content-Range": f"bytes {start_byte}-{end_byte}/{total_size}",
             },
             timeout=GRAPH_TIMEOUT,
+        )
+        await provider_request_usage_tracker.record_response(
+            provider="microsoft",
+            status_code=response.status_code,
         )
 
         if response.status_code >= 400:

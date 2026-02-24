@@ -13,11 +13,11 @@ from backend.core.config import get_settings
 
 DEFAULT_QUEUE_ALIAS_SUFFIXES: dict[str, str] = {
     "default": "",
-    "sync": "sync",
-    "io": "io",
-    "metadata": "metadata",
-    "rules": "rules",
-    "comics": "comics",
+    "sync": "light",
+    "io": "",
+    "metadata": "",
+    "rules": "",
+    "comics": "heavy",
 }
 
 
@@ -28,6 +28,8 @@ def build_queue_alias_map(*, settings=None) -> dict[str, str]:
     aliases: dict[str, str] = {}
     for alias, suffix in DEFAULT_QUEUE_ALIAS_SUFFIXES.items():
         if alias == "default":
+            aliases[alias] = base_queue_name
+        elif suffix == "":
             aliases[alias] = base_queue_name
         else:
             aliases[alias] = f"{base_queue_name}:{suffix}"

@@ -16,7 +16,7 @@ import {
     Plus, Trash2, ChevronRight, ChevronDown, ChevronLeft,
     Database, Loader2, Tag, Hash, ArrowLeft,
     File, Folder, ArrowUpDown, ArrowUp, ArrowDown,
-    CheckSquare, Square, Eye, Search, Filter, User, Pencil, BookOpen, Power,
+    CheckSquare, Square, Eye, Search, Filter, User, Pencil, BookOpen, Power, Columns3, GripVertical,
     Download, ArrowRightLeft, XCircle, Check, X
 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -34,6 +34,9 @@ const BASE_SORT_OPTIONS = [
     { value: 'size', label: 'Order: Size' },
     { value: 'created_at', label: 'Order: Created' },
 ];
+const METADATA_TABLE_COLUMNS_STORAGE_PREFIX = 'driver-metadata-table-columns-v1';
+
+const getLibraryDisplayName = (library) => (library?.key === 'comics_core' ? 'Comics' : library?.name);
 
 
 // -- Category Items Table --
@@ -68,6 +71,13 @@ const CategoryItemsTable = ({ category, onBack }) => {
     const [editingCell, setEditingCell] = useState(null);
     const [editingValue, setEditingValue] = useState('');
     const [savingCellKey, setSavingCellKey] = useState(null);
+    const [columnsMenuOpen, setColumnsMenuOpen] = useState(false);
+    const columnsMenuRef = useRef(null);
+    const resizeStateRef = useRef(null);
+    const [draggingColumnId, setDraggingColumnId] = useState(null);
+    const [tableColumnOrder, setTableColumnOrder] = useState([]);
+    const [tableColumnVisibility, setTableColumnVisibility] = useState({});
+    const [tableColumnWidths, setTableColumnWidths] = useState({});
     const [filters, setFilters] = useState({
         account_id: '',
         item_type: '',
@@ -103,6 +113,9 @@ const CategoryItemsTable = ({ category, onBack }) => {
         function handleClickOutside(event) {
             if (metadataMenuRef.current && !metadataMenuRef.current.contains(event.target)) {
                 setMetadataMenuOpen(false);
+            }
+            if (columnsMenuRef.current && !columnsMenuRef.current.contains(event.target)) {
+                setColumnsMenuOpen(false);
             }
         }
         document.addEventListener('mousedown', handleClickOutside);
@@ -636,7 +649,10 @@ const CategoryItemsTable = ({ category, onBack }) => {
         }
     };
 
-    const attributes = sortAttributesForCategory(category);
+    const attributes = useMemo(
+        () => sortAttributesForCategory(category),
+        [category?.id, category?.plugin_key, category?.attributes]
+    );
     const findAttr = (pluginKey, fallbackName) => {
         if (!pluginKey && !fallbackName) return null;
         const byPluginKey = pluginKey
@@ -668,10 +684,109 @@ const CategoryItemsTable = ({ category, onBack }) => {
         unknown: 'bg-zinc-100 text-zinc-700',
     };
 
-    const fixedColTemplate = '40px 40px 2fr 120px 80px';
-    const attrCols = attributes.map(() => 'minmax(100px, 1fr)').join(' ');
-    const gridTemplate = `${fixedColTemplate} ${attrCols} 140px minmax(180px,1fr)`;
-    const tableMinWidth = Math.max(1200, 780 + attributes.length * 180);
+    const tableColumnsStorageKey = `${METADATA_TABLE_COLUMNS_STORAGE_PREFIX}:${category.id}`;
+    const tableColumnDefs = useMemo(() => {
+        const fixed = [
+            { id: 'name', label: 'Name', width: 280, minWidth: 170, sortKey: 'name' },
+            { id: 'account', label: 'Account', width: 160, minWidth: 130, sortKey: null },
+            { id: 'size', label: 'Size', width: 110, minWidth: 90, sortKey: 'size', align: 'right' },
+        ];
+        const dynamicAttributes = attributes.map((attr) => ({
+            id: `attr:${attr.id}`,
+            label: attr.name,
+            width: 180,
+            minWidth: 110,
+            sortKey: null,
+            attrId: attr.id,
+        }));
+        const tail = [
+            { id: 'modified', label: 'Modified', width: 150, minWidth: 130, sortKey: 'modified_at', align: 'right' },
+            { id: 'path', label: 'Path', width: 260, minWidth: 150, sortKey: null, align: 'right' },
+        ];
+        return [...fixed, ...dynamicAttributes, ...tail];
+    }, [attributes]);
+
+    useEffect(() => {
+        const defaults = tableColumnDefs;
+        const defaultOrder = defaults.map((col) => col.id);
+        const defaultVisibility = defaults.reduce((acc, col) => ({ ...acc, [col.id]: true }), {});
+        const defaultWidths = defaults.reduce((acc, col) => ({ ...acc, [col.id]: col.width }), {});
+        let nextOrder = defaultOrder;
+        let nextVisibility = defaultVisibility;
+        let nextWidths = defaultWidths;
+
+        try {
+            const raw = window.localStorage.getItem(tableColumnsStorageKey);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                const validIds = new Set(defaultOrder);
+                const loadedOrder = Array.isArray(parsed.order) ? parsed.order.filter((id) => validIds.has(id)) : [];
+                nextOrder = [...loadedOrder, ...defaultOrder.filter((id) => !loadedOrder.includes(id))];
+                if (parsed.visibility && typeof parsed.visibility === 'object') {
+                    nextVisibility = { ...defaultVisibility };
+                    defaultOrder.forEach((id) => {
+                        if (Object.prototype.hasOwnProperty.call(parsed.visibility, id)) {
+                            nextVisibility[id] = Boolean(parsed.visibility[id]);
+                        }
+                    });
+                }
+                if (parsed.widths && typeof parsed.widths === 'object') {
+                    nextWidths = { ...defaultWidths };
+                    defaults.forEach((col) => {
+                        const candidate = Number(parsed.widths[col.id]);
+                        if (Number.isFinite(candidate)) {
+                            nextWidths[col.id] = Math.max(col.minWidth, candidate);
+                        }
+                    });
+                }
+            }
+        } catch {
+            // Ignore malformed table preferences
+        }
+
+        setTableColumnOrder(nextOrder);
+        setTableColumnVisibility(nextVisibility);
+        setTableColumnWidths(nextWidths);
+    }, [tableColumnsStorageKey, tableColumnDefs]);
+
+    useEffect(() => {
+        if (tableColumnOrder.length === 0) return;
+        const payload = {
+            order: tableColumnOrder,
+            visibility: tableColumnVisibility,
+            widths: tableColumnWidths,
+        };
+        window.localStorage.setItem(tableColumnsStorageKey, JSON.stringify(payload));
+    }, [tableColumnsStorageKey, tableColumnOrder, tableColumnVisibility, tableColumnWidths]);
+
+    const orderedTableColumns = useMemo(() => {
+        if (tableColumnOrder.length === 0) return tableColumnDefs;
+        const map = new Map(tableColumnDefs.map((col) => [col.id, col]));
+        return tableColumnOrder.map((id) => map.get(id)).filter(Boolean);
+    }, [tableColumnDefs, tableColumnOrder]);
+
+    const visibleTableColumns = useMemo(
+        () => orderedTableColumns.filter((col) => tableColumnVisibility[col.id] !== false),
+        [orderedTableColumns, tableColumnVisibility]
+    );
+
+    const gridTemplate = useMemo(() => {
+        const dataCols = visibleTableColumns.map(
+            (col) => `${Math.max(col.minWidth, tableColumnWidths[col.id] ?? col.width)}px`
+        );
+        return `40px 40px ${dataCols.join(' ')}`;
+    }, [visibleTableColumns, tableColumnWidths]);
+
+    const tableMinWidth = useMemo(() => {
+        const fixed = 80;
+        const totalColumns = 2 + visibleTableColumns.length;
+        const gapPx = Math.max(0, totalColumns - 1) * 16; // gap-4
+        const colsWidth = visibleTableColumns.reduce(
+            (sum, col) => sum + Math.max(col.minWidth, tableColumnWidths[col.id] ?? col.width),
+            0
+        );
+        return Math.max(980, fixed + colsWidth + gapPx);
+    }, [visibleTableColumns, tableColumnWidths]);
 
     const toggleSelection = (id, index, multiSelect, rangeSelect) => {
         const newSelection = new Set(multiSelect ? selectedItems : []);
@@ -694,6 +809,44 @@ const CategoryItemsTable = ({ category, onBack }) => {
         else setSelectedItems(new Set(items.map(f => f.id)));
     };
 
+    const beginResize = (event, column) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const startX = event.clientX;
+        const initialWidth = Math.max(column.minWidth, tableColumnWidths[column.id] ?? column.width);
+        resizeStateRef.current = { columnId: column.id, startX, initialWidth, minWidth: column.minWidth };
+
+        const onMouseMove = (moveEvent) => {
+            if (!resizeStateRef.current) return;
+            const nextWidth = resizeStateRef.current.initialWidth + (moveEvent.clientX - resizeStateRef.current.startX);
+            setTableColumnWidths((prev) => ({
+                ...prev,
+                [resizeStateRef.current.columnId]: Math.max(resizeStateRef.current.minWidth, nextWidth),
+            }));
+        };
+        const onMouseUp = () => {
+            resizeStateRef.current = null;
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', onMouseUp);
+        };
+
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+    };
+
+    const handleColumnDrop = (targetId) => {
+        if (!draggingColumnId || draggingColumnId === targetId) return;
+        setTableColumnOrder((prev) => {
+            const withoutDragged = prev.filter((id) => id !== draggingColumnId);
+            const targetIndex = withoutDragged.indexOf(targetId);
+            if (targetIndex < 0) return prev;
+            const next = [...withoutDragged];
+            next.splice(targetIndex, 0, draggingColumnId);
+            return next;
+        });
+        setDraggingColumnId(null);
+    };
+
     const getSelectedObjects = () => items.filter(i => selectedItems.has(i.id));
     const singleSelectedItem = selectedItems.size === 1
         ? items.find((i) => i.id === Array.from(selectedItems)[0]) || null
@@ -705,6 +858,143 @@ const CategoryItemsTable = ({ category, onBack }) => {
         ...item,
         item_id: item.item_id || item.id,
     }));
+
+    const renderTableCell = (item, column) => {
+        if (column.id === 'name') {
+            return <div className="min-w-0 truncate font-medium" title={item.name}>{item.name}</div>;
+        }
+        if (column.id === 'account') {
+            return (
+                <div className="flex items-center gap-1 text-sm text-foreground min-w-0">
+                    <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                        <User size={12} className="text-primary" />
+                    </div>
+                    <span className="truncate" title={getAccountName(item.account_id)}>
+                        {getAccountName(item.account_id)}
+                    </span>
+                </div>
+            );
+        }
+        if (column.id === 'size') {
+            return <div className="text-right text-sm text-muted-foreground tabular-nums">{formatSize(item.size)}</div>;
+        }
+        if (column.id === 'modified') {
+            return <div className="text-right text-sm text-muted-foreground tabular-nums">{formatDate(item.modified_at)}</div>;
+        }
+        if (column.id === 'path') {
+            return <div className="text-right text-xs text-muted-foreground truncate" title={item.path}>{item.path}</div>;
+        }
+        if (column.id.startsWith('attr:')) {
+            const attr = attributes.find((candidate) => `attr:${candidate.id}` === column.id);
+            if (!attr) return null;
+            const isEditing = editingCell?.itemId === item.id && editingCell?.attrId === attr.id;
+            const cellKey = `${item.id}:${attr.id}`;
+            const isSaving = savingCellKey === cellKey;
+            const readOnly = isReadOnlyAttribute(attr);
+            const displayValue = getAttributeValue(item, attr);
+
+            return (
+                <div
+                    className={`text-sm text-foreground min-w-0 ${readOnly ? '' : 'cursor-text'}`}
+                    onClick={(e) => startInlineEdit(item, attr, e)}
+                    title={readOnly ? `${displayValue} (read-only)` : String(displayValue)}
+                >
+                    {isEditing ? (
+                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                            {attr.data_type === 'select' ? (
+                                <select
+                                    className="w-full border rounded px-2 py-1 text-xs bg-background"
+                                    value={editingValue}
+                                    onChange={(e) => setEditingValue(e.target.value)}
+                                >
+                                    <option value="">-</option>
+                                    {getSelectOptions(attr.options).map((option) => (
+                                        <option key={option} value={option}>
+                                            {option}
+                                        </option>
+                                    ))}
+                                </select>
+                            ) : attr.data_type === 'boolean' ? (
+                                <select
+                                    className="w-full border rounded px-2 py-1 text-xs bg-background"
+                                    value={editingValue}
+                                    onChange={(e) => setEditingValue(e.target.value)}
+                                >
+                                    <option value="">-</option>
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            ) : attr.data_type === 'tags' ? (
+                                <input
+                                    type="text"
+                                    value={editingValue}
+                                    onChange={(e) => setEditingValue(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            saveInlineEdit(item, attr);
+                                        }
+                                        if (e.key === 'Escape') {
+                                            e.preventDefault();
+                                            cancelInlineEdit();
+                                        }
+                                    }}
+                                    placeholder="tag1, tag2, tag3"
+                                    className="w-full border rounded px-2 py-1 text-xs bg-background"
+                                    autoFocus
+                                />
+                            ) : (
+                                <input
+                                    type={attr.data_type === 'number' ? 'number' : attr.data_type === 'date' ? 'date' : 'text'}
+                                    value={editingValue}
+                                    onChange={(e) => setEditingValue(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            saveInlineEdit(item, attr);
+                                        }
+                                        if (e.key === 'Escape') {
+                                            e.preventDefault();
+                                            cancelInlineEdit();
+                                        }
+                                    }}
+                                    className="w-full border rounded px-2 py-1 text-xs bg-background"
+                                    autoFocus
+                                />
+                            )}
+                            <button
+                                type="button"
+                                className="p-1 rounded hover:bg-accent disabled:opacity-50"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    saveInlineEdit(item, attr);
+                                }}
+                                disabled={isSaving}
+                                title="Confirm"
+                            >
+                                {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                            </button>
+                            <button
+                                type="button"
+                                className="p-1 rounded hover:bg-accent disabled:opacity-50"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    cancelInlineEdit();
+                                }}
+                                disabled={isSaving}
+                                title="Cancel"
+                            >
+                                <X size={12} />
+                            </button>
+                        </div>
+                    ) : (
+                        <div className={`truncate ${readOnly ? 'text-muted-foreground' : ''}`}>{displayValue}</div>
+                    )}
+                </div>
+            );
+        }
+        return null;
+    };
 
     const handleDownload = async () => {
         const selectedFiles = getSelectedObjects().filter((item) => item.item_type === 'file');
@@ -799,7 +1089,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
     return (
         <>
             {/* Header */}
-            <div className="page-header flex flex-wrap items-center justify-between gap-3">
+            <div className="page-header relative z-[80] flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                     <button
                         onClick={onBack}
@@ -890,6 +1180,41 @@ const CategoryItemsTable = ({ category, onBack }) => {
                         }}
                         currentFilters={filters}
                     />
+                    {viewMode === 'table' && (
+                        <div className="relative z-[140]" ref={columnsMenuRef}>
+                            <button
+                                onClick={() => setColumnsMenuOpen((prev) => !prev)}
+                                className="flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium hover:bg-accent"
+                            >
+                                <Columns3 size={16} />
+                                Columns
+                            </button>
+                            {columnsMenuOpen && (
+                                <div className="absolute right-0 top-full mt-2 w-60 bg-popover border rounded-md shadow-lg p-2 z-[220] space-y-1 max-h-72 overflow-auto">
+                                    {orderedTableColumns.map((column) => (
+                                        <label key={column.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent cursor-pointer text-sm">
+                                            <input
+                                                type="checkbox"
+                                                checked={tableColumnVisibility[column.id] !== false}
+                                                onChange={(event) => {
+                                                    const checked = event.target.checked;
+                                                    setTableColumnVisibility((prev) => {
+                                                        const next = { ...prev, [column.id]: checked };
+                                                        const visibleCount = Object.values(next).filter(Boolean).length;
+                                                        if (visibleCount === 0) {
+                                                            next[column.id] = true;
+                                                        }
+                                                        return next;
+                                                    });
+                                                }}
+                                            />
+                                            <span className="truncate">{column.label}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -1184,7 +1509,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                     {/* Table Header */}
                                     <div
                                         className="gap-4 p-3 border-b border-border/70 bg-muted/45 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center sticky top-0 z-10"
-                                        style={{ display: 'grid', gridTemplateColumns: gridTemplate }}
+                                        style={{ display: 'grid', gridTemplateColumns: gridTemplate, minWidth: `${tableMinWidth}px` }}
                                     >
                                         <div className="flex justify-center">
                                             <button onClick={toggleSelectAll}>
@@ -1192,24 +1517,30 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                             </button>
                                         </div>
                                         <div></div>
-                                        <div className="cursor-pointer flex items-center gap-1 hover:text-foreground" onClick={() => handleSort('name')}>
-                                            Name {renderSortIcon('name')}
-                                        </div>
-                                        <div className="flex items-center gap-1 hover:text-foreground">
-                                            Account
-                                        </div>
-                                        <div className="cursor-pointer flex items-center gap-1 hover:text-foreground justify-end" onClick={() => handleSort('size')}>
-                                            Size {renderSortIcon('size')}
-                                        </div>
-                                        {attributes.map(attr => (
-                                            <div key={attr.id} className="flex items-center gap-1 truncate" title={attr.name}>
-                                                {attr.name}
+                                        {visibleTableColumns.map((column) => (
+                                            <div
+                                                key={column.id}
+                                                draggable
+                                                onDragStart={() => setDraggingColumnId(column.id)}
+                                                onDragOver={(event) => event.preventDefault()}
+                                                onDrop={() => handleColumnDrop(column.id)}
+                                                className={`relative flex items-center gap-1 truncate ${column.align === 'right' ? 'justify-end text-right' : ''}`}
+                                            >
+                                                <button
+                                                    type="button"
+                                                    className={`inline-flex items-center gap-1 hover:text-foreground ${column.sortKey ? '' : 'cursor-default'}`}
+                                                    onClick={() => column.sortKey && handleSort(column.sortKey)}
+                                                >
+                                                    <GripVertical size={12} className="opacity-45" />
+                                                    {column.label}
+                                                    {column.sortKey ? renderSortIcon(column.sortKey) : null}
+                                                </button>
+                                                <div
+                                                    className="absolute right-[-8px] top-0 h-full w-3 cursor-col-resize"
+                                                    onMouseDown={(event) => beginResize(event, column)}
+                                                />
                                             </div>
                                         ))}
-                                        <div className="cursor-pointer flex items-center gap-1 hover:text-foreground justify-end" onClick={() => handleSort('modified_at')}>
-                                            Modified {renderSortIcon('modified_at')}
-                                        </div>
-                                        <div className="text-right">Path</div>
                                     </div>
 
                                     {/* Table Rows */}
@@ -1221,7 +1552,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                 <div
                                                     key={item.id}
                                                     className={`gap-4 p-3 items-center hover:bg-accent/35 transition-colors ${isSelected ? 'bg-muted/45' : ''}`}
-                                                    style={{ display: 'grid', gridTemplateColumns: gridTemplate }}
+                                                    style={{ display: 'grid', gridTemplateColumns: gridTemplate, minWidth: `${tableMinWidth}px` }}
                                                     onClick={(e) => toggleSelection(item.id, index, !e.altKey, e.shiftKey)}
                                                 >
                                                     <div className="flex justify-center">
@@ -1236,134 +1567,11 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                             <File className="text-gray-400" size={20} />
                                                         )}
                                                     </div>
-                                                    <div className="min-w-0 truncate font-medium" title={item.name}>
-                                                        {item.name}
-                                                    </div>
-                                                    <div className="flex items-center gap-1 text-sm text-foreground">
-                                                        <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                                                            <User size={12} className="text-primary" />
+                                                    {visibleTableColumns.map((column) => (
+                                                        <div key={column.id}>
+                                                            {renderTableCell(item, column)}
                                                         </div>
-                                                        <span className="truncate" title={getAccountName(item.account_id)}>
-                                                            {getAccountName(item.account_id)}
-                                                        </span>
-                                                    </div>
-                                                    <div className="text-right text-sm text-muted-foreground tabular-nums">
-                                                        {formatSize(item.size)}
-                                                    </div>
-                                                    {attributes.map((attr) => {
-                                                        const isEditing = editingCell?.itemId === item.id && editingCell?.attrId === attr.id;
-                                                        const cellKey = `${item.id}:${attr.id}`;
-                                                        const isSaving = savingCellKey === cellKey;
-                                                        const readOnly = isReadOnlyAttribute(attr);
-                                                        const displayValue = getAttributeValue(item, attr);
-
-                                                        return (
-                                                            <div
-                                                                key={attr.id}
-                                                                className={`text-sm text-foreground min-w-0 ${readOnly ? '' : 'cursor-text'}`}
-                                                                onClick={(e) => startInlineEdit(item, attr, e)}
-                                                                title={readOnly ? `${displayValue} (read-only)` : String(displayValue)}
-                                                            >
-                                                                {isEditing ? (
-                                                                    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                                                                        {attr.data_type === 'select' ? (
-                                                                            <select
-                                                                                className="w-full border rounded px-2 py-1 text-xs bg-background"
-                                                                                value={editingValue}
-                                                                                onChange={(e) => setEditingValue(e.target.value)}
-                                                                            >
-                                                                                <option value="">-</option>
-                                                                                {getSelectOptions(attr.options).map((option) => (
-                                                                                    <option key={option} value={option}>
-                                                                                        {option}
-                                                                                    </option>
-                                                                                ))}
-                                                                            </select>
-                                                                        ) : attr.data_type === 'boolean' ? (
-                                                                            <select
-                                                                                className="w-full border rounded px-2 py-1 text-xs bg-background"
-                                                                                value={editingValue}
-                                                                                onChange={(e) => setEditingValue(e.target.value)}
-                                                                            >
-                                                                                <option value="">-</option>
-                                                                                <option value="true">Yes</option>
-                                                                                <option value="false">No</option>
-                                                                            </select>
-                                                                        ) : attr.data_type === 'tags' ? (
-                                                                            <input
-                                                                                type="text"
-                                                                                value={editingValue}
-                                                                                onChange={(e) => setEditingValue(e.target.value)}
-                                                                                onKeyDown={(e) => {
-                                                                                    if (e.key === 'Enter') {
-                                                                                        e.preventDefault();
-                                                                                        saveInlineEdit(item, attr);
-                                                                                    }
-                                                                                    if (e.key === 'Escape') {
-                                                                                        e.preventDefault();
-                                                                                        cancelInlineEdit();
-                                                                                    }
-                                                                                }}
-                                                                                placeholder="tag1, tag2, tag3"
-                                                                                className="w-full border rounded px-2 py-1 text-xs bg-background"
-                                                                                autoFocus
-                                                                            />
-                                                                        ) : (
-                                                                            <input
-                                                                                type={attr.data_type === 'number' ? 'number' : attr.data_type === 'date' ? 'date' : 'text'}
-                                                                                value={editingValue}
-                                                                                onChange={(e) => setEditingValue(e.target.value)}
-                                                                                onKeyDown={(e) => {
-                                                                                    if (e.key === 'Enter') {
-                                                                                        e.preventDefault();
-                                                                                        saveInlineEdit(item, attr);
-                                                                                    }
-                                                                                    if (e.key === 'Escape') {
-                                                                                        e.preventDefault();
-                                                                                        cancelInlineEdit();
-                                                                                    }
-                                                                                }}
-                                                                                className="w-full border rounded px-2 py-1 text-xs bg-background"
-                                                                                autoFocus
-                                                                            />
-                                                                        )}
-                                                                        <button
-                                                                            type="button"
-                                                                            className="p-1 rounded hover:bg-accent disabled:opacity-50"
-                                                                            onClick={(e) => {
-                                                                                e.stopPropagation();
-                                                                                saveInlineEdit(item, attr);
-                                                                            }}
-                                                                            disabled={isSaving}
-                                                                            title="Confirm"
-                                                                        >
-                                                                            {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-                                                                        </button>
-                                                                        <button
-                                                                            type="button"
-                                                                            className="p-1 rounded hover:bg-accent disabled:opacity-50"
-                                                                            onClick={(e) => {
-                                                                                e.stopPropagation();
-                                                                                cancelInlineEdit();
-                                                                            }}
-                                                                            disabled={isSaving}
-                                                                            title="Cancel"
-                                                                        >
-                                                                            <X size={12} />
-                                                                        </button>
-                                                                    </div>
-                                                                ) : (
-                                                                    <div className={`truncate ${readOnly ? 'text-muted-foreground' : ''}`}>{displayValue}</div>
-                                                                )}
-                                                            </div>
-                                                        );
-                                                    })}
-                                                    <div className="text-right text-sm text-muted-foreground tabular-nums">
-                                                        {formatDate(item.modified_at)}
-                                                    </div>
-                                                    <div className="text-right text-xs text-muted-foreground truncate" title={item.path}>
-                                                        {item.path}
-                                                    </div>
+                                                    ))}
                                                 </div>
                                             );
                                         })}
@@ -1561,7 +1769,7 @@ export default function MetadataManager() {
         () => (
             libraries.length > 0
                 ? libraries
-                : [{ key: 'comics_core', name: 'Comics Core', description: 'Managed comics metadata schema.', is_active: false }]
+                : [{ key: 'comics_core', name: 'Comics', description: 'Managed comics metadata schema.', is_active: false }]
         ),
         [libraries]
     );
@@ -1569,12 +1777,13 @@ export default function MetadataManager() {
     const toggleLibrary = async (library) => {
         try {
             setTogglingLibraryKey(library.key);
+            const libraryName = getLibraryDisplayName(library);
             if (library.is_active) {
                 await metadataService.deactivateMetadataLibrary(library.key);
-                showToast(`${library.name} disabled`, 'success');
+                showToast(`${libraryName} disabled`, 'success');
             } else {
                 await metadataService.activateMetadataLibrary(library.key);
-                showToast(`${library.name} enabled`, 'success');
+                showToast(`${libraryName} enabled`, 'success');
             }
             await Promise.all([loadLibraries(), loadCategories()]);
         } catch (error) {
@@ -1808,7 +2017,7 @@ export default function MetadataManager() {
                                                 <BookOpen size={16} />
                                             </div>
                                             <div className="min-w-0">
-                                                <div className="font-semibold">{library.name}</div>
+                                                <div className="font-semibold">{getLibraryDisplayName(library)}</div>
                                                 <div className="text-xs text-muted-foreground">{library.key}</div>
                                                 {library.description && (
                                                     <p className="text-sm text-muted-foreground mt-1">{library.description}</p>
@@ -2212,4 +2421,3 @@ export default function MetadataManager() {
         </div>
     );
 }
-

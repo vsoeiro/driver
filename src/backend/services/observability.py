@@ -21,6 +21,7 @@ from backend.schemas.admin import (
 )
 from backend.services.app_settings import AppSettingsService
 from backend.services.job_queue import get_job_queue
+from backend.services.provider_request_usage import provider_request_usage_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +257,7 @@ class ObservabilityService:
             )
             for row in dead_letter_rows.scalars().all()
         ]
+        provider_request_usage = await provider_request_usage_tracker.snapshot(now=now)
 
         return ObservabilitySnapshot(
             generated_at=now,
@@ -288,6 +290,7 @@ class ObservabilityService:
             recent_alerts=alerts,
             integration_health=integration_health,
             dead_letter_jobs=dead_letter_jobs,
+            provider_request_usage=provider_request_usage,
         )
 
     @staticmethod

@@ -14,7 +14,7 @@ import {
 } from '../utils/metadata';
 import {
     File, Folder, FolderOpen, Search, Filter, Database, CheckSquare, Square,
-    Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, X, Trash2, ChevronDown, BookOpen, Pencil,
+    Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, X, Trash2, ChevronDown, BookOpen, Pencil, Columns3, GripVertical,
     Download, ArrowRightLeft, XCircle
 } from 'lucide-react';
 import Modal from '../components/Modal';
@@ -23,6 +23,15 @@ import MetadataModal from '../components/MetadataModal';
 import MoveModal from '../components/MoveModal';
 
 const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'cbw', 'pdf', 'epub', 'cbr', 'rar', 'cb7', '7z', 'cbt', 'tar']);
+const ALL_FILES_COLUMNS_STORAGE_KEY = 'driver-all-files-columns-v1';
+const ALL_FILES_COLUMNS = [
+    { id: 'name', label: 'Name', width: 280, minWidth: 180, sortKey: 'name' },
+    { id: 'account', label: 'Account', width: 190, minWidth: 150, sortKey: null },
+    { id: 'size', label: 'Size', width: 110, minWidth: 90, sortKey: 'size', align: 'right' },
+    { id: 'category', label: 'Category', width: 110, minWidth: 90, sortKey: null, align: 'right' },
+    { id: 'modified', label: 'Modified', width: 160, minWidth: 130, sortKey: 'modified_at', align: 'right' },
+    { id: 'path', label: 'Path', width: 280, minWidth: 150, sortKey: null, align: 'right' },
+];
 
 // Filter Component
 const FilterBar = ({ onFilter, filters, accounts, categories }) => {
@@ -564,6 +573,7 @@ export default function AllFiles() {
     const [selectedItems, setSelectedItems] = useState(new Set());
     const [lastSelectedIndex, setLastSelectedIndex] = useState(null);
     const [metaCategories, setMetaCategories] = useState([]);
+    const [isComicsLibraryActive, setIsComicsLibraryActive] = useState(false);
 
     const [batchModalOpen, setBatchModalOpen] = useState(false);
     const [metadataModalOpen, setMetadataModalOpen] = useState(false);
@@ -579,12 +589,30 @@ export default function AllFiles() {
     const [renameValue, setRenameValue] = useState('');
     const [renameSaving, setRenameSaving] = useState(false);
     const metadataMenuRef = useRef(null);
+    const [columnsMenuOpen, setColumnsMenuOpen] = useState(false);
+    const columnsMenuRef = useRef(null);
+    const resizeStateRef = useRef(null);
+    const [draggingColumnId, setDraggingColumnId] = useState(null);
+    const [columnOrder, setColumnOrder] = useState(() => ALL_FILES_COLUMNS.map((col) => col.id));
+    const [columnVisibility, setColumnVisibility] = useState(() =>
+        ALL_FILES_COLUMNS.reduce((acc, col) => ({ ...acc, [col.id]: true }), {})
+    );
+    const [columnWidths, setColumnWidths] = useState(() =>
+        ALL_FILES_COLUMNS.reduce((acc, col) => ({ ...acc, [col.id]: col.width }), {})
+    );
 
     const { showToast } = useToast();
 
     useEffect(() => {
         accountsService.getAccounts().then(setAccounts).catch(console.error);
         metadataService.listCategories().then(setMetaCategories).catch(console.error);
+        metadataService
+            .listMetadataLibraries()
+            .then((rows) => {
+                const comicsLibrary = (rows || []).find((library) => library.key === 'comics_core');
+                setIsComicsLibraryActive(Boolean(comicsLibrary?.is_active));
+            })
+            .catch(() => setIsComicsLibraryActive(false));
     }, []);
 
     useEffect(() => {
@@ -592,11 +620,65 @@ export default function AllFiles() {
             if (metadataMenuRef.current && !metadataMenuRef.current.contains(event.target)) {
                 setMetadataMenuOpen(false);
             }
+            if (columnsMenuRef.current && !columnsMenuRef.current.contains(event.target)) {
+                setColumnsMenuOpen(false);
+            }
         };
 
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
+
+    useEffect(() => {
+        try {
+            const raw = window.localStorage.getItem(ALL_FILES_COLUMNS_STORAGE_KEY);
+            if (!raw) return;
+            const parsed = JSON.parse(raw);
+            const validIds = new Set(ALL_FILES_COLUMNS.map((col) => col.id));
+            const nextOrder = Array.isArray(parsed.order)
+                ? parsed.order.filter((id) => validIds.has(id))
+                : [];
+            const mergedOrder = [
+                ...nextOrder,
+                ...ALL_FILES_COLUMNS.map((col) => col.id).filter((id) => !nextOrder.includes(id)),
+            ];
+            setColumnOrder(mergedOrder);
+            if (parsed.visibility && typeof parsed.visibility === 'object') {
+                setColumnVisibility((prev) => {
+                    const next = { ...prev };
+                    ALL_FILES_COLUMNS.forEach((col) => {
+                        if (Object.prototype.hasOwnProperty.call(parsed.visibility, col.id)) {
+                            next[col.id] = Boolean(parsed.visibility[col.id]);
+                        }
+                    });
+                    return next;
+                });
+            }
+            if (parsed.widths && typeof parsed.widths === 'object') {
+                setColumnWidths((prev) => {
+                    const next = { ...prev };
+                    ALL_FILES_COLUMNS.forEach((col) => {
+                        const candidate = Number(parsed.widths[col.id]);
+                        if (Number.isFinite(candidate)) {
+                            next[col.id] = Math.max(col.minWidth, candidate);
+                        }
+                    });
+                    return next;
+                });
+            }
+        } catch {
+            // Ignore malformed preferences
+        }
+    }, []);
+
+    useEffect(() => {
+        const payload = {
+            order: columnOrder,
+            visibility: columnVisibility,
+            widths: columnWidths,
+        };
+        window.localStorage.setItem(ALL_FILES_COLUMNS_STORAGE_KEY, JSON.stringify(payload));
+    }, [columnOrder, columnVisibility, columnWidths]);
 
     const fetchItems = useCallback(async (overridePage) => {
         setLoading(true);
@@ -705,12 +787,116 @@ export default function AllFiles() {
         });
     }, [selectedItems, items]);
 
+    const orderedColumns = useMemo(() => {
+        const map = new Map(ALL_FILES_COLUMNS.map((col) => [col.id, col]));
+        return columnOrder.map((id) => map.get(id)).filter(Boolean);
+    }, [columnOrder]);
+
+    const visibleColumns = useMemo(
+        () => orderedColumns.filter((col) => columnVisibility[col.id] !== false),
+        [orderedColumns, columnVisibility]
+    );
+
+    const dataGridTemplate = useMemo(() => {
+        const dynamicCols = visibleColumns.map((col) => `${Math.max(col.minWidth, columnWidths[col.id] ?? col.width)}px`);
+        return `40px 40px ${dynamicCols.join(' ')}`;
+    }, [visibleColumns, columnWidths]);
+
+    const tableMinWidth = useMemo(() => {
+        const base = 80;
+        const dynamic = visibleColumns.reduce(
+            (sum, col) => sum + Math.max(col.minWidth, columnWidths[col.id] ?? col.width),
+            0
+        );
+        return base + dynamic;
+    }, [visibleColumns, columnWidths]);
+
+    const beginResize = (event, column) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const startX = event.clientX;
+        const initialWidth = Math.max(column.minWidth, columnWidths[column.id] ?? column.width);
+        resizeStateRef.current = { columnId: column.id, startX, initialWidth, minWidth: column.minWidth };
+
+        const onMouseMove = (moveEvent) => {
+            if (!resizeStateRef.current) return;
+            const nextWidth = resizeStateRef.current.initialWidth + (moveEvent.clientX - resizeStateRef.current.startX);
+            setColumnWidths((prev) => ({
+                ...prev,
+                [resizeStateRef.current.columnId]: Math.max(resizeStateRef.current.minWidth, nextWidth),
+            }));
+        };
+        const onMouseUp = () => {
+            resizeStateRef.current = null;
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', onMouseUp);
+        };
+
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+    };
+
+    const handleColumnDrop = (targetId) => {
+        if (!draggingColumnId || draggingColumnId === targetId) return;
+        setColumnOrder((prev) => {
+            const withoutDragged = prev.filter((id) => id !== draggingColumnId);
+            const targetIndex = withoutDragged.indexOf(targetId);
+            if (targetIndex < 0) return prev;
+            const next = [...withoutDragged];
+            next.splice(targetIndex, 0, draggingColumnId);
+            return next;
+        });
+        setDraggingColumnId(null);
+    };
+
     const getAccountName = (accountId) => {
         const acc = accounts.find(a => a.id === accountId);
         return acc ? acc.email : (accountId ? accountId.slice(0, 8) : '-');
     };
 
     const getAccountById = (accountId) => accounts.find((a) => a.id === accountId);
+
+    const renderColumnCell = (item, column) => {
+        switch (column.id) {
+            case 'name':
+                return (
+                    <div className="min-w-0 truncate font-medium" title={item.name}>
+                        {item.name}
+                    </div>
+                );
+            case 'account':
+                return (
+                    <div className="flex items-center gap-1 text-sm text-foreground min-w-0">
+                        <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                            <ProviderIcon provider={getAccountById(item.account_id)?.provider} className="w-3 h-3" />
+                        </div>
+                        <span className="truncate" title={getAccountName(item.account_id)}>
+                            {getAccountName(item.account_id)}
+                        </span>
+                    </div>
+                );
+            case 'size':
+                return <div className="text-right text-sm text-muted-foreground tabular-nums">{formatSize(item.size ?? 0)}</div>;
+            case 'category':
+                return (
+                    <div className="text-right text-sm text-muted-foreground truncate">
+                        {item.metadata
+                            ? (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800" title={item.metadata.category_name}>
+                                    {item.metadata.category_name || 'N/A'}
+                                </span>
+                            )
+                            : '-'}
+                    </div>
+                );
+            case 'modified':
+                return <div className="text-right text-sm text-muted-foreground tabular-nums">{formatDate(item.modified_at)}</div>;
+            case 'path':
+                return <div className="text-right text-xs text-muted-foreground truncate" title={item.path}>{item.path}</div>;
+            default:
+                return null;
+        }
+    };
 
     const handleFolderClick = (item) => {
         const folderPath = item.path || `/${item.name}`;
@@ -726,6 +912,7 @@ export default function AllFiles() {
     };
 
     const executeMapComics = async () => {
+        if (!isComicsLibraryActive) return;
         if (selectedItems.size === 0) return;
         if (!canMapComics) {
             showToast('Map Comics is only available for folders or files with supported extensions (CBZ, ZIP, CBW, PDF, EPUB, CBR, RAR, CB7, 7Z, CBT, TAR).', 'error');
@@ -831,6 +1018,7 @@ export default function AllFiles() {
     };
 
     const executeMapLibraryComics = async () => {
+        if (!isComicsLibraryActive) return;
         setMapLibraryConfirmOpen(true);
     };
 
@@ -928,15 +1116,51 @@ export default function AllFiles() {
                         />
                     </div>
                     <FilterBar onFilter={setFilters} filters={filters} accounts={accounts} categories={metaCategories} />
-                    <button
-                        onClick={executeMapLibraryComics}
-                        disabled={mapLibraryLoading}
-                        className="flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium hover:bg-accent disabled:opacity-50"
-                        title="Map all synced .cbr/.cbz items as comics"
-                    >
-                        {mapLibraryLoading ? <Loader2 size={16} className="animate-spin" /> : <BookOpen size={16} />}
-                        Map All Comics
-                    </button>
+                    <div className="relative" ref={columnsMenuRef}>
+                        <button
+                            onClick={() => setColumnsMenuOpen((prev) => !prev)}
+                            className="flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium hover:bg-accent"
+                            title="Choose columns"
+                        >
+                            <Columns3 size={16} />
+                            Columns
+                        </button>
+                        {columnsMenuOpen && (
+                            <div className="absolute right-0 top-full mt-2 w-56 bg-popover border rounded-md shadow-lg p-2 z-[120] space-y-1">
+                                {orderedColumns.map((column) => (
+                                    <label key={column.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent cursor-pointer text-sm">
+                                        <input
+                                            type="checkbox"
+                                            checked={columnVisibility[column.id] !== false}
+                                            onChange={(event) => {
+                                                const nextChecked = event.target.checked;
+                                                setColumnVisibility((prev) => {
+                                                    const next = { ...prev, [column.id]: nextChecked };
+                                                    const visibleCount = Object.values(next).filter(Boolean).length;
+                                                    if (visibleCount === 0) {
+                                                        next[column.id] = true;
+                                                    }
+                                                    return next;
+                                                });
+                                            }}
+                                        />
+                                        <span>{column.label}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                    {isComicsLibraryActive && (
+                        <button
+                            onClick={executeMapLibraryComics}
+                            disabled={mapLibraryLoading}
+                            className="flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium hover:bg-accent disabled:opacity-50"
+                            title="Map all synced .cbr/.cbz items as comics"
+                        >
+                            {mapLibraryLoading ? <Loader2 size={16} className="animate-spin" /> : <BookOpen size={16} />}
+                            Map All Comics
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -1010,14 +1234,16 @@ export default function AllFiles() {
                                     >
                                         <XCircle size={14} /> Remove Metadata
                                     </button>
-                                    <button
-                                        onClick={executeMapComics}
-                                        disabled={!canMapComics || actionLoading}
-                                        className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
-                                    >
-                                        {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
-                                        Map Comics
-                                    </button>
+                                    {isComicsLibraryActive && (
+                                        <button
+                                            onClick={executeMapComics}
+                                            disabled={!canMapComics || actionLoading}
+                                            className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
+                                        >
+                                            {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
+                                            Map Comics
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -1084,87 +1310,83 @@ export default function AllFiles() {
                     </div>
                 ) : (
                     <div className="surface-card overflow-hidden select-none">
-                        {/* Header */}
-                        <div className="grid grid-cols-[40px_40px_2fr_170px_80px_80px_140px_minmax(150px,1fr)] gap-4 p-3 border-b border-border/70 bg-muted/45 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center sticky top-0 z-10">
-                            <div className="flex justify-center">
-                                <button onClick={toggleSelectAll}>
-                                    {selectedItems.size === items.length && items.length > 0 ? <CheckSquare size={16} /> : <Square size={16} />}
-                                </button>
-                            </div>
-                            <div></div>
-                            <div className="cursor-pointer flex items-center gap-1 hover:text-foreground" onClick={() => handleSort('name')}>
-                                Name {renderSortIcon('name')}
-                            </div>
-                            <div className="flex items-center gap-1 hover:text-foreground">
-                                Account
-                            </div>
-                            <div className="cursor-pointer flex items-center gap-1 hover:text-foreground justify-end" onClick={() => handleSort('size')}>
-                                Size {renderSortIcon('size')}
-                            </div>
-                            <div className="flex items-center gap-1 hover:text-foreground justify-end">
-                                Category
-                            </div>
-                            <div className="cursor-pointer flex items-center gap-1 hover:text-foreground justify-end" onClick={() => handleSort('modified_at')}>
-                                Modified {renderSortIcon('modified_at')}
-                            </div>
-                            <div className="text-right">Path</div>
-                        </div>
-
-                        {/* List */}
-                        <div className="divide-y">
-                            {items.map((item, index) => {
-                                const isFolder = item.item_type === 'folder';
-                                const isSelected = selectedItems.has(item.id);
-                                return (
+                        <div className="overflow-x-auto">
+                            {/* Header */}
+                            <div
+                                className="gap-4 p-3 border-b border-border/70 bg-muted/45 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center sticky top-0 z-10"
+                                style={{ display: 'grid', gridTemplateColumns: dataGridTemplate, minWidth: `${tableMinWidth}px` }}
+                            >
+                                <div className="flex justify-center">
+                                    <button onClick={toggleSelectAll}>
+                                        {selectedItems.size === items.length && items.length > 0 ? <CheckSquare size={16} /> : <Square size={16} />}
+                                    </button>
+                                </div>
+                                <div />
+                                {visibleColumns.map((column) => (
                                     <div
-                                        key={item.id}
-                                        className={`group grid grid-cols-[40px_40px_2fr_170px_80px_80px_140px_minmax(150px,1fr)] gap-4 p-3 items-center hover:bg-accent/35 transition-colors ${isSelected ? 'bg-muted/45' : ''}`}
-                                        onClick={(e) => toggleSelection(item.id, index, !e.altKey, e.shiftKey)}
+                                        key={column.id}
+                                        draggable
+                                        onDragStart={() => setDraggingColumnId(column.id)}
+                                        onDragOver={(event) => event.preventDefault()}
+                                        onDrop={() => handleColumnDrop(column.id)}
+                                        className={`relative flex items-center gap-1 ${column.align === 'right' ? 'justify-end text-right' : ''}`}
                                     >
-                                        <div className="flex justify-center">
-                                            <div className={`cursor-pointer ${isSelected ? 'text-primary' : 'text-muted-foreground/50'}`}>
-                                                {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
-                                            </div>
-                                        </div>
-                                        <div className="flex justify-center text-muted-foreground">
-                                            {isFolder ? (
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); handleFolderClick(item); }}
-                                                    className="hover:scale-110 transition-transform"
-                                                    title="Show files inside this folder"
-                                                >
-                                                    <Folder className="text-blue-500 fill-blue-500/20" size={20} />
-                                                </button>
-                                            ) : (
-                                                <File className="text-gray-400" size={20} />
-                                            )}
-                                        </div>
-                                        <div className="min-w-0 truncate font-medium">
-                                            {item.name}
-                                        </div>
-                                        <div className="flex items-center gap-1 text-sm text-foreground">
-                                            <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                                                <ProviderIcon provider={getAccountById(item.account_id)?.provider} className="w-3 h-3" />
-                                            </div>
-                                            <span className="truncate" title={getAccountName(item.account_id)}>
-                                                {getAccountName(item.account_id)}
-                                            </span>
-                                        </div>
-                                        <div className="text-right text-sm text-muted-foreground tabular-nums">
-                                            {formatSize(item.size ?? 0)}
-                                        </div>
-                                        <div className="text-right text-sm text-muted-foreground truncate">
-                                            {item.metadata ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800" title={item.metadata.category_name}>{item.metadata.category_name || 'N/A'}</span> : '-'}
-                                        </div>
-                                        <div className="text-right text-sm text-muted-foreground tabular-nums">
-                                            {formatDate(item.modified_at)}
-                                        </div>
-                                        <div className="text-right text-xs text-muted-foreground truncate" title={item.path}>
-                                            {item.path}
-                                        </div>
+                                        <button
+                                            type="button"
+                                            className={`inline-flex items-center gap-1 hover:text-foreground ${column.sortKey ? '' : 'cursor-default'}`}
+                                            onClick={() => column.sortKey && handleSort(column.sortKey)}
+                                        >
+                                            <GripVertical size={12} className="opacity-45" />
+                                            {column.label}
+                                            {column.sortKey ? renderSortIcon(column.sortKey) : null}
+                                        </button>
+                                        <div
+                                            className="absolute right-[-8px] top-0 h-full w-3 cursor-col-resize"
+                                            onMouseDown={(event) => beginResize(event, column)}
+                                        />
                                     </div>
-                                );
-                            })}
+                                ))}
+                            </div>
+
+                            {/* List */}
+                            <div className="divide-y">
+                                {items.map((item, index) => {
+                                    const isFolder = item.item_type === 'folder';
+                                    const isSelected = selectedItems.has(item.id);
+                                    return (
+                                        <div
+                                            key={item.id}
+                                            className={`group gap-4 p-3 items-center hover:bg-accent/35 transition-colors ${isSelected ? 'bg-muted/45' : ''}`}
+                                            style={{ display: 'grid', gridTemplateColumns: dataGridTemplate, minWidth: `${tableMinWidth}px` }}
+                                            onClick={(e) => toggleSelection(item.id, index, !e.altKey, e.shiftKey)}
+                                        >
+                                            <div className="flex justify-center">
+                                                <div className={`cursor-pointer ${isSelected ? 'text-primary' : 'text-muted-foreground/50'}`}>
+                                                    {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
+                                                </div>
+                                            </div>
+                                            <div className="flex justify-center text-muted-foreground">
+                                                {isFolder ? (
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleFolderClick(item); }}
+                                                        className="hover:scale-110 transition-transform"
+                                                        title="Show files inside this folder"
+                                                    >
+                                                        <Folder className="text-blue-500 fill-blue-500/20" size={20} />
+                                                    </button>
+                                                ) : (
+                                                    <File className="text-gray-400" size={20} />
+                                                )}
+                                            </div>
+                                            {visibleColumns.map((column) => (
+                                                <div key={column.id}>
+                                                    {renderColumnCell(item, column)}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    );
+                                })}
+                            </div>
                         </div>
                     </div>
                 )}
