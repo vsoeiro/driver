@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.application.metadata.repositories import ItemMetadataRepository
 from backend.common.error_items import ErrorItemsCollector
 from backend.db.models import (
     Item,
@@ -355,6 +356,11 @@ async def apply_metadata_recursive_handler(
 
     result = await session.execute(query)
     items = result.scalars().all()
+    metadata_repo = ItemMetadataRepository(session)
+    metadata_by_item_id = await metadata_repo.get_by_items(
+        account_id=account_id,
+        item_ids=[item.item_id for item in items],
+    )
 
     stats = {
         "total": len(items),
@@ -371,12 +377,7 @@ async def apply_metadata_recursive_handler(
 
     for item in items:
         try:
-            stmt = select(ItemMetadata).where(
-                ItemMetadata.account_id == account_id,
-                ItemMetadata.item_id == item.item_id,
-            )
-            meta_result = await session.execute(stmt)
-            existing = meta_result.scalar_one_or_none()
+            existing = metadata_by_item_id.get(item.item_id)
             merged_values = (
                 dict(existing.values) if existing and existing.values else {}
             )
@@ -399,7 +400,7 @@ async def apply_metadata_recursive_handler(
                     stats["created"] += 1
 
             batch_count += 1
-            if batch_count >= 50:
+            if batch_count >= 200:
                 await session.commit()
                 batch_count = 0
 

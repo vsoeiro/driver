@@ -12,11 +12,11 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.application.metadata.repositories import ItemMetadataRepository
 from backend.application.drive.transfer_service import DriveTransferService
 from backend.common.error_items import ErrorItemsCollector
 from backend.db.models import (
     Item,
-    ItemMetadata,
     LinkedAccount,
     MetadataAttribute,
     MetadataRule,
@@ -194,6 +194,13 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
     query = _build_rule_item_query(rule)
     result = await session.execute(query)
     items = result.scalars().all()
+    metadata_repo = ItemMetadataRepository(session)
+    metadata_by_item_id = await metadata_repo.get_by_items(
+        account_id=rule.account_id,
+        item_ids=[item.item_id for item in items],
+    ) if rule.account_id else await metadata_repo.get_by_account_item_pairs(
+        pairs=[(item.account_id, item.item_id) for item in items]
+    )
 
     await progress.set_total(len(items))
 
@@ -242,12 +249,12 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
         try:
             item_changed = False
             normalized_rule_values = rule.target_values or {}
-            current_metadata = await session.scalar(
-                select(ItemMetadata).where(
-                    ItemMetadata.account_id == item.account_id,
-                    ItemMetadata.item_id == item.item_id,
+            if rule.account_id:
+                current_metadata = metadata_by_item_id.get(item.item_id)
+            else:
+                current_metadata = metadata_by_item_id.get(
+                    (item.account_id, item.item_id)
                 )
-            )
 
             change = (
                 await apply_metadata_change(
@@ -400,7 +407,7 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
             else:
                 stats["skipped"] += 1
             batch_count += 1
-            if batch_count >= 50:
+            if batch_count >= 200:
                 await session.commit()
                 batch_count = 0
         except Exception as exc:

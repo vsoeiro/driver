@@ -1,7 +1,7 @@
 """Metadata API routes."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -12,16 +12,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.api.dependencies import get_session
+from backend.application.metadata.item_metadata_command_service import (
+    ItemMetadataCommandService,
+)
+from backend.application.metadata.rules_service import MetadataRulesService
+from backend.application.metadata.rule_preview_service import RulePreviewService
 from backend.application.metadata.series_query_service import SeriesQueryService
 from backend.db.models import (
     AppSetting,
-    Item,
     ItemMetadata,
     ItemMetadataHistory,
-    LinkedAccount,
     MetadataAttribute,
     MetadataCategory,
-    MetadataRule,
 )
 from backend.domain.errors import NotFoundError
 from backend.schemas.metadata import (
@@ -56,7 +58,6 @@ from backend.schemas.metadata import (
 from backend.schemas.metadata import (
     MetadataRule as MetadataRuleSchema,
 )
-from backend.security.token_manager import TokenManager
 from backend.services.metadata_libraries.service import (
     COMICS_LIBRARY_KEY,
     MetadataLibraryService,
@@ -66,7 +67,6 @@ from backend.services.metadata_versioning import (
     normalize_metadata_values,
     undo_metadata_batch,
 )
-from backend.services.providers.factory import build_drive_client
 
 router = APIRouter(prefix="/metadata", tags=["Metadata"])
 FORM_LAYOUTS_SETTING_KEY = "metadata_form_layouts_v1"
@@ -573,37 +573,7 @@ def _can_inline_edit_attribute(attribute: MetadataAttribute) -> bool:
 
 
 async def _validate_rule_configuration(session: AsyncSession, payload: dict) -> None:
-    if (
-        payload.get("apply_rename")
-        and not (payload.get("rename_template") or "").strip()
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="rename_template is required when apply_rename is true",
-        )
-
-    if payload.get("apply_move"):
-        destination_folder_id = (payload.get("destination_folder_id") or "").strip()
-        if not destination_folder_id:
-            raise HTTPException(
-                status_code=400,
-                detail="destination_folder_id is required when apply_move is true",
-            )
-
-    if (
-        not payload.get("apply_metadata", True)
-        and not payload.get("apply_rename")
-        and not payload.get("apply_move")
-    ):
-        raise HTTPException(
-            status_code=400, detail="At least one action must be enabled"
-        )
-
-    destination_account_id = payload.get("destination_account_id")
-    if destination_account_id:
-        linked = await session.get(LinkedAccount, destination_account_id)
-        if not linked:
-            raise HTTPException(status_code=404, detail="Destination account not found")
+    await MetadataRulesService(session).validate_rule_configuration(payload)
 
 
 # --- Categories ---
@@ -1024,123 +994,9 @@ async def update_item_metadata_attribute(
 async def upsert_item_metadata(
     metadata: ItemMetadataCreate, session: AsyncSession = Depends(get_session)
 ):
-    """Assign or update metadata for an item.
-
-    If metadata exists for this item, it updates it.
-    However, since we allow only one category per item, if the category changes,
-    we essentially replace the record.
-    """
-    # 1. Check if account exists
-    account = await session.get(LinkedAccount, metadata.account_id)
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-
-    # 2. Check if category exists
-    category = await session.get(MetadataCategory, metadata.category_id)
-    if not category:
-        raise HTTPException(status_code=404, detail="Category not found")
-    if not category.is_active:
-        raise HTTPException(status_code=400, detail="Category is inactive")
-
-    # 3. Upsert Item record
-    # We need to fetch details from Graph API to populate Item table
-    token_manager = TokenManager(session)
-    client = build_drive_client(account, token_manager)
-
-    try:
-        # Get item details and path so index state stays aligned before metadata write.
-        drive_item = await client.get_item_metadata(account, metadata.item_id)
-
-        # Check if Item exists
-        stmt = select(Item).where(
-            Item.account_id == account.id, Item.item_id == metadata.item_id
-        )
-        result = await session.execute(stmt)
-        db_item = result.scalar_one_or_none()
-
-        # Extension extraction
-        extension = None
-        if drive_item.item_type == "file" and "." in drive_item.name:
-            extension = drive_item.name.rsplit(".", 1)[-1].lower()
-
-        if db_item:
-            # Update
-            db_item.name = drive_item.name
-            db_item.size = drive_item.size
-            db_item.modified_at = drive_item.modified_at
-            db_item.last_synced_at = datetime.now(UTC)
-            db_item.mime_type = drive_item.mime_type
-            db_item.extension = extension
-            # parent_id and path are hard to update without fetching parent details.
-            # If we want to be thorough we could fetch parent.
-        else:
-            # Create
-            # Fetch path to get parent?
-            try:
-                path_data = await client.get_item_path(account, metadata.item_id)
-                # path_data: [{'id': 'root', 'name': 'Root'}, ..., {'id': 'parent_id', 'name': 'Parent'}, {'id': 'item_id', 'name': 'Item'}]
-                # Parent is the second to last item
-                parent_id = None
-                path_str = "/"
-
-                if len(path_data) >= 2:
-                    parent_id = path_data[-2]["id"]
-
-                # Construct path string
-                path_names = [
-                    p["name"]
-                    for p in path_data
-                    if p["name"] and p["name"].lower() != "root"
-                ]
-                path_str = "/" + "/".join(path_names)
-
-            except Exception:
-                parent_id = None
-                path_str = None
-
-            db_item = Item(
-                account_id=account.id,
-                item_id=metadata.item_id,
-                parent_id=parent_id,
-                name=drive_item.name,
-                path=path_str,
-                item_type=drive_item.item_type,
-                mime_type=drive_item.mime_type,
-                extension=extension,
-                size=drive_item.size,
-                created_at=drive_item.created_at,
-                modified_at=drive_item.modified_at,
-                last_synced_at=datetime.now(UTC),
-            )
-            session.add(db_item)
-
-    except Exception as e:
-        # Don't fail the metadata update just because item sync failed?
-        # User requested "always register the item", so maybe we should log error but proceed,
-        # or fail? Let's log and proceed to avoid blocking metadata save if Graph is flaky.
-        import logging
-
-        logger = logging.getLogger(__name__)
-        logger.error(f"Failed to sync Item record for {metadata.item_id}: {e}")
-
-    await apply_metadata_change(
-        session,
-        account_id=metadata.account_id,
-        item_id=metadata.item_id,
-        category_id=metadata.category_id,
-        values=normalize_metadata_values(metadata.values),
-    )
-    await session.commit()
-
-    query = select(ItemMetadata).where(
-        ItemMetadata.account_id == metadata.account_id,
-        ItemMetadata.item_id == metadata.item_id,
-    )
-    refreshed = await session.execute(query)
-    current = refreshed.scalar_one_or_none()
-    if not current:
-        raise HTTPException(status_code=500, detail="Failed to save metadata")
-    return current
+    """Assign or update metadata for an item."""
+    service = ItemMetadataCommandService(session)
+    return await service.upsert_item_metadata(metadata)
 
 
 @router.delete("/items/{account_id}/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1232,11 +1088,7 @@ async def undo_metadata_batch_route(
 @router.get("/rules", response_model=list[MetadataRuleSchema])
 async def list_metadata_rules(session: AsyncSession = Depends(get_session)):
     """List metadata rules by priority."""
-    stmt = select(MetadataRule).order_by(
-        MetadataRule.priority.asc(), MetadataRule.created_at.asc()
-    )
-    result = await session.execute(stmt)
-    return result.scalars().all()
+    return await MetadataRulesService(session).list_rules()
 
 
 @router.post(
@@ -1247,17 +1099,7 @@ async def create_metadata_rule(
     session: AsyncSession = Depends(get_session),
 ):
     """Create a metadata rule."""
-    category = await session.get(MetadataCategory, rule.target_category_id)
-    if not category:
-        raise HTTPException(status_code=404, detail="Category not found")
-
-    payload = rule.model_dump()
-    await _validate_rule_configuration(session, payload)
-    db_rule = MetadataRule(**payload)
-    session.add(db_rule)
-    await session.commit()
-    await session.refresh(db_rule)
-    return db_rule
+    return await MetadataRulesService(session).create_rule(rule)
 
 
 @router.patch("/rules/{rule_id}", response_model=MetadataRuleSchema)
@@ -1267,36 +1109,7 @@ async def update_metadata_rule(
     session: AsyncSession = Depends(get_session),
 ):
     """Update a metadata rule."""
-    db_rule = await session.get(MetadataRule, rule_id)
-    if not db_rule:
-        raise HTTPException(status_code=404, detail="Rule not found")
-
-    updates = rule.model_dump(exclude_unset=True)
-    if "target_category_id" in updates:
-        category = await session.get(MetadataCategory, updates["target_category_id"])
-        if not category:
-            raise HTTPException(status_code=404, detail="Category not found")
-
-    for key, value in updates.items():
-        setattr(db_rule, key, value)
-
-    effective_payload = {
-        "apply_metadata": db_rule.apply_metadata,
-        "apply_rename": db_rule.apply_rename,
-        "rename_template": db_rule.rename_template,
-        "apply_move": db_rule.apply_move,
-        "destination_account_id": db_rule.destination_account_id,
-        "destination_folder_id": db_rule.destination_folder_id,
-        "destination_path_template": db_rule.destination_path_template,
-    }
-    effective_payload.update(
-        {k: v for k, v in updates.items() if k in effective_payload}
-    )
-    await _validate_rule_configuration(session, effective_payload)
-
-    await session.commit()
-    await session.refresh(db_rule)
-    return db_rule
+    return await MetadataRulesService(session).update_rule(rule_id=rule_id, payload=rule)
 
 
 @router.delete("/rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1305,11 +1118,7 @@ async def delete_metadata_rule(
     session: AsyncSession = Depends(get_session),
 ):
     """Delete a metadata rule."""
-    db_rule = await session.get(MetadataRule, rule_id)
-    if not db_rule:
-        raise HTTPException(status_code=404, detail="Rule not found")
-    await session.delete(db_rule)
-    await session.commit()
+    await MetadataRulesService(session).delete_rule(rule_id)
 
 
 @router.post("/rules/preview", response_model=MetadataRulePreviewResponse)
@@ -1319,54 +1128,8 @@ async def preview_metadata_rule(
 ):
     """Preview how many items would be changed by a rule."""
     await _validate_rule_configuration(session, request.model_dump())
-    query = select(Item).where(Item.path.isnot(None))
-    if request.account_id:
-        query = query.where(Item.account_id == request.account_id)
-    if request.path_prefix:
-        prefix = request.path_prefix.rstrip("/")
-        query = query.where(Item.path.ilike(f"{prefix}/%"))
-    if request.path_contains:
-        query = query.where(Item.path.ilike(f"%{request.path_contains}%"))
-    if not request.include_folders:
-        query = query.where(Item.item_type == "file")
-
-    result = await session.execute(query)
-    items = result.scalars().all()
-
-    target_values = normalize_metadata_values(request.target_values)
-    to_change = 0
-    already_compliant = 0
-    sample_item_ids: list[str] = []
-    has_organize_actions = request.apply_rename or request.apply_move
-
-    for item in items:
-        current = await session.scalar(
-            select(ItemMetadata).where(
-                ItemMetadata.account_id == item.account_id,
-                ItemMetadata.item_id == item.item_id,
-            )
-        )
-        current_values = normalize_metadata_values(current.values) if current else {}
-
-        same_metadata = (
-            current is not None
-            and current.category_id == request.target_category_id
-            and current_values == target_values
-        )
-        same = same_metadata and not has_organize_actions
-        if same:
-            already_compliant += 1
-        else:
-            to_change += 1
-            if len(sample_item_ids) < max(1, request.limit):
-                sample_item_ids.append(item.item_id)
-
-    return MetadataRulePreviewResponse(
-        total_matches=len(items),
-        to_change=to_change,
-        already_compliant=already_compliant,
-        sample_item_ids=sample_item_ids,
-    )
+    service = RulePreviewService(session)
+    return await service.preview(request)
 
 
 @router.get("/libraries", response_model=list[MetadataLibrarySchema])
