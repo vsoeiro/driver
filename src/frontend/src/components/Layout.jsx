@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Link2, Settings } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import ProviderPickerModal from './ProviderPickerModal';
@@ -12,16 +13,15 @@ const LAST_ACCOUNT_STORAGE_KEY = 'driver-last-account-id';
 export default function Layout() {
     const navigate = useNavigate();
     const location = useLocation();
-    const [accounts, setAccounts] = useState([]);
     const [pickerOpen, setPickerOpen] = useState(false);
     const [accountMenuOpen, setAccountMenuOpen] = useState(false);
     const accountMenuRef = useRef(null);
 
-    useEffect(() => {
-        getAccounts()
-            .then(setAccounts)
-            .catch(console.error);
-    }, []);
+    const { data: accounts = [] } = useQuery({
+        queryKey: ['accounts'],
+        queryFn: getAccounts,
+        staleTime: 60000,
+    });
 
     const selectedAccountId = useMemo(() => {
         const match = location.pathname.match(/^\/drive\/([^/]+)/);

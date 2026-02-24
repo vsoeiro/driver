@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useState, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw, CheckCircle, XCircle, Clock, PlayCircle, Eye, AlertTriangle, Undo2, Trash2, Square, RotateCcw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cancelJob, createMetadataUndoJob, deleteJob, getJobAttempts, getJobs, reprocessJob } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
 import Modal from '../components/Modal';
 import { formatJobStatus, formatJobType } from '../utils/jobLabels';
+import { usePolling } from '../hooks/usePolling';
 
 const DATE_RANGE_MS = {
     '24h': 24 * 60 * 60 * 1000,
@@ -14,10 +16,7 @@ const DATE_RANGE_MS = {
 };
 
 export default function Jobs() {
-    const [jobs, setJobs] = useState([]);
-    const [loading, setLoading] = useState(true);
     const [page, setPage] = useState(1);
-    const [hasNextPage, setHasNextPage] = useState(false);
     const [selectedJob, setSelectedJob] = useState(null);
     const [undoingBatchId, setUndoingBatchId] = useState(null);
     const [deletingJobId, setDeletingJobId] = useState(null);
@@ -29,6 +28,7 @@ export default function Jobs() {
     const [typeFilter, setTypeFilter] = useState('ALL');
     const [dateRangeFilter, setDateRangeFilter] = useState('ALL');
     const { showToast } = useToast();
+    const queryClient = useQueryClient();
     const PAGE_SIZE = 20;
 
     const DATE_RANGE_OPTIONS = [
@@ -55,50 +55,54 @@ export default function Jobs() {
         { value: 'reindex_comic_covers', label: 'Reindex Comic Covers' },
     ];
 
-    const fetchJobs = useCallback(async (
-        pageNumber = page,
-        statusValue = statusFilter,
-        typeValue = typeFilter,
-        dateRangeValue = dateRangeFilter
-    ) => {
-        setLoading(true);
-        try {
-            const parsedPage = Number(pageNumber);
-            const safePage = Number.isFinite(parsedPage) && parsedPage > 0 ? Math.floor(parsedPage) : page;
-            const offset = (safePage - 1) * PAGE_SIZE;
-            const statuses = statusValue === 'ALL' ? [] : [statusValue];
-            const types = typeValue === 'ALL' ? [] : [typeValue];
-            const deltaMs = DATE_RANGE_MS[dateRangeValue] || 0;
+    const queryKey = useMemo(
+        () => ['jobs', page, statusFilter, typeFilter, dateRangeFilter],
+        [dateRangeFilter, page, statusFilter, typeFilter],
+    );
+    const {
+        data: jobs = [],
+        isLoading,
+        isFetching,
+        error,
+        refetch,
+    } = useQuery({
+        queryKey,
+        queryFn: async () => {
+            const offset = (page - 1) * PAGE_SIZE;
+            const statuses = statusFilter === 'ALL' ? [] : [statusFilter];
+            const types = typeFilter === 'ALL' ? [] : [typeFilter];
+            const deltaMs = DATE_RANGE_MS[dateRangeFilter] || 0;
             const createdAfter = deltaMs > 0 ? new Date(Date.now() - deltaMs).toISOString() : null;
-            const data = await getJobs(PAGE_SIZE, offset, statuses, { types, createdAfter });
-            setJobs(data);
-            setHasNextPage(data.length === PAGE_SIZE);
-        } catch (error) {
-            console.error('Failed to load jobs:', error);
-            showToast('Failed to load jobs', 'error');
-        } finally {
-            setLoading(false);
-        }
-    }, [showToast, page, statusFilter, typeFilter, dateRangeFilter]);
+            return getJobs(PAGE_SIZE, offset, statuses, { types, createdAfter });
+        },
+        staleTime: 5000,
+    });
+    const loading = isLoading;
+    const refreshing = isFetching && !isLoading;
+    const hasNextPage = jobs.length === PAGE_SIZE;
 
     useEffect(() => {
-        fetchJobs(page, statusFilter, typeFilter, dateRangeFilter);
-        const interval = setInterval(() => fetchJobs(page, statusFilter, typeFilter, dateRangeFilter), 5000); // Poll every 5 seconds
-        return () => clearInterval(interval);
-    }, [fetchJobs, page, statusFilter, typeFilter, dateRangeFilter]);
+        if (error) {
+            showToast('Failed to load jobs', 'error');
+        }
+    }, [error, showToast]);
+
+    usePolling({
+        callback: () => refetch(),
+        intervalMs: 10000,
+        enabled: true,
+        pauseWhenHidden: true,
+        runImmediately: false,
+    });
 
     const goToPreviousPage = () => {
         if (page <= 1) return;
-        const nextPage = page - 1;
-        setPage(nextPage);
-        fetchJobs(nextPage, statusFilter, typeFilter, dateRangeFilter);
+        setPage((current) => current - 1);
     };
 
     const goToNextPage = () => {
         if (!hasNextPage) return;
-        const nextPage = page + 1;
-        setPage(nextPage);
-        fetchJobs(nextPage, statusFilter, typeFilter, dateRangeFilter);
+        setPage((current) => current + 1);
     };
 
     const getStatusIcon = (status) => {
@@ -126,7 +130,7 @@ export default function Jobs() {
         try {
             await createMetadataUndoJob(batchId);
             showToast(`Undo job created for batch ${batchId.slice(0, 8)}...`, 'success');
-            fetchJobs();
+            refetch();
         } catch {
             showToast('Failed to create undo job', 'error');
         } finally {
@@ -138,7 +142,7 @@ export default function Jobs() {
         setDeletingJobId(jobId);
         try {
             await deleteJob(jobId);
-            setJobs((prev) => prev.filter((job) => job.id !== jobId));
+            queryClient.setQueryData(queryKey, (prev = []) => prev.filter((job) => job.id !== jobId));
             if (selectedJob?.id === jobId) setSelectedJob(null);
             showToast('Job removed from history', 'success');
         } catch {
@@ -152,7 +156,7 @@ export default function Jobs() {
         setCancellingJobId(jobId);
         try {
             await cancelJob(jobId);
-            setJobs((prev) =>
+            queryClient.setQueryData(queryKey, (prev = []) =>
                 prev.map((job) =>
                     job.id === jobId
                         ? {
@@ -163,7 +167,7 @@ export default function Jobs() {
                 )
             );
             showToast('Cancellation requested', 'success');
-            fetchJobs();
+            refetch();
         } catch (error) {
             const message = error?.response?.data?.detail || 'Failed to cancel job';
             showToast(message, 'error');
@@ -177,7 +181,7 @@ export default function Jobs() {
         try {
             const cloned = await reprocessJob(jobId);
             showToast(`Reprocess queued (${cloned.id})`, 'success');
-            fetchJobs();
+            refetch();
         } catch (error) {
             const message = error?.response?.data?.detail || 'Failed to reprocess job';
             showToast(message, 'error');
@@ -333,7 +337,6 @@ export default function Jobs() {
                             const nextStatus = event.target.value;
                             setStatusFilter(nextStatus);
                             setPage(1);
-                            fetchJobs(1, nextStatus, typeFilter, dateRangeFilter);
                         }}
                     >
                         <option value="ALL">All status</option>
@@ -352,7 +355,6 @@ export default function Jobs() {
                             const nextType = event.target.value;
                             setTypeFilter(nextType);
                             setPage(1);
-                            fetchJobs(1, statusFilter, nextType, dateRangeFilter);
                         }}
                     >
                         {JOB_TYPE_OPTIONS.map((option) => (
@@ -366,7 +368,6 @@ export default function Jobs() {
                             const nextRange = event.target.value;
                             setDateRangeFilter(nextRange);
                             setPage(1);
-                            fetchJobs(1, statusFilter, typeFilter, nextRange);
                         }}
                     >
                         {DATE_RANGE_OPTIONS.map((option) => (
@@ -393,25 +394,33 @@ export default function Jobs() {
                         </button>
                     </div>
                     <button
-                        onClick={() => fetchJobs()}
+                        onClick={() => refetch()}
                         className="btn-refresh px-2.5"
                         title="Refresh"
                     >
-                        <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                        <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
                     </button>
                 </div>
             </div>
 
             <div className="flex-1 overflow-auto">
-                {jobs.length === 0 && !loading ? (
+                {loading && jobs.length === 0 ? (
+                    <div className="surface-card p-4 space-y-3">
+                        <div className="skeleton-block h-5 w-40" />
+                        <div className="skeleton-block h-10 w-full" />
+                        <div className="skeleton-block h-10 w-full" />
+                        <div className="skeleton-block h-10 w-full" />
+                        <div className="skeleton-block h-10 w-full" />
+                    </div>
+                ) : jobs.length === 0 ? (
                     <div className="empty-state">
                         <div className="empty-state-title">No jobs found</div>
                         <p className="empty-state-text">Try changing the filters or wait for new background activity.</p>
                     </div>
                 ) : (
                     <div className="surface-card overflow-x-auto">
-                        <div className="min-w-[1660px]">
-                            <div className="grid grid-cols-[120px_120px_1fr_140px_140px_140px_100px_150px_120px_72px_72px_72px_72px_78px] gap-4 p-3 border-b border-border/70 bg-muted/45 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
+                        <div className="min-w-[1380px]">
+                            <div className="grid grid-cols-[112px_110px_1fr_132px_132px_132px_95px_130px_110px_68px_68px_68px_68px_78px] gap-3 p-3 border-b border-border/70 bg-muted/45 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
                                 <div>Status</div>
                                 <div>Job ID</div>
                                 <div>Type</div>
@@ -449,7 +458,7 @@ export default function Jobs() {
                                     return (
                                         <div
                                             key={job.id}
-                                            className="grid grid-cols-[120px_120px_1fr_140px_140px_140px_100px_150px_120px_72px_72px_72px_72px_78px] gap-4 p-3 items-center hover:bg-accent/35 transition-colors pointer-events-none"
+                                            className="grid grid-cols-[112px_110px_1fr_132px_132px_132px_95px_130px_110px_68px_68px_68px_68px_78px] gap-3 p-3 items-center hover:bg-accent/35 transition-colors pointer-events-none"
                                         >
                                         <div className="pointer-events-auto">
                                             <div className={`inline-flex items-center gap-2 font-medium ${job.status === 'COMPLETED' ? 'text-green-600' :

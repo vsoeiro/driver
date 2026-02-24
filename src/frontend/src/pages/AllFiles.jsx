@@ -1,4 +1,5 @@
 import { Fragment, useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { itemsService } from '../services/items';
 import { metadataService } from '../services/metadata';
 import { accountsService } from '../services/accounts';
@@ -21,6 +22,7 @@ import Modal from '../components/Modal';
 import ProviderIcon from '../components/ProviderIcon';
 import MetadataModal from '../components/MetadataModal';
 import MoveModal from '../components/MoveModal';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'cbw', 'pdf', 'epub', 'cbr', 'rar', 'cb7', '7z', 'cbt', 'tar']);
 const ALL_FILES_COLUMNS_STORAGE_KEY = 'driver-all-files-columns-v1';
@@ -550,7 +552,6 @@ const RemoveMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showTo
 
 export default function AllFiles() {
     const [items, setItems] = useState([]);
-    const [accounts, setAccounts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
@@ -568,11 +569,11 @@ export default function AllFiles() {
 
     const [sort, setSort] = useState({ by: 'modified_at', order: 'desc' });
     const [searchTerm, setSearchTerm] = useState('');
+    const debouncedSearchTerm = useDebouncedValue(searchTerm, 300);
     const [searchScope, setSearchScope] = useState('both');
     const [pathPrefix, setPathPrefix] = useState('');
     const [selectedItems, setSelectedItems] = useState(new Set());
     const [lastSelectedIndex, setLastSelectedIndex] = useState(null);
-    const [metaCategories, setMetaCategories] = useState([]);
     const [isComicsLibraryActive, setIsComicsLibraryActive] = useState(false);
 
     const [batchModalOpen, setBatchModalOpen] = useState(false);
@@ -603,17 +604,26 @@ export default function AllFiles() {
 
     const { showToast } = useToast();
 
+    const { data: accounts = [] } = useQuery({
+        queryKey: ['accounts'],
+        queryFn: accountsService.getAccounts,
+        staleTime: 60000,
+    });
+    const { data: metaCategories = [] } = useQuery({
+        queryKey: ['metadata-categories'],
+        queryFn: metadataService.listCategories,
+        staleTime: 30000,
+    });
+    const { data: metadataLibraries = [] } = useQuery({
+        queryKey: ['metadata-libraries'],
+        queryFn: metadataService.listMetadataLibraries,
+        staleTime: 30000,
+    });
+
     useEffect(() => {
-        accountsService.getAccounts().then(setAccounts).catch(console.error);
-        metadataService.listCategories().then(setMetaCategories).catch(console.error);
-        metadataService
-            .listMetadataLibraries()
-            .then((rows) => {
-                const comicsLibrary = (rows || []).find((library) => library.key === 'comics_core');
-                setIsComicsLibraryActive(Boolean(comicsLibrary?.is_active));
-            })
-            .catch(() => setIsComicsLibraryActive(false));
-    }, []);
+        const comicsLibrary = (metadataLibraries || []).find((library) => library.key === 'comics_core');
+        setIsComicsLibraryActive(Boolean(comicsLibrary?.is_active));
+    }, [metadataLibraries]);
 
     useEffect(() => {
         const handleClickOutside = (event) => {
@@ -684,13 +694,13 @@ export default function AllFiles() {
         setLoading(true);
         try {
             const effectivePage = overridePage ?? page;
-            const isSearching = searchTerm.trim().length > 0;
+            const isSearching = debouncedSearchTerm.trim().length > 0;
             const params = {
                 page: effectivePage,
                 page_size: 50,
                 sort_by: sort.by,
                 sort_order: sort.order,
-                q: searchTerm,
+                q: debouncedSearchTerm,
                 search_fields: searchScope,
                 path_prefix: pathPrefix,
                 direct_children_only: !!pathPrefix && !isSearching,
@@ -705,7 +715,7 @@ export default function AllFiles() {
         } finally {
             setLoading(false);
         }
-    }, [page, searchTerm, sort.by, sort.order, searchScope, pathPrefix, filters]);
+    }, [page, debouncedSearchTerm, sort.by, sort.order, searchScope, pathPrefix, filters]);
 
     useEffect(() => {
         fetchItems();
@@ -1112,7 +1122,7 @@ export default function AllFiles() {
                             className="input-shell pl-8 pr-4 py-1.5 text-sm w-64"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); fetchItems(1); } }}
+                            onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); } }}
                         />
                     </div>
                     <FilterBar onFilter={setFilters} filters={filters} accounts={accounts} categories={metaCategories} />

@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Loader2, RefreshCw, RotateCcw } from 'lucide-react';
 import { settingsService } from '../services/settings';
 import { jobsService } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
 import AdminTabs from '../components/AdminTabs';
+import { usePolling } from '../hooks/usePolling';
+
+const PERIOD_OPTIONS = [
+    { value: '24h', label: 'Last 24h' },
+    { value: '3d', label: 'Last 3 days' },
+    { value: '7d', label: 'Last 7 days' },
+    { value: '30d', label: 'Last 30 days' },
+    { value: '90d', label: 'Last 90 days' },
+];
 
 function PercentRing({ value }) {
     const safe = Math.max(0, Math.min(100, Number(value) || 0));
@@ -42,68 +52,52 @@ function MiniBars({ items, max }) {
 
 export default function AdminDashboard() {
     const { showToast } = useToast();
-    const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [period, setPeriod] = useState('24h');
-    const [snapshot, setSnapshot] = useState(null);
     const [reprocessingJobId, setReprocessingJobId] = useState(null);
-
-    const PERIOD_OPTIONS = [
-        { value: '24h', label: 'Last 24h' },
-        { value: '3d', label: 'Last 3 days' },
-        { value: '7d', label: 'Last 7 days' },
-        { value: '30d', label: 'Last 30 days' },
-        { value: '90d', label: 'Last 90 days' },
-    ];
+    const queryClient = useQueryClient();
 
     const selectedPeriodLabel = useMemo(
         () => PERIOD_OPTIONS.find((option) => option.value === period)?.label || period,
         [period],
     );
 
-    const loadSnapshot = useCallback(async ({
-        silent = false,
-        forceRefresh = false,
-        periodValue = period,
-    } = {}) => {
-        if (silent) {
-            setRefreshing(true);
-        } else {
-            setLoading(true);
+    const { data: snapshot, isLoading: loading, error, refetch } = useQuery({
+        queryKey: ['observability', period],
+        queryFn: () => settingsService.getObservabilitySnapshot({ period, forceRefresh: false }),
+        staleTime: 15000,
+    });
+
+    useEffect(() => {
+        if (error) {
+            const message = error?.response?.data?.detail || 'Failed to load observability snapshot';
+            showToast(message, 'error');
         }
+    }, [error, showToast]);
+
+    const refreshSnapshot = useCallback(async ({ forceRefresh = false } = {}) => {
+        setRefreshing(true);
         try {
             const data = await settingsService.getObservabilitySnapshot({
-                period: periodValue,
+                period,
                 forceRefresh,
             });
-            setSnapshot(data);
+            queryClient.setQueryData(['observability', period], data);
         } catch (error) {
             const message = error?.response?.data?.detail || 'Failed to load observability snapshot';
             showToast(message, 'error');
         } finally {
-            setLoading(false);
             setRefreshing(false);
         }
-    }, [showToast, period]);
+    }, [period, queryClient, showToast]);
 
-    useEffect(() => {
-        let cancelled = false;
-        const run = async () => {
-            if (!cancelled) {
-                await loadSnapshot({ silent: false, forceRefresh: false, periodValue: period });
-            }
-        };
-        run();
-        const interval = setInterval(() => {
-            if (!cancelled) {
-                loadSnapshot({ silent: true, forceRefresh: false, periodValue: period });
-            }
-        }, 15000);
-        return () => {
-            cancelled = true;
-            clearInterval(interval);
-        };
-    }, [loadSnapshot, period]);
+    usePolling({
+        callback: () => refetch(),
+        intervalMs: 20000,
+        enabled: true,
+        pauseWhenHidden: true,
+        runImmediately: false,
+    });
 
     const windowLabel = useMemo(
         () => snapshot?.period_label || selectedPeriodLabel,
@@ -166,14 +160,14 @@ export default function AdminDashboard() {
         try {
             const job = await jobsService.reprocessJob(jobId);
             showToast(`Reprocess job queued (${job.id}).`, 'success');
-            await loadSnapshot({ silent: true, forceRefresh: true, periodValue: period });
+            await refreshSnapshot({ forceRefresh: true });
         } catch (error) {
             const message = error?.response?.data?.detail || 'Failed to reprocess dead-letter job';
             showToast(message, 'error');
         } finally {
             setReprocessingJobId(null);
         }
-    }, [showToast, loadSnapshot, period]);
+    }, [refreshSnapshot, showToast]);
 
     return (
         <div className="app-page">
@@ -196,7 +190,7 @@ export default function AdminDashboard() {
                     </select>
                     <button
                         type="button"
-                        onClick={() => loadSnapshot({ silent: true, forceRefresh: true, periodValue: period })}
+                        onClick={() => refreshSnapshot({ forceRefresh: true })}
                         className="btn-refresh"
                     >
                         {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}

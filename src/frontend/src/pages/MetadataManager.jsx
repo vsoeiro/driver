@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { metadataService } from '../services/metadata';
 import { itemsService } from '../services/items';
 import { accountsService } from '../services/accounts';
@@ -26,6 +27,7 @@ import RemoveMetadataModal from '../components/RemoveMetadataModal';
 import MetadataModal from '../components/MetadataModal';
 import MoveModal from '../components/MoveModal';
 import MetadataLayoutBuilderModal from '../components/MetadataLayoutBuilderModal';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 const ITEMS_PER_PAGE = 50;
 const BASE_SORT_OPTIONS = [
@@ -44,7 +46,6 @@ const CategoryItemsTable = ({ category, onBack }) => {
     const { showToast } = useToast();
     const [items, setItems] = useState([]);
     const [seriesRows, setSeriesRows] = useState([]);
-    const [accounts, setAccounts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [page, setPage] = useState(1);
     const [total, setTotal] = useState(0);
@@ -64,7 +65,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
     const [renameSaving, setRenameSaving] = useState(false);
     const [actionLoading, setActionLoading] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
-    const [appliedSearchTerm, setAppliedSearchTerm] = useState('');
+    const debouncedSearchTerm = useDebouncedValue(searchTerm.trim(), 300);
     const [searchScope, setSearchScope] = useState('both');
     const [viewMode, setViewMode] = useState('table');
     const [coverUrlsByItemId, setCoverUrlsByItemId] = useState({});
@@ -105,9 +106,11 @@ const CategoryItemsTable = ({ category, onBack }) => {
         return metadataSortOptions.find((option) => option.value === sort.by) || null;
     }, [sort.by, metadataSortOptions]);
 
-    useEffect(() => {
-        accountsService.getAccounts().then(setAccounts).catch(console.error);
-    }, []);
+    const { data: accounts = [] } = useQuery({
+        queryKey: ['accounts'],
+        queryFn: accountsService.getAccounts,
+        staleTime: 60000,
+    });
 
     useEffect(() => {
         function handleClickOutside(event) {
@@ -389,7 +392,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                 metadata_sort_data_type: selectedMetadataSort?.dataType,
                 category_id: category.id,
                 has_metadata: true,
-                q: appliedSearchTerm,
+                q: debouncedSearchTerm,
                 search_fields: searchScope,
                 account_id: filters.account_id || undefined,
                 item_type: filters.item_type || undefined,
@@ -403,7 +406,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                     page_size: ITEMS_PER_PAGE,
                     sort_by: seriesSortBy,
                     sort_order: sort.order,
-                    q: appliedSearchTerm,
+                    q: debouncedSearchTerm,
                     search_fields: searchScope,
                     account_id: filters.account_id || undefined,
                     item_type: filters.item_type || undefined,
@@ -429,7 +432,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
         } finally {
             setLoading(false);
         }
-    }, [page, sort.by, sort.order, selectedMetadataSort, category.id, supportsSeriesTracker, viewMode, appliedSearchTerm, searchScope, filters]);
+    }, [page, sort.by, sort.order, selectedMetadataSort, category.id, supportsSeriesTracker, viewMode, debouncedSearchTerm, searchScope, filters]);
 
     useEffect(() => {
         fetchItems();
@@ -651,7 +654,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
 
     const attributes = useMemo(
         () => sortAttributesForCategory(category),
-        [category?.id, category?.plugin_key, category?.attributes]
+        [category]
     );
     const findAttr = (pluginKey, fallbackName) => {
         if (!pluginKey && !fallbackName) return null;
@@ -1075,11 +1078,6 @@ const CategoryItemsTable = ({ category, onBack }) => {
         return acc ? (acc.email || acc.display_name) : (accountId ? String(accountId).slice(0, 8) : '-');
     };
 
-    const applySearch = () => {
-        setPage(1);
-        setAppliedSearchTerm(searchTerm.trim());
-    };
-
     const searchPlaceholders = {
         name: 'Search by title...',
         path: 'Search by path...',
@@ -1169,8 +1167,10 @@ const CategoryItemsTable = ({ category, onBack }) => {
                             placeholder={searchPlaceholders[searchScope]}
                             className="input-shell pl-8 pr-4 py-1.5 text-sm w-72"
                             value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === 'Enter') applySearch(); }}
+                            onChange={(e) => {
+                                setSearchTerm(e.target.value);
+                                setPage(1);
+                            }}
                         />
                     </div>
                     <CategoryFilterBar
@@ -1700,10 +1700,6 @@ const CategoryItemsTable = ({ category, onBack }) => {
 
 // -- Main Page --
 export default function MetadataManager() {
-    const [categories, setCategories] = useState([]);
-    const [libraries, setLibraries] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [librariesLoading, setLibrariesLoading] = useState(true);
     const [activeView, setActiveView] = useState('metadata');
     const [expandedCategory, setExpandedCategory] = useState(null);
     const [viewingCategory, setViewingCategory] = useState(null);
@@ -1731,39 +1727,38 @@ export default function MetadataManager() {
     const [deletingCategory, setDeletingCategory] = useState(false);
     const [layoutBuilderOpen, setLayoutBuilderOpen] = useState(false);
 
-    const loadLibraries = useCallback(async () => {
-        try {
-            setLibrariesLoading(true);
-            const rows = await metadataService.listMetadataLibraries();
-            setLibraries(rows || []);
-        } catch (error) {
-            console.error(error);
-            showToast('Failed to load metadata libraries', 'error');
-        } finally {
-            setLibrariesLoading(false);
-        }
-    }, [showToast]);
+    const {
+        data: categories = [],
+        isLoading: loading,
+        error: categoriesError,
+        refetch: refetchCategories,
+    } = useQuery({
+        queryKey: ['metadata-category-stats'],
+        queryFn: metadataService.getCategoryStats,
+        staleTime: 30000,
+    });
+    const {
+        data: libraries = [],
+        isLoading: librariesLoading,
+        error: librariesError,
+        refetch: refetchLibraries,
+    } = useQuery({
+        queryKey: ['metadata-libraries'],
+        queryFn: metadataService.listMetadataLibraries,
+        staleTime: 30000,
+    });
 
-    const loadCategories = useCallback(async () => {
-        try {
-            setLoading(true);
-            const data = await metadataService.getCategoryStats();
-            setCategories(data);
-        } catch (error) {
-            console.error(error);
+    useEffect(() => {
+        if (categoriesError) {
             showToast('Failed to load categories', 'error');
-        } finally {
-            setLoading(false);
         }
-    }, [showToast]);
+    }, [categoriesError, showToast]);
 
     useEffect(() => {
-        loadCategories();
-    }, [loadCategories]);
-
-    useEffect(() => {
-        loadLibraries();
-    }, [loadLibraries]);
+        if (librariesError) {
+            showToast('Failed to load metadata libraries', 'error');
+        }
+    }, [librariesError, showToast]);
 
     const knownLibraries = useMemo(
         () => (
@@ -1785,7 +1780,7 @@ export default function MetadataManager() {
                 await metadataService.activateMetadataLibrary(library.key);
                 showToast(`${libraryName} enabled`, 'success');
             }
-            await Promise.all([loadLibraries(), loadCategories()]);
+            await Promise.all([refetchLibraries(), refetchCategories()]);
         } catch (error) {
             const message = error?.response?.data?.detail || 'Failed to update metadata library';
             showToast(message, 'error');
@@ -1802,7 +1797,7 @@ export default function MetadataManager() {
             setCreateModalOpen(false);
             setNewCategoryName('');
             setNewCategoryDesc('');
-            loadCategories();
+            refetchCategories();
         } catch (error) {
             showToast(error.message || 'Failed to create category', 'error');
         }
@@ -1824,7 +1819,7 @@ export default function MetadataManager() {
             await metadataService.deleteCategory(deleteCategoryTarget.id);
             showToast('Category deleted', 'success');
             setDeleteCategoryTarget(null);
-            await loadCategories();
+            await refetchCategories();
         } catch (error) {
             showToast('Failed to delete category', 'error');
         } finally {
@@ -1853,7 +1848,7 @@ export default function MetadataManager() {
             setNewAttrType('text');
             setNewAttrOptions('');
             setNewAttrRequired(false);
-            loadCategories();
+            refetchCategories();
         } catch (error) {
             showToast('Failed to add attribute', 'error');
         }
@@ -1868,7 +1863,7 @@ export default function MetadataManager() {
         try {
             await metadataService.deleteAttribute(attr.id);
             showToast('Attribute deleted', 'success');
-            loadCategories();
+            refetchCategories();
         } catch (error) {
             showToast('Failed to delete attribute', 'error');
         }
@@ -1910,7 +1905,7 @@ export default function MetadataManager() {
 
             showToast('Attribute updated', 'success');
             setEditAttributeTarget(null);
-            await loadCategories();
+            await refetchCategories();
         } catch (error) {
             showToast(error?.response?.data?.detail || 'Failed to update attribute', 'error');
         } finally {
@@ -1928,7 +1923,7 @@ export default function MetadataManager() {
             <div className="app-page">
                 <CategoryItemsTable
                     category={viewingCategory}
-                    onBack={() => { setViewingCategory(null); loadCategories(); }}
+                    onBack={() => { setViewingCategory(null); refetchCategories(); }}
                 />
             </div>
         );
@@ -2415,7 +2410,7 @@ export default function MetadataManager() {
                 onClose={() => setLayoutBuilderOpen(false)}
                 categories={categories}
                 onSaved={async () => {
-                    await loadCategories();
+                    await refetchCategories();
                 }}
             />
         </div>

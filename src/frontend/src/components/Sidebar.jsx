@@ -19,7 +19,7 @@ export default function Sidebar() {
     ];
 
     return (
-        <aside className="sticky top-0 flex h-full w-64 shrink-0 flex-col border-r border-border/70 bg-card/72 backdrop-blur-xl">
+        <aside className="sticky top-0 flex h-full w-60 shrink-0 flex-col border-r border-border/70 bg-card/72 backdrop-blur-xl xl:w-64">
             <div className="border-b border-border/70 px-4 py-4">
                 <div className="inline-flex items-center gap-3 min-w-0">
                     <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-cyan-500 text-primary-foreground shadow-lg shadow-primary/20">
@@ -36,7 +36,7 @@ export default function Sidebar() {
                 <div className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                     Navigation
                 </div>
-                <nav className="space-y-1.5">
+                <nav className="space-y-1">
                     {quickLinks.map(({ to, label, icon: Icon }) => (
                         <NavLink
                             key={to}
