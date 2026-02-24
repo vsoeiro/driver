@@ -104,7 +104,7 @@ async def google_callback(
             detail="Invalid session state.",
         )
 
-    token_result = auth_service.exchange_code_for_tokens(
+    token_result = await auth_service.exchange_code_for_tokens(
         code, settings.google_redirect_uri
     )
     if not token_result:
@@ -168,7 +168,7 @@ async def dropbox_callback(
             detail="Invalid session state.",
         )
 
-    token_result = auth_service.exchange_code_for_tokens(
+    token_result = await auth_service.exchange_code_for_tokens(
         code, settings.dropbox_redirect_uri
     )
     if not token_result:
@@ -289,7 +289,7 @@ async def microsoft_callback(
             detail="Invalid session state.",
         )
 
-    token_result = auth_service.exchange_code_for_tokens(
+    token_result = await auth_service.exchange_code_for_tokens(
         flow, dict(request.query_params)
     )
     if not token_result:

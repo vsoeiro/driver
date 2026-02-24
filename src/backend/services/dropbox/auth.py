@@ -10,6 +10,7 @@ import httpx
 
 from backend.core.config import get_settings
 from backend.security.oauth_types import TokenResult
+from backend.services.oauth_http import post_form_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,9 @@ class DropboxAuthService:
         }
         return f"{DROPBOX_AUTH_URL}?{urlencode(params)}"
 
-    def exchange_code_for_tokens(self, code: str, redirect_uri: str) -> TokenResult | None:
+    async def exchange_code_for_tokens(
+        self, code: str, redirect_uri: str
+    ) -> TokenResult | None:
         payload = {
             "code": code,
             "client_id": self._settings.dropbox_client_id,
@@ -45,34 +48,28 @@ class DropboxAuthService:
             "redirect_uri": redirect_uri,
             "grant_type": "authorization_code",
         }
-        return self._token_request(payload)
+        return await self._token_request(payload)
 
-    def refresh_access_token(self, refresh_token: str) -> TokenResult | None:
+    async def refresh_access_token(self, refresh_token: str) -> TokenResult | None:
         payload = {
             "client_id": self._settings.dropbox_client_id,
             "client_secret": self._settings.dropbox_client_secret,
             "refresh_token": refresh_token,
             "grant_type": "refresh_token",
         }
-        result = self._token_request(payload)
+        result = await self._token_request(payload)
         if result and not result.refresh_token:
             result.refresh_token = refresh_token
         return result
 
-    def _token_request(self, payload: dict) -> TokenResult | None:
-        try:
-            response = httpx.post(
-                DROPBOX_TOKEN_URL,
-                data=payload,
-                timeout=DROPBOX_TIMEOUT,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-            )
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
-            details = ""
-            if getattr(exc, "response", None) is not None and exc.response is not None:
-                details = exc.response.text
-            logger.error("Dropbox token request failed: %s %s", exc, details)
+    async def _token_request(self, payload: dict) -> TokenResult | None:
+        response = await post_form_with_retry(
+            url=DROPBOX_TOKEN_URL,
+            payload=payload,
+            timeout=DROPBOX_TIMEOUT,
+            provider="Dropbox",
+        )
+        if response is None:
             return None
 
         data = response.json()
@@ -105,4 +102,3 @@ def get_dropbox_auth_service() -> DropboxAuthService:
     if _auth_service is None:
         _auth_service = DropboxAuthService()
     return _auth_service
-

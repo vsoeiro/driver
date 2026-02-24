@@ -8,6 +8,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 import msal
+from starlette.concurrency import run_in_threadpool
 
 from backend.core.config import get_settings
 from backend.security.oauth_types import TokenResult
@@ -51,7 +52,7 @@ class MicrosoftAuthService:
             prompt="select_account",
         )
 
-    def exchange_code_for_tokens(
+    async def exchange_code_for_tokens(
         self,
         auth_flow: dict,
         auth_response: dict,
@@ -71,9 +72,10 @@ class MicrosoftAuthService:
             Token result if successful, None otherwise.
 
         """
-        result = self._app.acquire_token_by_auth_code_flow(
-            auth_code_flow=auth_flow,
-            auth_response=auth_response,
+        result = await run_in_threadpool(
+            self._app.acquire_token_by_auth_code_flow,
+            auth_flow,
+            auth_response,
         )
 
         if "access_token" not in result:
@@ -92,7 +94,7 @@ class MicrosoftAuthService:
             id_token_claims=result.get("id_token_claims", {}),
         )
 
-    def refresh_access_token(self, refresh_token: str) -> TokenResult | None:
+    async def refresh_access_token(self, refresh_token: str) -> TokenResult | None:
         """Refresh an expired access token.
 
         Parameters
@@ -106,9 +108,10 @@ class MicrosoftAuthService:
             New token result if successful, None otherwise.
 
         """
-        result = self._app.acquire_token_by_refresh_token(
-            refresh_token=refresh_token,
-            scopes=self._settings.microsoft_scopes,
+        result = await run_in_threadpool(
+            self._app.acquire_token_by_refresh_token,
+            refresh_token,
+            self._settings.microsoft_scopes,
         )
 
         if "access_token" not in result:

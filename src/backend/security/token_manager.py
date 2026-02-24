@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.core.exceptions import TokenRefreshError
 from backend.core.security import decrypt_token, encrypt_token
 from backend.db.models import LinkedAccount
+from backend.security.oauth_types import AuthServiceProtocol
 from backend.services.dropbox.auth import get_dropbox_auth_service
 from backend.services.google.auth import get_google_auth_service
 from backend.services.microsoft.auth import get_microsoft_auth_service
@@ -154,7 +155,7 @@ class TokenManager:
             raise TokenRefreshError("Failed to decrypt refresh token")
 
         auth_service = self._get_auth_service(locked_account.provider)
-        result = auth_service.refresh_access_token(refresh_token)
+        result = await auth_service.refresh_access_token(refresh_token)
         if not result:
             logger.error(
                 "Token refresh failed for account %s. Result was None. Refresh token (masked): %s...",
@@ -196,7 +197,7 @@ class TokenManager:
         # Google access tokens can be opaque, so only basic sanity checks apply.
         return True
 
-    def _get_auth_service(self, provider: str):
+    def _get_auth_service(self, provider: str) -> AuthServiceProtocol:
         provider_key = (provider or "").lower()
         if provider_key == "microsoft":
             return self._microsoft_auth_service

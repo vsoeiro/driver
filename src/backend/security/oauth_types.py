@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Protocol
 
 
 @dataclass
@@ -12,3 +13,9 @@ class TokenResult:
     refresh_token: str | None
     expires_at: datetime
     id_token_claims: dict
+
+
+class AuthServiceProtocol(Protocol):
+    """Contract for OAuth auth services used by TokenManager."""
+
+    async def refresh_access_token(self, refresh_token: str) -> TokenResult | None: ...

@@ -11,6 +11,7 @@ import jwt
 
 from backend.core.config import get_settings
 from backend.security.oauth_types import TokenResult
+from backend.services.oauth_http import post_form_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,9 @@ class GoogleAuthService:
         }
         return f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
 
-    def exchange_code_for_tokens(self, code: str, redirect_uri: str) -> TokenResult | None:
+    async def exchange_code_for_tokens(
+        self, code: str, redirect_uri: str
+    ) -> TokenResult | None:
         """Exchange authorization code for access/refresh tokens."""
         payload = {
             "code": code,
@@ -52,9 +55,9 @@ class GoogleAuthService:
             "redirect_uri": redirect_uri,
             "grant_type": "authorization_code",
         }
-        return self._token_request(payload)
+        return await self._token_request(payload)
 
-    def refresh_access_token(self, refresh_token: str) -> TokenResult | None:
+    async def refresh_access_token(self, refresh_token: str) -> TokenResult | None:
         """Refresh an expired Google access token."""
         payload = {
             "client_id": self._settings.google_client_id,
@@ -62,25 +65,19 @@ class GoogleAuthService:
             "refresh_token": refresh_token,
             "grant_type": "refresh_token",
         }
-        result = self._token_request(payload)
+        result = await self._token_request(payload)
         if result and not result.refresh_token:
             result.refresh_token = refresh_token
         return result
 
-    def _token_request(self, payload: dict) -> TokenResult | None:
-        try:
-            response = httpx.post(
-                GOOGLE_TOKEN_URL,
-                data=payload,
-                timeout=GOOGLE_TIMEOUT,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-            )
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
-            details = ""
-            if getattr(exc, "response", None) is not None and exc.response is not None:
-                details = exc.response.text
-            logger.error("Google token request failed: %s %s", exc, details)
+    async def _token_request(self, payload: dict) -> TokenResult | None:
+        response = await post_form_with_retry(
+            url=GOOGLE_TOKEN_URL,
+            payload=payload,
+            timeout=GOOGLE_TIMEOUT,
+            provider="Google",
+        )
+        if response is None:
             return None
 
         data = response.json()
