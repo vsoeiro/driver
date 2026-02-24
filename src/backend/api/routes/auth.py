@@ -3,6 +3,7 @@
 import logging
 import secrets
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
@@ -11,6 +12,7 @@ from backend.api.dependencies import DBSession
 from backend.core.config import get_settings
 from backend.core.security import decrypt_token, encrypt_token
 from backend.db.models import LinkedAccount
+from backend.services.dropbox.auth import get_dropbox_auth_service
 from backend.services.google.auth import get_google_auth_service
 from backend.services.microsoft.auth import get_microsoft_auth_service
 
@@ -36,6 +38,34 @@ async def google_login() -> RedirectResponse:
 
     response.set_cookie(
         key="oauth_google_state",
+        value=encrypt_token(state),
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=600,
+        path="/",
+    )
+    return response
+
+
+@router.get("/dropbox/login")
+async def dropbox_login() -> RedirectResponse:
+    """Initiate Dropbox OAuth2 login flow."""
+    settings = get_settings()
+    auth_service = get_dropbox_auth_service()
+
+    if not settings.dropbox_client_id or not settings.dropbox_client_secret:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Dropbox OAuth is not configured.",
+        )
+
+    state = secrets.token_urlsafe(32)
+    auth_url = auth_service.get_auth_url(settings.dropbox_redirect_uri, state)
+    response = RedirectResponse(url=auth_url, status_code=status.HTTP_302_FOUND)
+
+    response.set_cookie(
+        key="oauth_dropbox_state",
         value=encrypt_token(state),
         httponly=True,
         secure=False,
@@ -107,6 +137,74 @@ async def google_callback(
 
     success_response = _success_html_response()
     success_response.delete_cookie("oauth_google_state", path="/")
+    return success_response
+
+
+@router.get("/dropbox/callback")
+async def dropbox_callback(
+    request: Request,
+    db: DBSession,
+    code: str = Query(..., description="Authorization code from Dropbox"),
+    state: str = Query(..., description="State parameter for CSRF validation"),
+) -> Response:
+    """Handle Dropbox OAuth2 callback and persist linked account."""
+    auth_service = get_dropbox_auth_service()
+    settings = get_settings()
+
+    encrypted_state = request.cookies.get("oauth_dropbox_state")
+    if not encrypted_state:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Session expired or invalid. Please try logging in again.",
+        )
+
+    try:
+        stored_state = decrypt_token(encrypted_state)
+        if not stored_state or stored_state != state:
+            raise ValueError("Invalid state")
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid session state.",
+        )
+
+    token_result = auth_service.exchange_code_for_tokens(
+        code, settings.dropbox_redirect_uri
+    )
+    if not token_result:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Failed to authenticate with Dropbox",
+        )
+
+    profile = await _fetch_dropbox_profile(token_result.access_token)
+    dropbox_account_id = profile.get("account_id") or token_result.id_token_claims.get("account_id")
+    email = profile.get("email", "")
+    name = (
+        ((profile.get("name") or {}).get("display_name") if isinstance(profile.get("name"), dict) else None)
+        or (email.split("@")[0] if email else None)
+        or "Dropbox User"
+    )
+
+    if not dropbox_account_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not determine Dropbox account ID",
+        )
+
+    await _upsert_linked_account(
+        db=db,
+        provider="dropbox",
+        provider_account_id=dropbox_account_id,
+        email=email,
+        name=name,
+        access_token=token_result.access_token,
+        refresh_token=token_result.refresh_token,
+        expires_at=token_result.expires_at,
+    )
+
+    success_response = _success_html_response()
+    success_response.delete_cookie("oauth_dropbox_state", path="/")
     return success_response
 
 
@@ -269,6 +367,24 @@ async def _upsert_linked_account(
 
     await db.commit()
     logger.info("Account %s (%s) linked successfully", email, provider)
+
+
+async def _fetch_dropbox_profile(access_token: str) -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=10.0)) as client:
+            response = await client.post(
+                "https://api.dropboxapi.com/2/users/get_current_account",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                },
+                json={},
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPError as exc:
+        logger.warning("Failed to fetch Dropbox profile during callback: %s", exc)
+        return {}
 
 
 def _success_html_response() -> HTMLResponse:

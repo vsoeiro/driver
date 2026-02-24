@@ -53,6 +53,17 @@ PROVIDER_LIMITS: dict[str, ProviderRequestLimit] = {
         docs_url="https://learn.microsoft.com/graph/throttling-limits",
         notes="This is the Graph global limit; service-specific limits may be lower.",
     ),
+    # Source: https://developers.dropbox.com/dbx-performance-guide
+    # Dropbox applies adaptive throttling rather than a single fixed public limit.
+    # We track a conservative synthetic baseline window for utilization telemetry.
+    "dropbox": ProviderRequestLimit(
+        provider="dropbox",
+        label="Dropbox API",
+        max_requests=1_200,
+        window_seconds=300,
+        docs_url="https://developers.dropbox.com/dbx-performance-guide",
+        notes="Adaptive rate limits; this baseline is for relative utilization tracking.",
+    ),
 }
 
 
@@ -165,4 +176,3 @@ class ProviderRequestUsageTracker:
 
 
 provider_request_usage_tracker = ProviderRequestUsageTracker()
-

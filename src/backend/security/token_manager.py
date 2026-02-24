@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.core.exceptions import TokenRefreshError
 from backend.core.security import decrypt_token, encrypt_token
 from backend.db.models import LinkedAccount
+from backend.services.dropbox.auth import get_dropbox_auth_service
 from backend.services.google.auth import get_google_auth_service
 from backend.services.microsoft.auth import get_microsoft_auth_service
 
@@ -38,6 +39,7 @@ class TokenManager:
         self._db = db
         self._microsoft_auth_service = get_microsoft_auth_service()
         self._google_auth_service = get_google_auth_service()
+        self._dropbox_auth_service = get_dropbox_auth_service()
 
     async def get_valid_access_token(self, account: LinkedAccount) -> str:
         """Get a valid access token for the account, refreshing if needed.
@@ -200,6 +202,8 @@ class TokenManager:
             return self._microsoft_auth_service
         if provider_key == "google":
             return self._google_auth_service
+        if provider_key == "dropbox":
+            return self._dropbox_auth_service
         raise TokenRefreshError(f"Unsupported provider for token refresh: {provider}")
 
     async def _mark_account_inactive(self, account: LinkedAccount) -> None:

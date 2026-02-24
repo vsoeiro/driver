@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     microsoft_tenant_id: str = Field(default="common", alias="MS_TENANT_ID")
     google_client_id: str | None = Field(default=None, alias="GOOGLE_CLIENT_ID")
     google_client_secret: str | None = Field(default=None, alias="GOOGLE_CLIENT_SECRET")
+    dropbox_client_id: str | None = Field(default=None, alias="DROPBOX_CLIENT_ID")
+    dropbox_client_secret: str | None = Field(default=None, alias="DROPBOX_CLIENT_SECRET")
 
     app_secret_key: str = Field(alias="SECRET_KEY")
     token_encryption_key: str = Field(alias="ENCRYPTION_KEY")
@@ -69,6 +71,10 @@ class Settings(BaseSettings):
     google_redirect_uri: str = Field(
         default="http://localhost:8000/api/v1/auth/google/callback",
         alias="GOOGLE_REDIRECT_URI",
+    )
+    dropbox_redirect_uri: str = Field(
+        default="http://localhost:8000/api/v1/auth/dropbox/callback",
+        alias="DROPBOX_REDIRECT_URI",
     )
 
     host: str = "0.0.0.0"

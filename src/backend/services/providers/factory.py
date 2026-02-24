@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from backend.core.exceptions import DriveOrganizerError
 from backend.db.models import LinkedAccount
+from backend.services.dropbox.drive.client import DropboxDriveClient
 from backend.security.token_manager import TokenManager
 from backend.services.google.drive.client import GoogleDriveClient
 from backend.services.microsoft.onedrive.client import GraphClient
@@ -20,6 +21,8 @@ def build_drive_client(
         return GraphClient(token_manager)
     if provider == "google":
         return GoogleDriveClient(token_manager)
+    if provider == "dropbox":
+        return DropboxDriveClient(token_manager)
 
     raise DriveOrganizerError(
         f"Provider '{account.provider}' is not supported yet",
