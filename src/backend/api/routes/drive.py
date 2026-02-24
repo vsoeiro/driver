@@ -5,7 +5,10 @@ This module provides endpoints for navigating and accessing OneDrive files.
 
 import logging
 import mimetypes
+import os
+import uuid
 import zipfile
+import asyncio
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
@@ -196,9 +199,10 @@ async def download_content(
         )
         other_accounts = (await db.execute(stmt)).scalars().all()
         token_manager = TokenManager(db)
+        resolved = False
         filename = "file"
         content = b""
-        resolved = False
+
         for candidate in other_accounts:
             try:
                 candidate_client = build_drive_client(candidate, token_manager)
@@ -243,9 +247,7 @@ async def download_zip(
     Files are downloaded to a temporary directory on the server before being zipped
     and streamed to the client, preventing memory exhaustion.
     """
-    import os
     import shutil
-    import tempfile
 
     if not request.item_ids:
         raise HTTPException(
@@ -259,24 +261,26 @@ async def download_zip(
         files_to_zip = []
         used_names: set[str] = set()
 
-        # Download all files to temp dir
-        for item_id in request.item_ids:
+        semaphore = asyncio.Semaphore(4)
+        files_lock = asyncio.Lock()
+
+        async def _download_one(item_id: str) -> None:
             try:
-                # We need a unique placeholder name for the download first
-                # The actual filename will be returned by download_file_to_path
-                temp_file_path = os.path.join(temp_dir, f"temp_{item_id}")
-                filename = await graph_client.download_file_to_path(
-                    account, item_id, temp_file_path
-                )
-
-                safe_name = _sanitize_zip_name(filename)
-                unique_name = _ensure_unique_name(safe_name, used_names)
-
-                files_to_zip.append((temp_file_path, unique_name))
+                async with semaphore:
+                    temp_file_path = os.path.join(
+                        temp_dir, f"tmp_{uuid.uuid4().hex}_{item_id}"
+                    )
+                    filename = await graph_client.download_file_to_path(
+                        account, item_id, temp_file_path
+                    )
+                    safe_name = _sanitize_zip_name(filename)
+                    async with files_lock:
+                        unique_name = _ensure_unique_name(safe_name, used_names)
+                        files_to_zip.append((temp_file_path, unique_name))
             except Exception as e:
                 logger.error("Failed to download item %s for ZIP: %s", item_id, e)
-                # Continue with other files or fail? Partial success is usually better for bulk ops
-                continue
+
+        await asyncio.gather(*[_download_one(item_id) for item_id in request.item_ids])
 
         if not files_to_zip:
             shutil.rmtree(temp_dir)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -18,6 +19,11 @@ from backend.services.jobs import JobService
 
 logger = logging.getLogger(__name__)
 
+try:
+    from redis.asyncio import Redis
+except Exception:  # pragma: no cover - import guard for constrained runtimes
+    Redis = None  # type: ignore[assignment]
+
 
 class DailySyncScheduler:
     """Enqueue one sync job per active account based on persisted cron settings."""
@@ -29,6 +35,13 @@ class DailySyncScheduler:
         self.session_factory = session_factory
         self._running = False
         self._stop_event = asyncio.Event()
+        settings = get_settings()
+        self._lock_enabled = bool(settings.scheduler_distributed_lock_enabled)
+        self._lock_key = settings.scheduler_lock_key
+        self._lock_ttl_seconds = int(settings.scheduler_lock_ttl_seconds)
+        self._lock_owner = str(uuid4())
+        self._lock_client: Redis | None = None
+        self._lock_is_owned = False
 
     async def start(self) -> None:
         """Run the scheduling loop until stopped."""
@@ -38,6 +51,11 @@ class DailySyncScheduler:
         next_run: datetime | None = None
 
         while self._running:
+            if not await self._acquire_or_renew_leader_lock():
+                if await self._wait_or_stop(10):
+                    break
+                continue
+
             runtime_settings = await self._get_runtime_settings()
             signature = (
                 runtime_settings.enable_daily_sync_scheduler,
@@ -79,6 +97,8 @@ class DailySyncScheduler:
             )
 
         logger.info("Daily sync scheduler stopped.")
+        await self._release_leader_lock()
+        await self._close_lock_client()
 
     def stop(self) -> None:
         """Stop the scheduling loop."""
@@ -134,3 +154,66 @@ class DailySyncScheduler:
             return True
         except asyncio.TimeoutError:
             return False
+
+    async def _acquire_or_renew_leader_lock(self) -> bool:
+        if not self._lock_enabled:
+            return True
+        if Redis is None:
+            logger.error("Redis package unavailable; scheduler distributed lock is enabled.")
+            return False
+
+        try:
+            client = await self._get_lock_client()
+            if self._lock_is_owned:
+                current = await client.get(self._lock_key)
+                if current == self._lock_owner:
+                    await client.expire(self._lock_key, self._lock_ttl_seconds)
+                    return True
+                self._lock_is_owned = False
+
+            acquired = await client.set(
+                self._lock_key,
+                self._lock_owner,
+                ex=self._lock_ttl_seconds,
+                nx=True,
+            )
+            self._lock_is_owned = bool(acquired)
+            if self._lock_is_owned:
+                logger.debug("Acquired scheduler leader lock key=%s", self._lock_key)
+            return self._lock_is_owned
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to acquire scheduler distributed lock: %s", exc)
+            return False
+
+    async def _release_leader_lock(self) -> None:
+        if not self._lock_enabled or not self._lock_is_owned:
+            return
+        try:
+            client = await self._get_lock_client()
+            script = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('del', KEYS[1])
+else
+    return 0
+end
+"""
+            await client.eval(script, 1, self._lock_key, self._lock_owner)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to release scheduler distributed lock: %s", exc)
+        finally:
+            self._lock_is_owned = False
+
+    async def _get_lock_client(self):
+        if self._lock_client is not None:
+            return self._lock_client
+        settings = get_settings()
+        self._lock_client = Redis.from_url(settings.redis_url, decode_responses=True)
+        return self._lock_client
+
+    async def _close_lock_client(self) -> None:
+        if self._lock_client is None:
+            return
+        try:
+            await self._lock_client.aclose()
+        finally:
+            self._lock_client = None

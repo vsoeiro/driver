@@ -115,6 +115,10 @@ You can run with only Microsoft, only Google, or only Dropbox. You do not need a
 - `WORKER_CONCURRENCY`
 - `WORKER_JOB_TIMEOUT_SECONDS`
 - `ENABLE_DAILY_SYNC_SCHEDULER`
+- `RUN_SCHEDULER_IN_API`
+- `SCHEDULER_DISTRIBUTED_LOCK_ENABLED`
+- `SCHEDULER_LOCK_KEY`
+- `SCHEDULER_LOCK_TTL_SECONDS`
 - `DAILY_SYNC_CRON`
 - comics-related vars (`COMIC_*`) if you enable the optional comics module
 
@@ -188,6 +192,12 @@ docker compose logs -f worker-light
 docker compose logs -f worker-default
 docker compose logs -f worker-heavy
 docker compose stop worker-light worker-default worker-heavy
+```
+
+### Dedicated scheduler process (recommended in multi-instance deployments)
+
+```bash
+uv run python -m backend.workers.scheduler_worker
 ```
 
 ## Queues and workers (light/default/heavy)

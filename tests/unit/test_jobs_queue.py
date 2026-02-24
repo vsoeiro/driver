@@ -147,4 +147,4 @@ async def test_create_job_applies_type_policy_when_not_explicit(monkeypatch):
     created = await service.create_job(JobCreate(type="sync_items", payload={"account_id": "acc-1"}))
 
     assert created.max_retries == 2
-    assert created.queue_name == "driver:jobs:sync"
+    assert created.queue_name == "driver:jobs:light"

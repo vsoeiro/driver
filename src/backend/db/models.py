@@ -16,6 +16,7 @@ from sqlalchemy import (
     ForeignKey,
     BigInteger,
     UniqueConstraint,
+    Index,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -189,6 +190,12 @@ class Job(Base):
         nullable=True,
     )
 
+    __table_args__ = (
+        Index("ix_jobs_status_created_at", "status", "created_at"),
+        Index("ix_jobs_queue_status_created_at", "queue_name", "status", "created_at"),
+        Index("ix_jobs_dedupe_status", "dedupe_key", "status"),
+    )
+
 
 class JobAttempt(Base):
     """Execution attempt history for each background job."""
@@ -308,6 +315,8 @@ class ItemMetadata(Base):
 
     __table_args__ = (
         UniqueConstraint("account_id", "item_id", name="uq_item_metadata_account_item"),
+        Index("ix_item_metadata_category_id", "category_id"),
+        Index("ix_item_metadata_updated_at", "updated_at"),
     )
 
 
@@ -474,4 +483,7 @@ class Item(Base):
 
     __table_args__ = (
         UniqueConstraint('account_id', 'item_id', name='uq_items_account_item'),
+        Index("ix_items_account_path", "account_id", "path"),
+        Index("ix_items_account_item_type", "account_id", "item_type"),
+        Index("ix_items_account_modified_at", "account_id", "modified_at"),
     )

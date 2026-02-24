@@ -39,7 +39,7 @@ def test_build_drive_client_google():
 
 
 def test_build_drive_client_unsupported_provider():
-    account = _make_account("dropbox")
+    account = _make_account("unsupported-provider")
     token_manager = TokenManager(None)  # type: ignore[arg-type]
 
     with pytest.raises(DriveOrganizerError) as exc:

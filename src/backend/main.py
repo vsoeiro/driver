@@ -49,19 +49,29 @@ async def lifespan(app: FastAPI):
         # Initialize any required services or cache here
         pass
     
-    scheduler = DailySyncScheduler(async_session_maker)
-    scheduler_task = asyncio.create_task(scheduler.start())
-    logger.info("Daily sync scheduler started with dynamic runtime settings.")
+    scheduler: DailySyncScheduler | None = None
+    scheduler_task: asyncio.Task | None = None
+    if settings.enable_daily_sync_scheduler and settings.run_scheduler_in_api:
+        scheduler = DailySyncScheduler(async_session_maker)
+        scheduler_task = asyncio.create_task(scheduler.start())
+        logger.info("Daily sync scheduler started with dynamic runtime settings.")
+    else:
+        logger.info(
+            "Daily sync scheduler not started in API process (ENABLE_DAILY_SYNC_SCHEDULER=%s, RUN_SCHEDULER_IN_API=%s).",
+            settings.enable_daily_sync_scheduler,
+            settings.run_scheduler_in_api,
+        )
     
     logger.info("Starting Drive Organizer API on %s:%s", settings.host, settings.port)
     yield
     
-    logger.info("Stopping daily sync scheduler...")
-    scheduler.stop()
-    try:
-        await scheduler_task
-    except asyncio.CancelledError:
-        pass
+    if scheduler is not None and scheduler_task is not None:
+        logger.info("Stopping daily sync scheduler...")
+        scheduler.stop()
+        try:
+            await scheduler_task
+        except asyncio.CancelledError:
+            pass
 
     await close_graph_http_client()
     await close_google_drive_http_client()

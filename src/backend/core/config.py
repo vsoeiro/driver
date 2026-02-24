@@ -81,6 +81,16 @@ class Settings(BaseSettings):
     port: int = 8000
     debug: bool = False
     enable_daily_sync_scheduler: bool = Field(default=True, alias="ENABLE_DAILY_SYNC_SCHEDULER")
+    run_scheduler_in_api: bool = Field(default=False, alias="RUN_SCHEDULER_IN_API")
+    scheduler_distributed_lock_enabled: bool = Field(
+        default=True,
+        alias="SCHEDULER_DISTRIBUTED_LOCK_ENABLED",
+    )
+    scheduler_lock_key: str = Field(
+        default="driver:scheduler:daily-sync",
+        alias="SCHEDULER_LOCK_KEY",
+    )
+    scheduler_lock_ttl_seconds: int = Field(default=90, alias="SCHEDULER_LOCK_TTL_SECONDS")
     daily_sync_cron: str | None = Field(default=None, alias="DAILY_SYNC_CRON")
     daily_sync_hour: int | None = Field(default=None, alias="DAILY_SYNC_HOUR")
     daily_sync_minute: int | None = Field(default=None, alias="DAILY_SYNC_MINUTE")
@@ -185,6 +195,9 @@ class Settings(BaseSettings):
             raise ValueError("WORKER_CONCURRENCY must be greater than 0")
         if self.worker_job_timeout_seconds <= 0:
             raise ValueError("WORKER_JOB_TIMEOUT_SECONDS must be greater than 0")
+        self.scheduler_lock_key = self.scheduler_lock_key.strip() or "driver:scheduler:daily-sync"
+        if self.scheduler_lock_ttl_seconds <= 5:
+            raise ValueError("SCHEDULER_LOCK_TTL_SECONDS must be greater than 5")
         return self
 
     @property
