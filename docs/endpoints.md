@@ -2,7 +2,7 @@
 
 Complete inventory of endpoints exposed by the backend application.
 
-- Total endpoints mapped: **75**
+- Total endpoints mapped: **77**
 - Base API prefix for routers: `/api/v1`
 - Source of truth: decorators in `src/backend/api/routes/*.py` plus app routes in `src/backend/main.py`
 
@@ -12,7 +12,7 @@ Complete inventory of endpoints exposed by the backend application.
 |-------|-------|
 | `ACCOUNTS` | 3 |
 | `ADMIN` | 3 |
-| `AUTH` | 4 |
+| `AUTH` | 6 |
 | `DRIVE` | 20 |
 | `ITEMS` | 2 |
 | `JOBS` | 16 |
@@ -37,10 +37,12 @@ Complete inventory of endpoints exposed by the backend application.
 
 | Method | Path | Summary | Handler | Source |
 |--------|------|---------|---------|--------|
-| `GET` | `/api/v1/auth/google/callback` | Handle Google OAuth2 callback and persist linked account. | `google_callback` | `src/backend/api/routes/auth.py:49` |
-| `GET` | `/api/v1/auth/google/login` | Initiate Google OAuth2 login flow. | `google_login` | `src/backend/api/routes/auth.py:21` |
-| `GET` | `/api/v1/auth/microsoft/callback` | Handle Microsoft OAuth2 callback. | `microsoft_callback` | `src/backend/api/routes/auth.py:155` |
-| `GET` | `/api/v1/auth/microsoft/login` | Initiate Microsoft OAuth2 login flow. | `microsoft_login` | `src/backend/api/routes/auth.py:111` |
+| `GET` | `/api/v1/auth/dropbox/callback` | Handle Dropbox OAuth2 callback and persist linked account. | `dropbox_callback` | `src/backend/api/routes/auth.py:144` |
+| `GET` | `/api/v1/auth/dropbox/login` | Initiate Dropbox OAuth2 login flow. | `dropbox_login` | `src/backend/api/routes/auth.py:52` |
+| `GET` | `/api/v1/auth/google/callback` | Handle Google OAuth2 callback and persist linked account. | `google_callback` | `src/backend/api/routes/auth.py:80` |
+| `GET` | `/api/v1/auth/google/login` | Initiate Google OAuth2 login flow. | `google_login` | `src/backend/api/routes/auth.py:24` |
+| `GET` | `/api/v1/auth/microsoft/callback` | Handle Microsoft OAuth2 callback. | `microsoft_callback` | `src/backend/api/routes/auth.py:257` |
+| `GET` | `/api/v1/auth/microsoft/login` | Initiate Microsoft OAuth2 login flow. | `microsoft_login` | `src/backend/api/routes/auth.py:212` |
 ## DRIVE
 
 | Method | Path | Summary | Handler | Source |

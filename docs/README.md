@@ -9,10 +9,12 @@ This folder contains detailed documentation for all Drive Organizer API endpoint
 - Includes `auth`, `accounts`, `drive`, `items`, `jobs`, `metadata`, `admin`, and `/health`.
 
 ### Authentication
-- [Google Login](./auth/google-login.md)
-- [Google Callback](./auth/google-callback.md)
-- [Microsoft Login](./auth/microsoft-login.md)
-- [Microsoft Callback](./auth/microsoft-callback.md)
+- [Microsoft Login](./drive/login.md)
+- [Microsoft Callback](./drive/callback.md)
+- [Google Login](./google-drive/login.md)
+- [Google Callback](./google-drive/callback.md)
+- [Dropbox Login](./dropbox/login.md)
+- [Dropbox Callback](./dropbox/callback.md)
 
 ### Legacy Auth (Not Exposed)
 - [Logout (Legacy)](./auth/logout.md)
@@ -22,7 +24,9 @@ This folder contains detailed documentation for all Drive Organizer API endpoint
 - [List Linked Accounts](./accounts/list.md)
 - [Disconnect Account](./accounts/disconnect.md)
 
-### OneDrive
+### Drive API (OneDrive, Google Drive, Dropbox)
+- [Microsoft Login](./drive/login.md)
+- [Microsoft Callback](./drive/callback.md)
 - [List Root Files](./drive/list-root.md)
 - [List Folder Files](./drive/list-folder.md)
 - [Get File Metadata](./drive/get-metadata.md)
@@ -42,6 +46,8 @@ This folder contains detailed documentation for all Drive Organizer API endpoint
 - [Delete Item](./drive/delete-item.md)
 
 ### Google Drive
+- [Google Login](./google-drive/login.md)
+- [Google Callback](./google-drive/callback.md)
 - [List Root Files](./google-drive/list-root.md)
 - [List Folder Files](./google-drive/list-folder.md)
 - [Get File Metadata](./google-drive/get-metadata.md)
@@ -59,6 +65,27 @@ This folder contains detailed documentation for all Drive Organizer API endpoint
 - [Update Item (Rename/Move)](./google-drive/update-item.md)
 - [Copy Item](./google-drive/copy-item.md)
 - [Delete Item](./google-drive/delete-item.md)
+
+### Dropbox
+- [Dropbox Login](./dropbox/login.md)
+- [Dropbox Callback](./dropbox/callback.md)
+- [List Root Files](./dropbox/list-root.md)
+- [List Folder Files](./dropbox/list-folder.md)
+- [Get File Metadata](./dropbox/get-metadata.md)
+- [Get Download URL](./dropbox/download-url.md)
+- [Download Redirect](./dropbox/download-redirect.md)
+- [Search Files](./dropbox/search.md)
+- [Get Quota](./dropbox/quota.md)
+- [Get Recent Files](./dropbox/recent.md)
+- [Get Shared Files](./dropbox/shared.md)
+- [Get Item Path](./dropbox/path.md)
+- [Upload File](./dropbox/upload.md)
+- [Create Upload Session](./dropbox/upload-session.md)
+- [Upload Chunk](./dropbox/upload-chunk.md)
+- [Create Folder](./dropbox/create-folder.md)
+- [Update Item (Rename/Move)](./dropbox/update-item.md)
+- [Copy Item](./dropbox/copy-item.md)
+- [Delete Item](./dropbox/delete-item.md)
 
 ## Microsoft Graph API Permissions
 
@@ -78,3 +105,13 @@ This folder contains detailed documentation for all Drive Organizer API endpoint
 | `email` | OAuth scope | Access user email in ID token claims |
 | `profile` | OAuth scope | Access basic profile data |
 | `https://www.googleapis.com/auth/drive` | OAuth scope | Full read/write access to Google Drive files |
+
+## Dropbox OAuth Scopes
+
+| Scope | Type | Description |
+|------------|------|-------------|
+| `account_info.read` | OAuth scope | Read account profile (`account_id`, name, email) |
+| `files.metadata.read` | OAuth scope | List and inspect file/folder metadata |
+| `files.content.read` | OAuth scope | Download file bytes |
+| `files.content.write` | OAuth scope | Upload, move, copy, and delete files/folders |
+

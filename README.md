@@ -34,7 +34,7 @@ A full-stack application to connect cloud storage providers, browse file librari
 
 With Driver, you can:
 
-- connect multiple cloud accounts (Microsoft and Google)
+- connect multiple cloud accounts (Microsoft, Google, and Dropbox)
 - browse and search files in one place
 - apply metadata in bulk, recursively, and via rules
 - monitor jobs and attempts with retry/dead-letter flows
@@ -101,7 +101,12 @@ Google provider:
 - `GOOGLE_CLIENT_SECRET`
 - `GOOGLE_REDIRECT_URI`
 
-You can run with only Microsoft or only Google. You do not need both.
+Dropbox provider:
+- `DROPBOX_CLIENT_ID`
+- `DROPBOX_CLIENT_SECRET`
+- `DROPBOX_REDIRECT_URI`
+
+You can run with only Microsoft, only Google, or only Dropbox. You do not need all providers.
 
 ### Optional (recommended defaults exist)
 
@@ -123,6 +128,10 @@ You can run with only Microsoft or only Google. You do not need both.
   `https://developers.google.com/workspace/guides/configure-oauth-consent`
 - Google OAuth 2.0 for web server apps:
   `https://developers.google.com/identity/protocols/oauth2/web-server`
+- Dropbox OAuth guide:
+  `https://developers.dropbox.com/oauth-guide`
+- Dropbox app console:
+  `https://www.dropbox.com/developers/apps`
 
 ## Running with Docker (recommended)
 
