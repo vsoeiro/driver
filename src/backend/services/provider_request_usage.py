@@ -6,6 +6,14 @@ import asyncio
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
+try:
+    from redis.asyncio import Redis
+except Exception:  # pragma: no cover - optional runtime dependency
+    Redis = None  # type: ignore[assignment]
+
+from backend.core.config import get_settings
 
 
 @dataclass(frozen=True)
@@ -75,6 +83,9 @@ class ProviderRequestUsageTracker:
             (limit.window_seconds for limit in PROVIDER_LIMITS.values()),
             default=60,
         )
+        self._redis_client: Redis | None = None
+        self._redis_client_lock = asyncio.Lock()
+        self._redis_key_prefix = "driver:provider_usage"
 
     @staticmethod
     def _normalize_provider(provider: str | None) -> str:
@@ -85,6 +96,165 @@ class ProviderRequestUsageTracker:
         floor = now - timedelta(seconds=self._max_window_seconds)
         while counter.recent_timestamps and counter.recent_timestamps[0] < floor:
             counter.recent_timestamps.popleft()
+
+    async def _get_redis_client(self) -> Redis | None:
+        if Redis is None:
+            return None
+        if self._redis_client is not None:
+            return self._redis_client
+        async with self._redis_client_lock:
+            if self._redis_client is not None:
+                return self._redis_client
+            try:
+                settings = get_settings()
+                client = Redis.from_url(settings.redis_url, decode_responses=True)
+                await client.ping()
+                self._redis_client = client
+            except Exception:
+                self._redis_client = None
+            return self._redis_client
+
+    async def _record_response_redis(
+        self,
+        *,
+        provider: str,
+        status_code: int,
+        now: datetime,
+    ) -> None:
+        client = await self._get_redis_client()
+        if client is None:
+            return
+        score = now.timestamp()
+        providers_key = f"{self._redis_key_prefix}:providers"
+        counts_key = f"{self._redis_key_prefix}:{provider}:counts"
+        timestamps_key = f"{self._redis_key_prefix}:{provider}:timestamps"
+        window_floor = score - float(self._max_window_seconds)
+        member = f"{score}:{uuid4().hex}"
+
+        fields = {"total_requests": 1, "successful_responses": 0, "throttled_responses": 0, "client_error_responses": 0, "server_error_responses": 0}
+        if 200 <= status_code < 400:
+            fields["successful_responses"] = 1
+        elif status_code == 429:
+            fields["throttled_responses"] = 1
+        elif 400 <= status_code < 500:
+            fields["client_error_responses"] = 1
+        elif status_code >= 500:
+            fields["server_error_responses"] = 1
+
+        try:
+            pipe = client.pipeline()
+            pipe.sadd(providers_key, provider)
+            for field, value in fields.items():
+                if value:
+                    pipe.hincrby(counts_key, field, value)
+            pipe.hset(counts_key, "last_request_at", now.isoformat())
+            pipe.zadd(timestamps_key, {member: score})
+            pipe.zremrangebyscore(timestamps_key, "-inf", window_floor)
+            await pipe.execute()
+        except Exception:
+            return
+
+    async def _record_transport_error_redis(
+        self,
+        *,
+        provider: str,
+        kind: str,
+        now: datetime,
+    ) -> None:
+        client = await self._get_redis_client()
+        if client is None:
+            return
+        providers_key = f"{self._redis_key_prefix}:providers"
+        counts_key = f"{self._redis_key_prefix}:{provider}:counts"
+        field = "timeout_errors" if kind == "timeout" else "connection_errors"
+        try:
+            pipe = client.pipeline()
+            pipe.sadd(providers_key, provider)
+            pipe.hincrby(counts_key, field, 1)
+            pipe.hset(counts_key, "last_request_at", now.isoformat())
+            await pipe.execute()
+        except Exception:
+            return
+
+    async def _snapshot_from_redis(self, *, now: datetime) -> list[dict] | None:
+        client = await self._get_redis_client()
+        if client is None:
+            return None
+
+        providers_key = f"{self._redis_key_prefix}:providers"
+        try:
+            redis_providers = {
+                str(provider)
+                for provider in await client.smembers(providers_key)
+            }
+        except Exception:
+            return None
+
+        providers = sorted(set(PROVIDER_LIMITS.keys()) | redis_providers)
+        rows: list[dict] = []
+        for provider in providers:
+            limit = PROVIDER_LIMITS.get(provider)
+            counts_key = f"{self._redis_key_prefix}:{provider}:counts"
+            timestamps_key = f"{self._redis_key_prefix}:{provider}:timestamps"
+            now_ts = now.timestamp()
+            try:
+                pipe = client.pipeline()
+                pipe.hgetall(counts_key)
+                if limit is not None:
+                    floor = now_ts - float(limit.window_seconds)
+                    pipe.zcount(timestamps_key, floor, now_ts)
+                else:
+                    pipe.zcard(timestamps_key)
+                if limit is not None:
+                    prune_floor = now_ts - float(self._max_window_seconds)
+                    pipe.zremrangebyscore(timestamps_key, "-inf", prune_floor)
+                result = await pipe.execute()
+                counts = result[0] if isinstance(result[0], dict) else {}
+                requests_in_window = int(result[1] or 0)
+            except Exception:
+                return None
+
+            total_requests = int(counts.get("total_requests", 0) or 0)
+            successful_responses = int(counts.get("successful_responses", 0) or 0)
+            throttled_responses = int(counts.get("throttled_responses", 0) or 0)
+            client_error_responses = int(counts.get("client_error_responses", 0) or 0)
+            server_error_responses = int(counts.get("server_error_responses", 0) or 0)
+            timeout_errors = int(counts.get("timeout_errors", 0) or 0)
+            connection_errors = int(counts.get("connection_errors", 0) or 0)
+            raw_last_request = counts.get("last_request_at")
+            last_request_at = None
+            if raw_last_request:
+                try:
+                    parsed = datetime.fromisoformat(str(raw_last_request))
+                    last_request_at = parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+                except Exception:
+                    last_request_at = None
+
+            utilization = 0.0
+            if limit is not None and limit.max_requests > 0:
+                utilization = requests_in_window / limit.max_requests
+
+            rows.append(
+                {
+                    "provider": provider,
+                    "provider_label": (limit.label if limit else provider.title()),
+                    "window_seconds": (limit.window_seconds if limit else 0),
+                    "max_requests": (limit.max_requests if limit else 0),
+                    "requests_in_window": requests_in_window,
+                    "utilization_ratio": max(0.0, min(utilization, 1.0)),
+                    "docs_url": (limit.docs_url if limit else None),
+                    "notes": (limit.notes if limit else None),
+                    "total_requests_since_start": total_requests,
+                    "successful_responses": successful_responses,
+                    "throttled_responses": throttled_responses,
+                    "client_error_responses": client_error_responses,
+                    "server_error_responses": server_error_responses,
+                    "timeout_errors": timeout_errors,
+                    "connection_errors": connection_errors,
+                    "last_request_at": last_request_at,
+                }
+            )
+        return rows
 
     async def record_response(
         self,
@@ -109,6 +279,11 @@ class ProviderRequestUsageTracker:
             elif status_code >= 500:
                 counter.server_error_responses += 1
             self._prune(counter, current)
+        await self._record_response_redis(
+            provider=key,
+            status_code=status_code,
+            now=current,
+        )
 
     async def record_transport_error(
         self,
@@ -127,9 +302,17 @@ class ProviderRequestUsageTracker:
             else:
                 counter.connection_errors += 1
             self._prune(counter, current)
+        await self._record_transport_error_redis(
+            provider=key,
+            kind=kind,
+            now=current,
+        )
 
     async def snapshot(self, *, now: datetime | None = None) -> list[dict]:
         current = now or datetime.now(UTC)
+        redis_rows = await self._snapshot_from_redis(now=current)
+        if redis_rows is not None:
+            return redis_rows
         async with self._lock:
             providers = sorted(set(PROVIDER_LIMITS.keys()) | set(self._counters.keys()))
             rows: list[dict] = []

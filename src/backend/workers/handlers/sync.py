@@ -152,7 +152,17 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
         client,
         account,
         root_item,
-        worker_count=min(16, max(1, settings.worker_concurrency)),
+        worker_count=(
+            min(
+                max(1, settings.sync_snapshot_worker_count_microsoft),
+                max(1, settings.worker_concurrency),
+            )
+            if (account.provider or "").lower() == "microsoft"
+            else min(
+                max(1, settings.sync_snapshot_worker_count),
+                max(1, settings.worker_concurrency),
+            )
+        ),
     )
     logger.info(
         "Sync snapshot collected account_id=%s entries=%s listing_errors=%s pages_fetched=%s",

@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse, Response
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from starlette.background import BackgroundTask
 
 from backend.api.dependencies import (
@@ -24,7 +24,7 @@ from backend.api.dependencies import (
 from backend.application.drive.transfer_service import DriveTransferService
 from backend.common.upload_policy import MAX_SIMPLE_UPLOAD_SIZE
 from backend.core.exceptions import DriveOrganizerError
-from backend.db.models import Item, LinkedAccount
+from backend.db.models import Item, ItemMetadata, LinkedAccount
 from backend.schemas.drive import (
     BatchDeleteRequest,
     BreadcrumbItem,
@@ -42,6 +42,7 @@ from backend.schemas.drive import (
 from backend.security.token_manager import TokenManager
 from backend.services.item_index import (
     delete_item_and_descendants,
+    get_item_path as get_indexed_item_path,
     parent_id_from_breadcrumb,
     path_from_breadcrumb,
     update_descendant_paths,
@@ -72,6 +73,30 @@ def _ensure_unique_name(name: str, used_names: set[str]) -> str:
         counter += 1
     used_names.add(candidate.lower())
     return candidate
+
+
+async def _collect_local_item_ids_for_deletion(
+    *,
+    db: DBSession,
+    account_id: uuid.UUID,
+    item_id: str,
+) -> list[str]:
+    """Collect local indexed item ids for an item and descendants."""
+    item_path = await get_indexed_item_path(db, account_id=account_id, item_id=item_id)
+
+    if item_path:
+        stmt = select(Item.item_id).where(
+            Item.account_id == account_id,
+            (Item.path == item_path) | (Item.path.like(f"{item_path}/%")),
+        )
+    else:
+        stmt = select(Item.item_id).where(
+            Item.account_id == account_id,
+            Item.item_id == item_id,
+        )
+
+    rows = await db.execute(stmt)
+    return [row[0] for row in rows.all()]
 
 
 async def _refresh_index_from_provider(
@@ -604,6 +629,18 @@ async def delete_item(
 ) -> None:
     """Delete an item (move to recycle bin)."""
     await graph_client.delete_item(account, item_id)
+    item_ids = await _collect_local_item_ids_for_deletion(
+        db=db,
+        account_id=account.id,
+        item_id=item_id,
+    )
+    if item_ids:
+        await db.execute(
+            delete(ItemMetadata).where(
+                ItemMetadata.account_id == account.id,
+                ItemMetadata.item_id.in_(item_ids),
+            )
+        )
     await delete_item_and_descendants(db, account_id=account.id, item_id=item_id)
     await db.commit()
 
@@ -622,6 +659,23 @@ async def batch_delete_items(
         return
 
     await graph_client.batch_delete_items(account, request.item_ids)
+    item_ids_to_clear_metadata: set[str] = set()
+    for item_id in request.item_ids:
+        matched_ids = await _collect_local_item_ids_for_deletion(
+            db=db,
+            account_id=account.id,
+            item_id=item_id,
+        )
+        item_ids_to_clear_metadata.update(matched_ids)
+
+    if item_ids_to_clear_metadata:
+        await db.execute(
+            delete(ItemMetadata).where(
+                ItemMetadata.account_id == account.id,
+                ItemMetadata.item_id.in_(list(item_ids_to_clear_metadata)),
+            )
+        )
+
     for item_id in request.item_ids:
         await delete_item_and_descendants(db, account_id=account.id, item_id=item_id)
     await db.commit()

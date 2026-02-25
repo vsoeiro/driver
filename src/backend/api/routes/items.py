@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.application.metadata.item_query_service import ItemQueryService
 from backend.api.dependencies import get_session
 from backend.db.models import ItemMetadata, LinkedAccount, MetadataCategory
-from backend.schemas.items import ItemListResponse, BatchMetadataUpdate
+from backend.schemas.items import ItemListResponse, BatchMetadataUpdate, SimilarItemsReportResponse
 from backend.services.metadata_versioning import apply_metadata_change
 
 router = APIRouter(prefix="/items", tags=["Items"])
@@ -62,6 +62,32 @@ async def list_items(
         has_metadata=has_metadata,
         metadata_filters=metadata_filters,
         include_total=include_total,
+    )
+
+
+@router.get("/similar-report", response_model=SimilarItemsReportResponse)
+async def get_similar_items_report(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    account_id: Optional[UUID] = None,
+    scope: str = Query("all", pattern="^(all|same_account|cross_account)$"),
+    sort_by: str = Query("relevance", pattern="^(relevance|name|size)$"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
+    extensions: Optional[list[str]] = Query(None),
+    hide_low_priority: bool = Query(False),
+    session: AsyncSession = Depends(get_session),
+):
+    """Generate a report for possible duplicate files."""
+    service = ItemQueryService(session)
+    return await service.get_similar_items_report(
+        page=page,
+        page_size=page_size,
+        account_id=account_id,
+        scope=scope,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        extensions=extensions,
+        hide_low_priority=hide_low_priority,
     )
 
 

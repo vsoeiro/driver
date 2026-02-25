@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -13,7 +15,7 @@ from sqlalchemy.orm import selectinload
 from backend.common.metadata_filters import build_metadata_filter_conditions
 from backend.db.models import Item, ItemMetadata, MetadataCategory
 from backend.domain.errors import NotFoundError
-from backend.schemas.items import ItemListResponse
+from backend.schemas.items import ItemListResponse, SimilarItemsReportResponse
 from backend.schemas.metadata import SeriesSummaryResponse
 
 
@@ -32,11 +34,269 @@ def _parse_positive_int(value: str | None) -> int | None:
     return parsed
 
 
+def _normalize_text(value: str | None) -> str:
+    return (value or "").strip().lower()
+
+
+def _stem_name(name: str, extension: str | None) -> str:
+    clean_name = name.strip()
+    clean_ext = (extension or "").strip().lstrip(".")
+    if not clean_ext:
+        return clean_name
+    suffix = f".{clean_ext}"
+    if clean_name.lower().endswith(suffix.lower()):
+        return clean_name[: -len(suffix)]
+    return clean_name
+
+
+LOW_PRIORITY_PATH_MARKERS = (
+    "/venv/",
+    "/.venv/",
+    "/env/",
+    "/site-packages/",
+    "/__pycache__/",
+    "/node_modules/",
+    "/.objects/",
+    "/__covers__/",
+)
+
+
+def _is_low_priority_path(path: str | None) -> tuple[bool, str | None]:
+    normalized = _normalize_text(path)
+    for marker in LOW_PRIORITY_PATH_MARKERS:
+        if marker in normalized:
+            return True, marker.strip("/")
+    return False, None
+
+
 class MetadataQueryService:
     """Read-only query service used by items + metadata APIs."""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def get_similar_items_report(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        account_id: UUID | None,
+        scope: str,
+        sort_by: str,
+        sort_order: str,
+        extensions: list[str] | None,
+        hide_low_priority: bool,
+    ) -> SimilarItemsReportResponse:
+        stmt = select(
+            Item.account_id,
+            Item.item_id,
+            Item.name,
+            Item.path,
+            Item.extension,
+            Item.size,
+            Item.modified_at,
+        ).where(Item.item_type == "file")
+        if account_id:
+            stmt = stmt.where(Item.account_id == account_id)
+
+        ext_filter_set = {
+            _normalize_text(ext).lstrip(".")
+            for ext in (extensions or [])
+            if _normalize_text(ext).lstrip(".")
+        }
+
+        result = await self.session.execute(stmt)
+        rows = result.all()
+
+        with_extension_groups: dict[tuple[str, int, str], list[dict[str, Any]]] = defaultdict(list)
+        without_extension_groups: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
+
+        dedupe_map: dict[tuple[str, str, str, int, str], dict[str, Any]] = {}
+        raw_records = 0
+        for row in rows:
+            raw_records += 1
+            normalized_extension = _normalize_text(row.extension).lstrip(".")
+            normalized_path = _normalize_text(row.path)
+            dedupe_key = (
+                str(row.account_id),
+                normalized_path,
+                _normalize_text(row.name),
+                int(row.size or 0),
+                normalized_extension,
+            )
+            current_modified = row.modified_at
+            existing = dedupe_map.get(dedupe_key)
+            if existing is not None:
+                existing_modified = existing.get("modified_at")
+                should_replace = (
+                    existing_modified is None
+                    or (current_modified is not None and current_modified > existing_modified)
+                )
+                if should_replace:
+                    existing["item_id"] = row.item_id
+                    existing["modified_at"] = current_modified
+                existing["source_records"] = int(existing.get("source_records") or 1) + 1
+                continue
+
+            entry = {
+                "account_id": row.account_id,
+                "item_id": row.item_id,
+                "name": row.name,
+                "path": row.path,
+                "extension": row.extension,
+                "size": int(row.size or 0),
+                "modified_at": row.modified_at,
+                "source_records": 1,
+            }
+            dedupe_map[dedupe_key] = entry
+
+        entries = list(dedupe_map.values())
+
+        for entry in entries:
+            normalized_name = _normalize_text(entry["name"])
+            normalized_extension = _normalize_text(entry["extension"]).lstrip(".")
+            if ext_filter_set and normalized_extension not in ext_filter_set:
+                continue
+            with_key = (normalized_name, int(entry["size"] or 0), normalized_extension)
+            with_extension_groups[with_key].append(entry)
+
+            stem = _normalize_text(_stem_name(entry["name"], entry["extension"]))
+            without_key = (stem, int(entry["size"] or 0))
+            without_extension_groups[without_key].append(entry)
+
+        groups: list[dict[str, Any]] = []
+
+        def should_include_group(items: list[dict[str, Any]]) -> tuple[bool, bool]:
+            account_counts = defaultdict(int)
+            for item in items:
+                account_counts[item["account_id"]] += 1
+            has_same_account_matches = any(count > 1 for count in account_counts.values())
+            has_cross_account_matches = len(account_counts) > 1
+            if scope == "same_account" and not has_same_account_matches:
+                return False, False
+            if scope == "cross_account" and not has_cross_account_matches:
+                return False, False
+            return has_same_account_matches, has_cross_account_matches
+
+        for (normalized_name, size, normalized_extension), items in with_extension_groups.items():
+            if len(items) < 2:
+                continue
+            has_same_account_matches, has_cross_account_matches = should_include_group(items)
+            if not has_same_account_matches and not has_cross_account_matches and scope in ("same_account", "cross_account"):
+                continue
+            extension_values = sorted({_normalize_text(item["extension"]).lstrip(".") for item in items if item["extension"]})
+            low_markers = sorted(
+                {reason for reason in (_is_low_priority_path(item.get("path"))[1] for item in items) if reason}
+            )
+            low_hits = sum(1 for item in items if _is_low_priority_path(item.get("path"))[0])
+            is_low_priority = low_hits == len(items)
+            groups.append(
+                {
+                    "match_type": "with_extension",
+                    "name": normalized_name,
+                    "size": size,
+                    "extension": normalized_extension or None,
+                    "extensions": extension_values,
+                    "total_items": len(items),
+                    "total_accounts": len({item["account_id"] for item in items}),
+                    "has_same_account_matches": has_same_account_matches,
+                    "has_cross_account_matches": has_cross_account_matches,
+                    "deletable_items": max(0, len(items) - 1),
+                    "potential_savings_bytes": max(0, len(items) - 1) * int(size or 0),
+                    "priority_level": "low" if is_low_priority else "normal",
+                    "low_priority_reasons": low_markers if is_low_priority else [],
+                    "items": sorted(items, key=lambda item: (str(item["account_id"]), item["name"], item["path"] or "")),
+                }
+            )
+
+        for (stem, size), items in without_extension_groups.items():
+            if len(items) < 2:
+                continue
+            extension_values = sorted({_normalize_text(item["extension"]).lstrip(".") for item in items})
+            has_blank_extension = any(not ext for ext in extension_values)
+            has_extension_variation = len(extension_values) > 1
+            if not has_blank_extension and not has_extension_variation:
+                continue
+            has_same_account_matches, has_cross_account_matches = should_include_group(items)
+            if not has_same_account_matches and not has_cross_account_matches and scope in ("same_account", "cross_account"):
+                continue
+            low_markers = sorted(
+                {reason for reason in (_is_low_priority_path(item.get("path"))[1] for item in items) if reason}
+            )
+            low_hits = sum(1 for item in items if _is_low_priority_path(item.get("path"))[0])
+            is_low_priority = low_hits == len(items)
+            groups.append(
+                {
+                    "match_type": "without_extension",
+                    "name": stem,
+                    "size": size,
+                    "extension": None,
+                    "extensions": [ext for ext in extension_values if ext],
+                    "total_items": len(items),
+                    "total_accounts": len({item["account_id"] for item in items}),
+                    "has_same_account_matches": has_same_account_matches,
+                    "has_cross_account_matches": has_cross_account_matches,
+                    "deletable_items": max(0, len(items) - 1),
+                    "potential_savings_bytes": max(0, len(items) - 1) * int(size or 0),
+                    "priority_level": "low" if is_low_priority else "normal",
+                    "low_priority_reasons": low_markers if is_low_priority else [],
+                    "items": sorted(items, key=lambda item: (str(item["account_id"]), item["name"], item["path"] or "")),
+                }
+            )
+
+        if hide_low_priority:
+            groups = [group for group in groups if group.get("priority_level") != "low"]
+
+        if sort_by == "name":
+            groups.sort(
+                key=lambda group: (
+                    1 if group.get("priority_level") == "low" else 0,
+                    group["name"],
+                    group["match_type"],
+                ),
+                reverse=(sort_order == "desc"),
+            )
+        elif sort_by == "size":
+            groups.sort(
+                key=lambda group: (
+                    1 if group.get("priority_level") == "low" else 0,
+                    group["size"],
+                    group["name"],
+                    group["match_type"],
+                ),
+                reverse=(sort_order == "desc"),
+            )
+        else:
+            groups.sort(
+                key=lambda group: (
+                    1 if group.get("priority_level") == "low" else 0,
+                    -group["total_items"],
+                    -group["size"],
+                    group["name"],
+                    group["match_type"],
+                )
+            )
+
+        total_groups = len(groups)
+        total_items = sum(group["total_items"] for group in groups)
+        collapsed_records = max(0, raw_records - len(entries))
+        potential_savings_bytes = sum(int(group["potential_savings_bytes"] or 0) for group in groups)
+        start = (page - 1) * page_size
+        end = start + page_size
+        paged_groups = groups[start:end]
+        total_pages = (total_groups + page_size - 1) // page_size if total_groups > 0 else 0
+
+        return SimilarItemsReportResponse(
+            generated_at=datetime.now(UTC),
+            total_groups=total_groups,
+            total_items=total_items,
+            collapsed_records=collapsed_records,
+            potential_savings_bytes=potential_savings_bytes,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            groups=paged_groups,
+        )
 
     async def list_items(
         self,

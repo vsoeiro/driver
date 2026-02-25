@@ -20,6 +20,7 @@ from backend.application.metadata.rule_preview_service import RulePreviewService
 from backend.application.metadata.series_query_service import SeriesQueryService
 from backend.db.models import (
     AppSetting,
+    Item,
     ItemMetadata,
     ItemMetadataHistory,
     MetadataAttribute,
@@ -605,6 +606,11 @@ async def get_category_stats(session: AsyncSession = Depends(get_session)):
         select(
             ItemMetadata.category_id,
             func.count(ItemMetadata.id).label("item_count"),
+        )
+        .join(
+            Item,
+            (Item.account_id == ItemMetadata.account_id)
+            & (Item.item_id == ItemMetadata.item_id),
         )
         .group_by(ItemMetadata.category_id)
         .subquery()

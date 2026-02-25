@@ -120,6 +120,11 @@ class Settings(BaseSettings):
     job_queue_names: dict[str, str] = Field(default_factory=dict, alias="JOB_QUEUE_NAMES")
     worker_concurrency: int = Field(default=8, alias="WORKER_CONCURRENCY")
     worker_job_timeout_seconds: int = Field(default=1800, alias="WORKER_JOB_TIMEOUT_SECONDS")
+    sync_snapshot_worker_count: int = Field(default=4, alias="SYNC_SNAPSHOT_WORKER_COUNT")
+    sync_snapshot_worker_count_microsoft: int = Field(
+        default=2,
+        alias="SYNC_SNAPSHOT_WORKER_COUNT_MICROSOFT",
+    )
 
     @model_validator(mode="after")
     def assemble_db_connection(self) -> "Settings":
@@ -195,6 +200,10 @@ class Settings(BaseSettings):
             raise ValueError("WORKER_CONCURRENCY must be greater than 0")
         if self.worker_job_timeout_seconds <= 0:
             raise ValueError("WORKER_JOB_TIMEOUT_SECONDS must be greater than 0")
+        if self.sync_snapshot_worker_count <= 0:
+            raise ValueError("SYNC_SNAPSHOT_WORKER_COUNT must be greater than 0")
+        if self.sync_snapshot_worker_count_microsoft <= 0:
+            raise ValueError("SYNC_SNAPSHOT_WORKER_COUNT_MICROSOFT must be greater than 0")
         self.scheduler_lock_key = self.scheduler_lock_key.strip() or "driver:scheduler:daily-sync"
         if self.scheduler_lock_ttl_seconds <= 5:
             raise ValueError("SCHEDULER_LOCK_TTL_SECONDS must be greater than 5")

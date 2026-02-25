@@ -5,6 +5,8 @@ to access OneDrive files and user information.
 """
 
 import logging
+import asyncio
+import random
 from typing import Any
 from urllib.parse import quote
 
@@ -21,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 GRAPH_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
+GRAPH_THROTTLE_MAX_RETRIES = 5
+GRAPH_THROTTLE_BASE_DELAY_SECONDS = 0.5
+GRAPH_THROTTLE_MAX_DELAY_SECONDS = 15.0
 
 
 def _encode_drive_path_component(value: str) -> str:
@@ -43,6 +48,29 @@ class GraphClient(OAuthHTTPClientBase):
             Token manager for obtaining valid access tokens.
         """
         super().__init__(token_manager)
+
+    @staticmethod
+    def _parse_retry_after_seconds(response: httpx.Response) -> float | None:
+        raw_value = response.headers.get("Retry-After")
+        if not raw_value:
+            return None
+        try:
+            seconds = float(raw_value)
+        except (TypeError, ValueError):
+            return None
+        if seconds < 0:
+            return None
+        return seconds
+
+    @staticmethod
+    def _build_throttle_delay_seconds(attempt: int, response: httpx.Response) -> float:
+        retry_after = GraphClient._parse_retry_after_seconds(response)
+        if retry_after is not None:
+            return min(retry_after, GRAPH_THROTTLE_MAX_DELAY_SECONDS)
+        exponent = max(0, attempt - 1)
+        base = GRAPH_THROTTLE_BASE_DELAY_SECONDS * (2 ** exponent)
+        jitter = random.uniform(0.0, 0.35)
+        return min(base + jitter, GRAPH_THROTTLE_MAX_DELAY_SECONDS)
 
     async def _request(
         self,
@@ -86,23 +114,39 @@ class GraphClient(OAuthHTTPClientBase):
                 linked_account.id,
             )
 
-        response = await self._perform_oauth_request(
-            method=method,
-            url=url,
-            account=account,
-            timeout=request_timeout,
-            request_headers={"Content-Type": "application/json"},
-            timeout_error_factory=lambda exc: GraphAPIError(
-                "Microsoft Graph request timed out. Please try again.",
-                status_code=504,
-            ),
-            connection_error_factory=lambda exc: GraphAPIError(
-                "Failed to reach Microsoft Graph. Please try again.",
-                status_code=502,
-            ),
-            unauthorized_retry_log=_log_unauthorized_retry,
-            **kwargs,
-        )
+        attempt = 0
+        while True:
+            response = await self._perform_oauth_request(
+                method=method,
+                url=url,
+                account=account,
+                timeout=request_timeout,
+                request_headers={"Content-Type": "application/json"},
+                timeout_error_factory=lambda exc: GraphAPIError(
+                    "Microsoft Graph request timed out. Please try again.",
+                    status_code=504,
+                ),
+                connection_error_factory=lambda exc: GraphAPIError(
+                    "Failed to reach Microsoft Graph. Please try again.",
+                    status_code=502,
+                ),
+                unauthorized_retry_log=_log_unauthorized_retry,
+                **kwargs,
+            )
+            if response.status_code in {429, 503, 504} and attempt < GRAPH_THROTTLE_MAX_RETRIES:
+                attempt += 1
+                delay_seconds = self._build_throttle_delay_seconds(attempt, response)
+                logger.warning(
+                    "Graph throttled/status=%s for account=%s, retry=%s/%s in %.2fs",
+                    response.status_code,
+                    account.id,
+                    attempt,
+                    GRAPH_THROTTLE_MAX_RETRIES,
+                    delay_seconds,
+                )
+                await asyncio.sleep(delay_seconds)
+                continue
+            break
 
         if response.status_code >= 400:
             error_msg = self.parse_error_message(
