@@ -1,4 +1,6 @@
 import { NavLink, useLocation } from 'react-router-dom';
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
     Cloud,
     Activity,
@@ -6,10 +8,49 @@ import {
     FileText,
     Wand2,
     HardDrive,
+    Gauge,
 } from 'lucide-react';
+import { accountsService } from '../services/accounts';
+import { driveService } from '../services/drive';
+
+const { getAccounts } = accountsService;
+const { getQuota } = driveService;
+
+function formatSize(bytes) {
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
+    return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
+}
 
 export default function Sidebar() {
     const location = useLocation();
+    const showQuotaCard = location.pathname === '/accounts' || location.pathname.startsWith('/drive/');
+
+    const { data: accounts = [] } = useQuery({
+        queryKey: ['accounts'],
+        queryFn: getAccounts,
+        staleTime: 60000,
+    });
+
+    const selectedAccountId = useMemo(() => {
+        const match = location.pathname.match(/^\/drive\/([^/]+)/);
+        if (match?.[1]) return match[1];
+        return accounts[0]?.id || '';
+    }, [accounts, location.pathname]);
+
+    const { data: quota, isLoading: isQuotaLoading, isError: isQuotaError } = useQuery({
+        queryKey: ['quota', selectedAccountId],
+        queryFn: () => getQuota(selectedAccountId),
+        enabled: showQuotaCard && !!selectedAccountId,
+        staleTime: 45000,
+    });
+
+    const used = Number(quota?.used || 0);
+    const total = Number(quota?.total || 0);
+    const usedPercent = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0;
+
     const quickLinks = [
         { to: '/accounts', label: 'Accounts', icon: HardDrive },
         { to: '/all-files', label: 'Files', icon: FileText },
@@ -60,6 +101,34 @@ export default function Sidebar() {
                         </NavLink>
                     ))}
                 </nav>
+                {showQuotaCard && (
+                    <div className="mt-auto border-t border-border/70 px-2 pt-3">
+                        <div className="rounded-lg border border-border/80 bg-background/60 px-3 py-3">
+                            <div className="mb-2 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                                <Gauge size={12} />
+                                <span>Quota</span>
+                            </div>
+                            {isQuotaLoading ? (
+                                <div className="text-xs text-muted-foreground">Loading...</div>
+                            ) : isQuotaError ? (
+                                <div className="text-xs text-muted-foreground">Unavailable</div>
+                            ) : (
+                                <>
+                                    <div className="mb-1 text-sm font-semibold">{usedPercent}% used</div>
+                                    <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                                        <div
+                                            className="h-full rounded-full bg-primary transition-[width] duration-300"
+                                            style={{ width: `${usedPercent}%` }}
+                                        />
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                        {formatSize(used)} / {formatSize(total)}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                )}
             </div>
         </aside>
     );

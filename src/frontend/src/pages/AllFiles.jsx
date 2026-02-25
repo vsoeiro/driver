@@ -22,6 +22,7 @@ import Modal from '../components/Modal';
 import ProviderIcon from '../components/ProviderIcon';
 import MetadataModal from '../components/MetadataModal';
 import MoveModal from '../components/MoveModal';
+import SimilarFilesReportTab from '../components/SimilarFilesReportTab';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'cbw', 'pdf', 'epub', 'cbr', 'rar', 'cb7', '7z', 'cbt', 'tar']);
@@ -556,6 +557,7 @@ export default function AllFiles() {
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
     const [totalPages, setTotalPages] = useState(1);
+    const [activeTab, setActiveTab] = useState('library');
 
     const [filters, setFilters] = useState({
         extensions: [],
@@ -1081,6 +1083,33 @@ export default function AllFiles() {
 
     return (
         <div className="app-page">
+            <div className="mb-4 inline-flex items-center gap-1 rounded-lg border border-border/70 bg-card p-1">
+                <button
+                    type="button"
+                    onClick={() => setActiveTab('library')}
+                    className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                        activeTab === 'library'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                    }`}
+                >
+                    File Library
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setActiveTab('similar')}
+                    className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                        activeTab === 'similar'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                    }`}
+                >
+                    Similar Files
+                </button>
+            </div>
+
+            {activeTab === 'library' ? (
+                <>
             {/* Header */}
             <div className="page-header z-[80] flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
@@ -1565,6 +1594,10 @@ export default function AllFiles() {
                     </button>
                 </div>
             </Modal>
+                </>
+            ) : (
+                <SimilarFilesReportTab accounts={accounts} />
+            )}
         </div>
     );
 }

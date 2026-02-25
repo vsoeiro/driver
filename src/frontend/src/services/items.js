@@ -34,6 +34,22 @@ export const itemsService = {
         return response.data;
     },
 
+    getSimilarReport: async (params = {}) => {
+        const queryParams = new URLSearchParams();
+        Object.entries(params).forEach(([key, value]) => {
+            if (value !== undefined && value !== null && value !== '') {
+                if (Array.isArray(value)) {
+                    value.forEach((v) => queryParams.append(key, v));
+                } else {
+                    queryParams.append(key, value);
+                }
+            }
+        });
+        const suffix = queryParams.toString() ? `?${queryParams.toString()}` : '';
+        const response = await api.get(`/items/similar-report${suffix}`);
+        return response.data;
+    },
+
     /**
      * Batch update metadata.
      * @param {string} accountId - Account ID.
