@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AlertCircle, CheckSquare, ChevronLeft, ChevronRight, Copy, Loader2, RefreshCcw, Square, Trash2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { itemsService } from '../services/items';
 import { driveService } from '../services/drive';
 import { jobsService } from '../services/jobs';
@@ -17,6 +18,7 @@ function formatSize(bytes) {
 }
 
 export default function SimilarFilesReportTab({ accounts = [] }) {
+    const { t } = useTranslation();
     const { showToast } = useToast();
     const [page, setPage] = useState(1);
     const [scope, setScope] = useState('all');
@@ -127,11 +129,11 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
             return selectedInGroup >= totalInGroup;
         });
         if (violatingGroups.length > 0) {
-            showToast('Safety rule: keep at least 1 file per duplicate group.', 'error');
+            showToast(t('similarFiles.safetyRule'), 'error');
             return;
         }
 
-        const confirmed = window.confirm(`Delete ${selectedItems.length} selected file(s)?`);
+        const confirmed = window.confirm(t('similarFiles.confirmDelete', { count: selectedItems.length }));
         if (!confirmed) return;
 
         const byAccount = new Map();
@@ -147,7 +149,7 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                     driveService.batchDeleteItems(accId, itemIds)
                 )
             );
-            showToast(`Deleted ${selectedItems.length} file(s).`, 'success');
+            showToast(t('similarFiles.deleted', { count: selectedItems.length }), 'success');
             setSelectedKeys((prev) => {
                 const next = new Set(prev);
                 selectedItems.forEach((item) => next.delete(`${item.account_id}:${item.item_id}`));
@@ -155,7 +157,7 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
             });
             await refetch();
         } catch (error) {
-            showToast(`Failed to delete selected files: ${error.message}`, 'error');
+            showToast(`${t('similarFiles.failedDelete')}: ${error.message}`, 'error');
         }
     };
 
@@ -167,7 +169,7 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
 
     const handleCreateRemoveDuplicatesJob = async () => {
         if (!preferredKeepAccountId) {
-            showToast('Select a preferred account to keep files.', 'error');
+            showToast(t('similarFiles.selectPreferredAccount'), 'error');
             return;
         }
 
@@ -180,10 +182,10 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                 extensions,
                 hide_low_priority: hideLowPriority,
             });
-            showToast(`Duplicate removal job created (${String(job.id).slice(0, 8)}...)`, 'success');
+            showToast(t('similarFiles.jobCreated', { id: String(job.id).slice(0, 8) }), 'success');
             setRemoveDuplicatesModalOpen(false);
         } catch (error) {
-            const message = error?.response?.data?.detail || error?.message || 'Failed to create duplicate-removal job.';
+            const message = error?.response?.data?.detail || error?.message || t('similarFiles.failedCreateJob');
             showToast(message, 'error');
         } finally {
             setCreatingRemoveDuplicatesJob(false);
@@ -194,19 +196,19 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
         <div className="flex flex-col gap-4">
             <div className="page-header z-[80] flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
-                    <div className="text-lg font-semibold">Similar Files Report</div>
+                    <div className="text-lg font-semibold">{t('similarFiles.title')}</div>
                     <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-0.5 rounded-full">
-                        {totalGroups} groups
+                        {t('similarFiles.groups', { count: totalGroups })}
                     </span>
                     <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-0.5 rounded-full">
-                        {totalItems} files
+                        {t('similarFiles.files', { count: totalItems })}
                     </span>
                     <span className="text-xs font-normal bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
-                        Potential savings: {formatSize(totalPotentialSavings)}
+                        {t('similarFiles.potentialSavings', { value: formatSize(totalPotentialSavings) })}
                     </span>
                     {collapsedRecords > 0 && (
                         <span className="text-xs text-muted-foreground font-normal bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
-                            {collapsedRecords} collapsed duplicates
+                            {t('similarFiles.collapsed', { count: collapsedRecords })}
                         </span>
                     )}
                 </div>
@@ -219,9 +221,9 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                             setScope(event.target.value);
                         }}
                     >
-                        <option value="all">All matches</option>
-                        <option value="same_account">Same account</option>
-                        <option value="cross_account">Cross account</option>
+                        <option value="all">{t('similarFiles.allMatches')}</option>
+                        <option value="same_account">{t('similarFiles.sameAccount')}</option>
+                        <option value="cross_account">{t('similarFiles.crossAccount')}</option>
                     </select>
                     <select
                         className="input-shell px-2 py-1.5 text-sm"
@@ -231,8 +233,8 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                             setSortBy(event.target.value);
                         }}
                     >
-                        <option value="size">Sort: Size</option>
-                        <option value="name">Sort: Name</option>
+                        <option value="size">{t('similarFiles.sortSize')}</option>
+                        <option value="name">{t('similarFiles.sortName')}</option>
                     </select>
                     <select
                         className="input-shell px-2 py-1.5 text-sm"
@@ -242,8 +244,8 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                             setSortOrder(event.target.value);
                         }}
                     >
-                        <option value="desc">Desc</option>
-                        <option value="asc">Asc</option>
+                        <option value="desc">{t('similarFiles.desc')}</option>
+                        <option value="asc">{t('similarFiles.asc')}</option>
                     </select>
                     <select
                         className="input-shell px-2 py-1.5 text-sm"
@@ -253,7 +255,7 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                             setAccountId(event.target.value);
                         }}
                     >
-                        <option value="">All accounts</option>
+                        <option value="">{t('similarFiles.allAccounts')}</option>
                         {accounts.map((account) => (
                             <option key={account.id} value={account.id}>
                                 {account.email || account.display_name}
@@ -263,7 +265,7 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                     <input
                         type="text"
                         className="input-shell px-2 py-1.5 text-sm w-52"
-                        placeholder="Extensions: cbz, cbr"
+                        placeholder={t('similarFiles.extensionsPlaceholder')}
                         value={extensionsInput}
                         onChange={(event) => {
                             setPage(1);
@@ -276,7 +278,7 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                         className="flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium hover:bg-accent"
                     >
                         <RefreshCcw size={14} className={isFetching ? 'animate-spin' : ''} />
-                        Refresh
+                        {t('similarFiles.refresh')}
                     </button>
                     <label className="text-sm text-muted-foreground inline-flex items-center gap-2 px-2">
                         <input
@@ -288,20 +290,20 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                                 setHideLowPriority(event.target.checked);
                             }}
                         />
-                        Hide low priority
+                        {t('similarFiles.hideLowPriority')}
                     </label>
                 </div>
             </div>
 
             <div className="toolbar-surface relative z-40 px-4 py-2 flex items-center justify-end gap-2 text-sm">
-                <span className="text-muted-foreground">{selectedVisibleCount} selected</span>
+                <span className="text-muted-foreground">{t('similarFiles.selected', { count: selectedVisibleCount })}</span>
                 <button
                     type="button"
                     onClick={handleOpenRemoveDuplicatesModal}
                     className="inline-flex items-center gap-2 rounded-md border border-destructive/30 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10"
                 >
                     <Trash2 size={13} />
-                    Remove Duplicates (Job)
+                    {t('similarFiles.removeDuplicatesJob')}
                 </button>
                 <button
                     type="button"
@@ -310,9 +312,9 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                     className="inline-flex items-center gap-2 rounded-md border border-destructive/30 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-50"
                 >
                     <Trash2 size={13} />
-                    Delete Selected
+                    {t('similarFiles.deleteSelected')}
                 </button>
-                <span className="text-muted-foreground">Page {page} of {Math.max(totalPages, 1)}</span>
+                <span className="text-muted-foreground">{t('similarFiles.pageOf', { page, total: Math.max(totalPages, 1) })}</span>
                 <button
                     disabled={page <= 1 || isLoading}
                     onClick={() => setPage((prev) => prev - 1)}
@@ -332,22 +334,22 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
             <Modal
                 isOpen={removeDuplicatesModalOpen}
                 onClose={() => !creatingRemoveDuplicatesJob && setRemoveDuplicatesModalOpen(false)}
-                title="Remove Duplicates (Job)"
+                title={t('similarFiles.removeDuplicatesJob')}
                 maxWidthClass="max-w-lg"
             >
                 <div className="space-y-4">
                     <p className="text-sm text-muted-foreground">
-                        This will create a background job to remove duplicate files using the current Similar Files filters.
+                        {t('similarFiles.modalDescription')}
                     </p>
                     <div>
-                        <label className="block text-sm font-medium mb-1">Preferred account to keep files</label>
+                        <label className="block text-sm font-medium mb-1">{t('similarFiles.preferredAccount')}</label>
                         <select
                             className="w-full border rounded-md p-2 bg-background"
                             value={preferredKeepAccountId}
                             onChange={(event) => setPreferredKeepAccountId(event.target.value)}
                             disabled={creatingRemoveDuplicatesJob}
                         >
-                            <option value="">Select an account...</option>
+                            <option value="">{t('similarFiles.selectAccount')}</option>
                             {accounts.map((account) => (
                                 <option key={account.id} value={account.id}>
                                     {account.email || account.display_name}
@@ -356,10 +358,10 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                         </select>
                     </div>
                     <div className="rounded-md border border-border/70 bg-muted/30 p-3 text-xs text-muted-foreground space-y-1">
-                        <div>Scope: {scope}</div>
-                        <div>Account filter: {accountId ? (accounts.find((acc) => acc.id === accountId)?.email || accountId) : 'All accounts'}</div>
-                        <div>Extensions: {extensions.length > 0 ? extensions.join(', ') : 'All'}</div>
-                        <div>Hide low priority: {hideLowPriority ? 'Yes' : 'No'}</div>
+                        <div>{t('similarFiles.scope')}: {scope}</div>
+                        <div>{t('similarFiles.accountFilter')}: {accountId ? (accounts.find((acc) => acc.id === accountId)?.email || accountId) : t('similarFiles.allAccounts')}</div>
+                        <div>{t('similarFiles.extensions')}: {extensions.length > 0 ? extensions.join(', ') : t('similarFiles.all')}</div>
+                        <div>{t('similarFiles.hideLowPriority')}: {hideLowPriority ? t('common.yes') : t('common.no')}</div>
                     </div>
                     <div className="flex justify-end gap-2">
                         <button
@@ -368,7 +370,7 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                             disabled={creatingRemoveDuplicatesJob}
                             className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
                         >
-                            Cancel
+                            {t('common.cancel')}
                         </button>
                         <button
                             type="button"
@@ -377,7 +379,7 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                             className="px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 disabled:opacity-50 flex items-center gap-2"
                         >
                             {creatingRemoveDuplicatesJob && <Loader2 className="animate-spin" size={14} />}
-                            Create Job
+                            {t('similarFiles.createJob')}
                         </button>
                     </div>
                 </div>
@@ -390,15 +392,15 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
             ) : isError ? (
                 <div className="surface-card p-5 text-sm text-destructive flex items-center gap-2">
                     <AlertCircle size={16} />
-                    Failed to load similar files report.
+                    {t('similarFiles.failedLoad')}
                 </div>
             ) : groups.length === 0 ? (
                 <div className="empty-state">
                     <div className="empty-state-icon">
                         <Copy size={26} />
                     </div>
-                    <div className="empty-state-title">No similar groups found</div>
-                    <p className="empty-state-text">Try switching scope or account to broaden the report.</p>
+                    <div className="empty-state-title">{t('similarFiles.noGroups')}</div>
+                    <p className="empty-state-text">{t('similarFiles.noGroupsHelp')}</p>
                 </div>
             ) : (
                 <div className="space-y-3">
@@ -410,33 +412,33 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                                         {group.name}
                                     </div>
                                     <div className="text-xs text-muted-foreground flex flex-wrap gap-2 mt-1">
-                                        <span>{group.match_type === 'with_extension' ? 'With extension' : 'Without extension'}</span>
-                                        <span>Size: {formatSize(group.size)}</span>
-                                        <span>{group.total_items} files</span>
-                                        <span>Savings: {formatSize(group.potential_savings_bytes || 0)}</span>
-                                        <span>{group.total_accounts} accounts</span>
+                                        <span>{group.match_type === 'with_extension' ? t('similarFiles.withExtension') : t('similarFiles.withoutExtension')}</span>
+                                        <span>{t('similarFiles.size')}: {formatSize(group.size)}</span>
+                                        <span>{t('similarFiles.files', { count: group.total_items })}</span>
+                                        <span>{t('similarFiles.savings')}: {formatSize(group.potential_savings_bytes || 0)}</span>
+                                        <span>{t('similarFiles.accounts', { count: group.total_accounts })}</span>
                                         {group.extensions?.length > 0 && (
-                                            <span>Extensions: {group.extensions.join(', ')}</span>
+                                            <span>{t('similarFiles.extensions')}: {group.extensions.join(', ')}</span>
                                         )}
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     {group.priority_level === 'low' && (
                                         <span className="text-xs rounded-full px-2 py-1 bg-amber-100 text-amber-800">
-                                            low priority
+                                            {t('similarFiles.lowPriority')}
                                         </span>
                                     )}
                                     {group.has_same_account_matches && (
-                                        <span className="text-xs rounded-full px-2 py-1 bg-blue-100 text-blue-700">same account</span>
+                                        <span className="text-xs rounded-full px-2 py-1 bg-blue-100 text-blue-700">{t('similarFiles.sameAccount')}</span>
                                     )}
                                     {group.has_cross_account_matches && (
-                                        <span className="text-xs rounded-full px-2 py-1 bg-emerald-100 text-emerald-700">cross account</span>
+                                        <span className="text-xs rounded-full px-2 py-1 bg-emerald-100 text-emerald-700">{t('similarFiles.crossAccount')}</span>
                                     )}
                                 </div>
                             </div>
                             {group.priority_level === 'low' && group.low_priority_reasons?.length > 0 && (
                                 <div className="px-3 py-2 text-xs text-amber-800 bg-amber-50 border-b border-amber-200">
-                                    Low-priority reasons: {group.low_priority_reasons.join(', ')}
+                                    {t('similarFiles.lowPriorityReasons')}: {group.low_priority_reasons.join(', ')}
                                 </div>
                             )}
                             <div className="overflow-x-auto">
@@ -461,10 +463,10 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                                                     )}
                                                 </button>
                                             </th>
-                                            <th className="text-left p-2 align-middle">Account</th>
-                                            <th className="text-left p-2 align-middle">Extension</th>
-                                            <th className="text-left p-2 align-middle">Size</th>
-                                            <th className="text-left p-2 align-middle">Path</th>
+                                            <th className="text-left p-2 align-middle">{t('similarFiles.account')}</th>
+                                            <th className="text-left p-2 align-middle">{t('similarFiles.extension')}</th>
+                                            <th className="text-left p-2 align-middle">{t('similarFiles.size')}</th>
+                                            <th className="text-left p-2 align-middle">{t('similarFiles.path')}</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-border/60">

@@ -1,5 +1,6 @@
 import React, { useRef, useState, useMemo, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useDrive } from '../hooks/useDrive';
 import { useUpload } from '../hooks/useUpload';
 import { driveService } from '../services/drive';
@@ -15,11 +16,14 @@ import Modal from '../components/Modal';
 import MoveModal from '../components/MoveModal';
 import MetadataModal from '../components/MetadataModal';
 import BatchMetadataModal from '../components/BatchMetadataModal';
+import ImagePreviewModal from '../components/ImagePreviewModal';
 import { useToast } from '../contexts/ToastContext';
+import { isPreviewableFileName } from '../utils/imagePreview';
 
 const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'cbw', 'pdf', 'epub', 'cbr', 'rar', 'cb7', '7z', 'cbt', 'tar']);
 
 export default function FileBrowser() {
+    const { t, i18n } = useTranslation();
     const { accountId, folderId } = useParams();
     const {
         files,
@@ -76,6 +80,7 @@ export default function FileBrowser() {
     const [syncing, setSyncing] = useState(false);
     const [isNavDropActive, setIsNavDropActive] = useState(false);
     const [isComicsLibraryActive, setIsComicsLibraryActive] = useState(false);
+    const [imagePreviewItem, setImagePreviewItem] = useState(null);
     const { showToast } = useToast();
 
     // Reset selection on folder change
@@ -97,7 +102,7 @@ export default function FileBrowser() {
     // Helper to format date
     const formatDate = (dateString) => {
         if (!dateString) return '-';
-        return new Date(dateString).toLocaleDateString('en-GB', {
+        return new Date(dateString).toLocaleDateString(i18n.language, {
             day: '2-digit', month: '2-digit', year: 'numeric',
             hour: '2-digit', minute: '2-digit'
         });
@@ -208,10 +213,10 @@ export default function FileBrowser() {
         setActionLoading(true);
         try {
             await jobsService.createExtractComicAssetsJob(accountId, Array.from(selectedItems));
-            showToast('Comic mapping job created. It can process selected files and folders recursively.', 'success');
+            showToast(t('fileBrowser.comicsJobCreated'), 'success');
             setMetadataMenuOpen(false);
         } catch (e) {
-            showToast(`Failed to create comic mapping job: ${e.message}`, 'error');
+            showToast(`${t('fileBrowser.failedComicsJob')}: ${e.message}`, 'error');
         } finally {
             setActionLoading(false);
         }
@@ -237,9 +242,9 @@ export default function FileBrowser() {
         setSyncing(true);
         try {
             await jobsService.createSyncJob(accountId);
-            showToast('Sync job created for selected account.', 'success');
+            showToast(t('fileBrowser.syncCreated'), 'success');
         } catch (e) {
-            showToast(`Failed to create sync job: ${e.message}`, 'error');
+            showToast(`${t('fileBrowser.failedSync')}: ${e.message}`, 'error');
         } finally {
             setSyncing(false);
         }
@@ -295,7 +300,7 @@ export default function FileBrowser() {
         setIsNavDropActive(false);
         const droppedFiles = Array.from(event.dataTransfer?.files || []).filter(Boolean);
         if (droppedFiles.length === 0) return;
-        showToast(`Uploading ${droppedFiles.length} file(s)...`, 'info');
+        showToast(t('fileBrowser.uploadingFiles', { count: droppedFiles.length }), 'info');
         upload(droppedFiles);
     };
 
@@ -348,7 +353,7 @@ export default function FileBrowser() {
                 >
                     <nav className="flex items-center text-sm text-muted-foreground overflow-x-auto whitespace-nowrap scrollbar-hide">
                         <Link to={`/drive/${accountId}`} className="hover:text-foreground hover:underline px-1 font-medium">
-                            Root
+                            {t('fileBrowser.root')}
                         </Link>
                         {breadcrumbs.map((crumb) => (
                             <React.Fragment key={crumb.id}>
@@ -360,16 +365,16 @@ export default function FileBrowser() {
                         ))}
                     </nav>
                     <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-0.5 rounded-full shrink-0">
-                        {files.length} item{files.length === 1 ? '' : 's'}
+                        {t('fileBrowser.items', { count: files.length })}
                     </span>
                     {!searchQuery && (
                         <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <span>Page {page}</span>
+                            <span>{t('jobs.page', { page })}</span>
                             <button
                                 onClick={goToPrevPage}
                                 disabled={!canPrevPage || loading}
                                 className="p-1 rounded hover:bg-accent disabled:opacity-50"
-                                title="Previous page"
+                                title={t('jobs.previousPage')}
                             >
                                 <ChevronLeft size={14} />
                             </button>
@@ -377,7 +382,7 @@ export default function FileBrowser() {
                                 onClick={goToNextPage}
                                 disabled={!canNextPage || loading}
                                 className="p-1 rounded hover:bg-accent disabled:opacity-50"
-                                title="Next page"
+                                title={t('jobs.nextPage')}
                             >
                                 <ChevronRight size={14} />
                             </button>
@@ -385,7 +390,7 @@ export default function FileBrowser() {
                     )}
                     {isNavDropActive && (
                         <span className="status-chip border-primary/35 bg-primary/12 text-primary whitespace-nowrap">
-                            Drop files to upload
+                            {t('fileBrowser.dropUpload')}
                         </span>
                     )}
                 </div>
@@ -395,18 +400,18 @@ export default function FileBrowser() {
                         onClick={executeSync}
                         disabled={!accountId || syncing}
                         className="flex items-center gap-2 px-3 py-2 text-sm font-medium hover:bg-accent rounded-md disabled:opacity-50"
-                        title="Sync account"
+                        title={t('fileBrowser.syncAccount')}
                     >
                         {syncing ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
-                        {syncing ? 'Syncing...' : 'Sync'}
+                        {syncing ? t('fileBrowser.syncing') : t('fileBrowser.sync')}
                     </button>
                     <button onClick={() => setCreateFolderModal(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-medium hover:bg-accent rounded-md">
                         <FolderPlus size={16} />
-                        New Folder
+                        {t('fileBrowser.newFolder')}
                     </button>
                     <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="flex items-center gap-2 px-3 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50">
                         {uploading ? <Loader2 className="animate-spin" size={16} /> : <UploadCloud size={16} />}
-                        {uploading ? `Uploading ${uploadProgress}%` : 'Upload'}
+                        {uploading ? t('fileBrowser.uploadingProgress', { progress: uploadProgress }) : t('fileBrowser.upload')}
                     </button>
                     <input
                         type="file"
@@ -430,7 +435,7 @@ export default function FileBrowser() {
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         onKeyDown={handleSearchSubmit}
-                        placeholder="Search files..."
+                        placeholder={t('fileBrowser.searchFiles')}
                         className="input-shell pl-8 pr-8 py-1.5 text-sm w-full"
                     />
                     {searchTerm && (
@@ -442,25 +447,25 @@ export default function FileBrowser() {
 
                 <div className="flex items-center gap-2">
                     <div className="h-4 w-px bg-border mx-2" />
-                    <span className="font-medium mr-2 whitespace-nowrap w-24 text-right tabular-nums">{selectedItems.size} selected</span>
+                    <span className="font-medium mr-2 whitespace-nowrap w-24 text-right tabular-nums">{t('similarFiles.selected', { count: selectedItems.size })}</span>
 
                     {/* Actions */}
                     <button
                         onClick={handleDownload}
                         disabled={selectedItems.size === 0}
                         className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Download"
+                        title={t('fileBrowser.download')}
                     >
-                        <Download size={16} /> <span className="hidden sm:inline">Download</span>
+                        <Download size={16} /> <span className="hidden sm:inline">{t('fileBrowser.download')}</span>
                     </button>
 
                     <button
                         onClick={() => setMoveModal({ isOpen: true })}
                         disabled={selectedItems.size === 0}
                         className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Move"
+                        title={t('fileBrowser.move')}
                     >
-                        <ArrowRightLeft size={16} /> <span className="hidden sm:inline">Move</span>
+                        <ArrowRightLeft size={16} /> <span className="hidden sm:inline">{t('fileBrowser.move')}</span>
                     </button>
 
                     <div
@@ -473,10 +478,10 @@ export default function FileBrowser() {
                             onClick={() => setMetadataMenuOpen(!metadataMenuOpen)}
                             disabled={selectedItems.size === 0}
                             className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:cursor-not-allowed"
-                            title="Metadata Actions"
+                            title={t('fileBrowser.metadataActions')}
                         >
                             <Database size={16} />
-                            <span className="hidden sm:inline">Metadata</span>
+                            <span className="hidden sm:inline">{t('fileBrowser.metadata')}</span>
                             <ChevronDown size={14} className={`transition-transform ${metadataMenuOpen ? 'rotate-180' : ''}`} />
                         </button>
 
@@ -495,13 +500,13 @@ export default function FileBrowser() {
                                         disabled={selectedItems.size === 0}
                                         className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
                                     >
-                                        <Database size={14} /> Edit Metadata
+                                        <Database size={14} /> {t('fileBrowser.editMetadata')}
                                     </button>
                                     <button
                                         onClick={() => { setRemoveMetadataModal(true); setMetadataMenuOpen(false); }}
                                         className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 text-destructive hover:text-destructive"
                                     >
-                                        <XCircle size={14} /> Remove Metadata
+                                        <XCircle size={14} /> {t('fileBrowser.removeMetadata')}
                                     </button>
                                     {isComicsLibraryActive && (
                                         <button
@@ -510,7 +515,7 @@ export default function FileBrowser() {
                                             className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
                                         >
                                             {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
-                                            Map Comics
+                                            {t('fileBrowser.mapComics')}
                                         </button>
                                     )}
                                 </div>
@@ -524,9 +529,9 @@ export default function FileBrowser() {
                         onClick={() => setDeleteModal({ isOpen: true })}
                         disabled={selectedItems.size === 0}
                         className="p-2 hover:bg-destructive/10 text-destructive rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Delete"
+                        title={t('fileBrowser.delete')}
                     >
-                        <Trash2 size={16} /> <span className="hidden sm:inline">Delete</span>
+                        <Trash2 size={16} /> <span className="hidden sm:inline">{t('fileBrowser.delete')}</span>
                     </button>
                 </div>
             </div>
@@ -547,10 +552,10 @@ export default function FileBrowser() {
                             <Folder size={26} />
                         </div>
                         <div className="empty-state-title">
-                            {searchQuery ? 'No matching files' : 'This folder is empty'}
+                            {searchQuery ? t('fileBrowser.noMatching') : t('fileBrowser.emptyFolder')}
                         </div>
                         <p className="empty-state-text">
-                            {searchQuery ? `No results for "${searchQuery}".` : 'Upload files or create a new folder to get started.'}
+                            {searchQuery ? t('fileBrowser.noResults', { query: searchQuery }) : t('fileBrowser.emptyHelp')}
                         </p>
                     </div>
                 ) : (
@@ -562,9 +567,9 @@ export default function FileBrowser() {
                                 </button>
                             </div>
                             <div className="text-center"></div>
-                            <div>Name</div>
-                            <div className="text-right">Size</div>
-                            <div className="text-right">Modified</div>
+                            <div>{t('fileBrowser.name')}</div>
+                            <div className="text-right">{t('similarFiles.size')}</div>
+                            <div className="text-right">{t('fileBrowser.modified')}</div>
                         </div>
 
                         <div className="divide-y">
@@ -597,9 +602,27 @@ export default function FileBrowser() {
                                                     {file.name}
                                                 </Link>
                                             ) : (
-                                                <span className="text-foreground">
-                                                    {file.name}
-                                                </span>
+                                                isPreviewableFileName(file.name) ? (
+                                                    <button
+                                                        type="button"
+                                                        className="truncate text-left text-foreground hover:underline"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setImagePreviewItem({
+                                                                accountId,
+                                                                itemId: file.id,
+                                                                filename: file.name,
+                                                            });
+                                                        }}
+                                                        title={t('fileBrowser.previewFile')}
+                                                    >
+                                                        {file.name}
+                                                    </button>
+                                                ) : (
+                                                    <span className="text-foreground">
+                                                        {file.name}
+                                                    </span>
+                                                )
                                             )}
                                         </div>
 
@@ -622,17 +645,17 @@ export default function FileBrowser() {
             <Modal
                 isOpen={deleteModal.isOpen}
                 onClose={() => setDeleteModal({ isOpen: false })}
-                title={`Delete ${selectedItems.size} item(s)?`}
+                title={t('fileBrowser.deleteTitle', { count: selectedItems.size })}
             >
                 <div className="space-y-4">
-                    <p>Are you sure you want to delete the selected items? This action cannot be undone.</p>
+                    <p>{t('fileBrowser.deleteConfirm')}</p>
                     <div className="flex justify-end gap-2">
                         <button onClick={() => setDeleteModal({ isOpen: false })} className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent">
-                            Cancel
+                            {t('common.cancel')}
                         </button>
                         <button onClick={executeDelete} disabled={actionLoading} className="px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 disabled:opacity-50 flex items-center gap-2">
                             {actionLoading && <Loader2 className="animate-spin" size={14} />}
-                            Delete
+                            {t('fileBrowser.delete')}
                         </button>
                     </div>
                 </div>
@@ -641,17 +664,17 @@ export default function FileBrowser() {
             <Modal
                 isOpen={removeMetadataModal}
                 onClose={() => setRemoveMetadataModal(false)}
-                title={`Remove Metadata from ${selectedItems.size} item(s)?`}
+                title={t('fileBrowser.removeMetadataTitle', { count: selectedItems.size })}
             >
                 <div className="space-y-4">
-                    <p>Are you sure you want to remove metadata from the selected items? The file content will remain unchanged.</p>
+                    <p>{t('fileBrowser.removeMetadataConfirm')}</p>
                     <div className="flex justify-end gap-2">
                         <button onClick={() => setRemoveMetadataModal(false)} className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent">
-                            Cancel
+                            {t('common.cancel')}
                         </button>
                         <button onClick={executeRemoveMetadata} disabled={actionLoading} className="px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 disabled:opacity-50 flex items-center gap-2">
                             {actionLoading && <Loader2 className="animate-spin" size={14} />}
-                            Remove
+                            {t('fileBrowser.remove')}
                         </button>
                     </div>
                 </div>
@@ -660,27 +683,27 @@ export default function FileBrowser() {
             <Modal
                 isOpen={createFolderModal}
                 onClose={() => setCreateFolderModal(false)}
-                title="Create New Folder"
+                title={t('fileBrowser.createFolder')}
             >
                 <form onSubmit={executeCreateFolder} className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium mb-1">Folder Name</label>
+                        <label className="block text-sm font-medium mb-1">{t('fileBrowser.folderName')}</label>
                         <input
                             type="text"
                             className="w-full border rounded-md p-2 bg-background"
                             value={newFolderName}
                             onChange={e => setNewFolderName(e.target.value)}
-                            placeholder="My Folder"
+                            placeholder={t('fileBrowser.folderPlaceholder')}
                             autoFocus
                         />
                     </div>
                     <div className="flex justify-end gap-2">
                         <button type="button" onClick={() => setCreateFolderModal(false)} className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent">
-                            Cancel
+                            {t('common.cancel')}
                         </button>
                         <button type="submit" disabled={actionLoading || !newFolderName.trim()} className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2">
                             {actionLoading && <Loader2 className="animate-spin" size={14} />}
-                            Create
+                            {t('fileBrowser.create')}
                         </button>
                     </div>
                 </form>
@@ -719,6 +742,14 @@ export default function FileBrowser() {
                     setSelectedItems(new Set());
                     refresh();
                 }}
+            />
+
+            <ImagePreviewModal
+                isOpen={Boolean(imagePreviewItem)}
+                onClose={() => setImagePreviewItem(null)}
+                accountId={imagePreviewItem?.accountId}
+                itemId={imagePreviewItem?.itemId}
+                filename={imagePreviewItem?.filename}
             />
         </div>
     );

@@ -1,5 +1,6 @@
 import { Suspense, lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import Layout from './components/Layout';
 import { ToastProvider } from './contexts/ToastContext';
 import JobStatusNotifier from './components/JobStatusNotifier';
@@ -15,11 +16,13 @@ const AccountsRedirect = lazy(() => import('./pages/AccountsRedirect'));
 const AIAssistant = lazy(() => import('./pages/AIAssistant'));
 
 function App() {
+    const { t } = useTranslation();
+
     return (
         <ToastProvider>
             <JobStatusNotifier />
             <div className="min-h-screen text-foreground font-sans antialiased">
-                <Suspense fallback={<div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">Loading workspace...</div>}>
+                <Suspense fallback={<div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">{t('app.loadingWorkspace')}</div>}>
                     <Routes>
                         <Route element={<Layout />}>
                             <Route path="/" element={<Navigate to="/accounts" replace />} />

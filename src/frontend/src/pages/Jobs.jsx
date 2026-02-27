@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw, CheckCircle, XCircle, Clock, PlayCircle, Eye, AlertTriangle, Undo2, Trash2, Square, RotateCcw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { cancelJob, createMetadataUndoJob, deleteJob, getJobAttempts, getJobs, reprocessJob } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
 import Modal from '../components/Modal';
@@ -16,6 +17,7 @@ const DATE_RANGE_MS = {
 };
 
 export default function Jobs() {
+    const { t, i18n } = useTranslation();
     const [page, setPage] = useState(1);
     const [selectedJob, setSelectedJob] = useState(null);
     const [undoingBatchId, setUndoingBatchId] = useState(null);
@@ -32,28 +34,28 @@ export default function Jobs() {
     const PAGE_SIZE = 20;
 
     const DATE_RANGE_OPTIONS = [
-        { value: 'ALL', label: 'All time' },
-        { value: '24h', label: 'Last 24h', hours: 24 },
-        { value: '3d', label: 'Last 3 days', days: 3 },
-        { value: '7d', label: 'Last 7 days', days: 7 },
-        { value: '30d', label: 'Last 30 days', days: 30 },
-        { value: '90d', label: 'Last 90 days', days: 90 },
+        { value: 'ALL', label: t('jobs.allTime') },
+        { value: '24h', label: t('adminDashboard.last24h'), hours: 24 },
+        { value: '3d', label: t('adminDashboard.last3d'), days: 3 },
+        { value: '7d', label: t('adminDashboard.last7d'), days: 7 },
+        { value: '30d', label: t('adminDashboard.last30d'), days: 30 },
+        { value: '90d', label: t('adminDashboard.last90d'), days: 90 },
     ];
 
     const JOB_TYPE_OPTIONS = [
-        { value: 'ALL', label: 'All types' },
-        { value: 'sync_items', label: 'Sync Items' },
-        { value: 'move_items', label: 'Move Items' },
-        { value: 'upload_file', label: 'Upload File' },
-        { value: 'update_metadata', label: 'Update Metadata' },
-        { value: 'apply_metadata_recursive', label: 'Apply Metadata Recursive' },
-        { value: 'remove_metadata_recursive', label: 'Remove Metadata Recursive' },
-        { value: 'undo_metadata_batch', label: 'Undo Metadata Batch' },
-        { value: 'apply_metadata_rule', label: 'Apply Metadata Rule' },
-        { value: 'extract_comic_assets', label: 'Extract Comic Assets' },
-        { value: 'extract_library_comic_assets', label: 'Extract Library Comic Assets' },
-        { value: 'reindex_comic_covers', label: 'Reindex Comic Covers' },
-        { value: 'remove_duplicate_files', label: 'Remove Duplicate Files' },
+        { value: 'ALL', label: t('jobs.allTypes') },
+        { value: 'sync_items', label: t('jobs.typeOptions.sync_items') },
+        { value: 'move_items', label: t('jobs.typeOptions.move_items') },
+        { value: 'upload_file', label: t('jobs.typeOptions.upload_file') },
+        { value: 'update_metadata', label: t('jobs.typeOptions.update_metadata') },
+        { value: 'apply_metadata_recursive', label: t('jobs.typeOptions.apply_metadata_recursive') },
+        { value: 'remove_metadata_recursive', label: t('jobs.typeOptions.remove_metadata_recursive') },
+        { value: 'undo_metadata_batch', label: t('jobs.typeOptions.undo_metadata_batch') },
+        { value: 'apply_metadata_rule', label: t('jobs.typeOptions.apply_metadata_rule') },
+        { value: 'extract_comic_assets', label: t('jobs.typeOptions.extract_comic_assets') },
+        { value: 'extract_library_comic_assets', label: t('jobs.typeOptions.extract_library_comic_assets') },
+        { value: 'reindex_comic_covers', label: t('jobs.typeOptions.reindex_comic_covers') },
+        { value: 'remove_duplicate_files', label: t('jobs.typeOptions.remove_duplicate_files') },
     ];
 
     const queryKey = useMemo(
@@ -84,9 +86,9 @@ export default function Jobs() {
 
     useEffect(() => {
         if (error) {
-            showToast('Failed to load jobs', 'error');
+            showToast(t('jobs.failedLoad'), 'error');
         }
-    }, [error, showToast]);
+    }, [error, showToast, t]);
 
     usePolling({
         callback: () => refetch(),
@@ -130,10 +132,10 @@ export default function Jobs() {
         setUndoingBatchId(batchId);
         try {
             await createMetadataUndoJob(batchId);
-            showToast(`Undo job created for batch ${batchId.slice(0, 8)}...`, 'success');
+            showToast(t('jobs.undoCreated', { batch: batchId.slice(0, 8) }), 'success');
             refetch();
         } catch {
-            showToast('Failed to create undo job', 'error');
+            showToast(t('jobs.failedUndo'), 'error');
         } finally {
             setUndoingBatchId(null);
         }
@@ -145,9 +147,9 @@ export default function Jobs() {
             await deleteJob(jobId);
             queryClient.setQueryData(queryKey, (prev = []) => prev.filter((job) => job.id !== jobId));
             if (selectedJob?.id === jobId) setSelectedJob(null);
-            showToast('Job removed from history', 'success');
+            showToast(t('jobs.jobRemoved'), 'success');
         } catch {
-            showToast('Failed to remove job', 'error');
+            showToast(t('jobs.failedRemove'), 'error');
         } finally {
             setDeletingJobId(null);
         }
@@ -167,10 +169,10 @@ export default function Jobs() {
                         : job
                 )
             );
-            showToast('Cancellation requested', 'success');
+            showToast(t('jobs.cancelRequested'), 'success');
             refetch();
         } catch (error) {
-            const message = error?.response?.data?.detail || 'Failed to cancel job';
+            const message = error?.response?.data?.detail || t('jobs.failedCancel');
             showToast(message, 'error');
         } finally {
             setCancellingJobId(null);
@@ -181,10 +183,10 @@ export default function Jobs() {
         setReprocessingJobId(jobId);
         try {
             const cloned = await reprocessJob(jobId);
-            showToast(`Reprocess queued (${cloned.id})`, 'success');
+            showToast(t('jobs.reprocessQueued', { id: cloned.id }), 'success');
             refetch();
         } catch (error) {
-            const message = error?.response?.data?.detail || 'Failed to reprocess job';
+            const message = error?.response?.data?.detail || t('jobs.failedReprocess');
             showToast(message, 'error');
         } finally {
             setReprocessingJobId(null);
@@ -193,7 +195,7 @@ export default function Jobs() {
 
     const formatDate = (dateString) => {
         if (!dateString) return '-';
-        return new Date(dateString).toLocaleDateString('en-GB', {
+        return new Date(dateString).toLocaleDateString(i18n.language, {
             day: '2-digit',
             month: '2-digit',
             year: 'numeric',
@@ -327,8 +329,8 @@ export default function Jobs() {
         <div className="app-page">
             <div className="page-header flex flex-wrap items-start justify-between gap-3">
                 <div>
-                    <h1 className="page-title">Background Jobs</h1>
-                    <p className="page-subtitle">Queue status, progress and troubleshooting details.</p>
+                    <h1 className="page-title">{t('jobs.title')}</h1>
+                    <p className="page-subtitle">{t('jobs.subtitle')}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                     <select
@@ -340,14 +342,14 @@ export default function Jobs() {
                             setPage(1);
                         }}
                     >
-                        <option value="ALL">All status</option>
-                        <option value="PENDING">Pending</option>
-                        <option value="RUNNING">Running</option>
-                        <option value="RETRY_SCHEDULED">Retry Scheduled</option>
-                        <option value="COMPLETED">Completed</option>
-                        <option value="FAILED">Failed</option>
-                        <option value="DEAD_LETTER">Dead Letter</option>
-                        <option value="CANCELLED">Cancelled</option>
+                        <option value="ALL">{t('jobs.allStatus')}</option>
+                        <option value="PENDING">{t('jobStatus.PENDING')}</option>
+                        <option value="RUNNING">{t('jobStatus.RUNNING')}</option>
+                        <option value="RETRY_SCHEDULED">{t('jobStatus.RETRY_SCHEDULED')}</option>
+                        <option value="COMPLETED">{t('jobStatus.COMPLETED')}</option>
+                        <option value="FAILED">{t('jobStatus.FAILED')}</option>
+                        <option value="DEAD_LETTER">{t('jobStatus.DEAD_LETTER')}</option>
+                        <option value="CANCELLED">{t('jobStatus.CANCELLED')}</option>
                     </select>
                     <select
                         className="input-shell px-2 py-1.5 text-sm"
@@ -375,13 +377,13 @@ export default function Jobs() {
                             <option key={option.value} value={option.value}>{option.label}</option>
                         ))}
                     </select>
-                    <span className="status-chip">Page {page}</span>
+                    <span className="status-chip">{t('jobs.page', { page })}</span>
                     <div className="flex gap-1">
                         <button
                             onClick={goToPreviousPage}
                             disabled={page <= 1 || loading}
                             className="ghost-icon-button p-1 disabled:opacity-50"
-                            title="Previous page"
+                            title={t('jobs.previousPage')}
                         >
                             <ChevronLeft size={16} />
                         </button>
@@ -389,7 +391,7 @@ export default function Jobs() {
                             onClick={goToNextPage}
                             disabled={!hasNextPage || loading}
                             className="ghost-icon-button p-1 disabled:opacity-50"
-                            title="Next page"
+                            title={t('jobs.nextPage')}
                         >
                             <ChevronRight size={16} />
                         </button>
@@ -397,7 +399,7 @@ export default function Jobs() {
                     <button
                         onClick={() => refetch()}
                         className="btn-refresh px-2.5"
-                        title="Refresh"
+                        title={t('jobs.refresh')}
                     >
                         <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
                     </button>
@@ -415,26 +417,26 @@ export default function Jobs() {
                     </div>
                 ) : jobs.length === 0 ? (
                     <div className="empty-state">
-                        <div className="empty-state-title">No jobs found</div>
-                        <p className="empty-state-text">Try changing the filters or wait for new background activity.</p>
+                        <div className="empty-state-title">{t('jobs.noJobs')}</div>
+                        <p className="empty-state-text">{t('jobs.noJobsHelp')}</p>
                     </div>
                 ) : (
                     <div className="surface-card overflow-x-auto">
                         <div className="min-w-[1380px]">
                             <div className="grid grid-cols-[112px_110px_1fr_132px_132px_132px_95px_130px_110px_68px_68px_68px_68px_78px] gap-3 p-3 border-b border-border/70 bg-muted/45 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
-                                <div>Status</div>
-                                <div>Job ID</div>
-                                <div>Type</div>
-                                <div className="text-right">Created</div>
-                                <div className="text-right">Started</div>
-                                <div className="text-right">Finished</div>
-                                <div className="text-right">Duration</div>
-                                <div>ETA</div>
-                                <div>Progress</div>
-                                <div className="text-right">Total</div>
-                                <div className="text-right">Success</div>
-                                <div className="text-right">Failed</div>
-                                <div className="text-right">Skipped</div>
+                                <div>{t('jobs.status')}</div>
+                                <div>{t('jobs.jobId')}</div>
+                                <div>{t('jobs.type')}</div>
+                                <div className="text-right">{t('jobs.created')}</div>
+                                <div className="text-right">{t('jobs.started')}</div>
+                                <div className="text-right">{t('jobs.finished')}</div>
+                                <div className="text-right">{t('jobs.duration')}</div>
+                                <div>{t('jobs.eta')}</div>
+                                <div>{t('jobs.progress')}</div>
+                                <div className="text-right">{t('jobs.total')}</div>
+                                <div className="text-right">{t('jobs.success')}</div>
+                                <div className="text-right">{t('jobs.failed')}</div>
+                                <div className="text-right">{t('jobs.skipped')}</div>
                                 <div className="text-center"></div>
                             </div>
 
@@ -469,14 +471,14 @@ export default function Jobs() {
                                                             job.status === 'CANCELLED' ? 'text-zinc-500' : 'text-zinc-500'
                                                 }`}>
                                                 {getStatusIcon(job.status)}
-                                                <span>{formatJobStatus(job.status)}</span>
+                                                <span>{formatJobStatus(job.status, t)}</span>
                                             </div>
                                         </div>
                                         <div className="pointer-events-auto font-mono text-xs text-muted-foreground truncate" title={job.id}>
                                             {String(job.id).slice(0, 8)}...
                                         </div>
                                         <div className="font-medium text-foreground truncate pointer-events-auto">
-                                            {formatJobType(job.type)}
+                                            {formatJobType(job.type, t)}
                                         </div>
                                         <div className="text-right text-muted-foreground tabular-nums pointer-events-auto">
                                             {formatDate(job.created_at)}
@@ -494,7 +496,7 @@ export default function Jobs() {
                                             <div>{etaText}</div>
                                             {isQueued && (
                                                 <div>
-                                                    start: {formatDate(job.estimated_start_at)}
+                                                    {t('jobs.started')}: {formatDate(job.estimated_start_at)}
                                                 </div>
                                             )}
                                         </div>
@@ -528,7 +530,7 @@ export default function Jobs() {
                                                         onClick={() => triggerUndo(job.result.batch_id)}
                                                         disabled={undoingBatchId === job.result.batch_id}
                                                         className="p-1 text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors disabled:opacity-50"
-                                                        title="Undo Batch"
+                                                        title={t('jobs.undoBatch')}
                                                     >
                                                         <Undo2 className="w-4 h-4" />
                                                     </button>
@@ -538,7 +540,7 @@ export default function Jobs() {
                                                         onClick={() => requestCancel(job.id)}
                                                         disabled={cancellingJobId === job.id || job.status === 'CANCEL_REQUESTED'}
                                                         className="p-1 text-muted-foreground hover:text-amber-600 hover:bg-amber-50 rounded-md transition-colors disabled:opacity-50"
-                                                        title={job.status === 'CANCEL_REQUESTED' ? 'Cancellation requested' : 'Cancel job'}
+                                                        title={job.status === 'CANCEL_REQUESTED' ? t('jobs.cancelRequestedTitle') : t('jobs.cancelJob')}
                                                     >
                                                         <Square className="w-4 h-4" />
                                                     </button>
@@ -557,7 +559,7 @@ export default function Jobs() {
                                                         }
                                                     }}
                                                     className="p-1 text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors"
-                                                    title="View Details"
+                                                    title={t('jobs.viewDetails')}
                                                 >
                                                     <Eye className="w-4 h-4" />
                                                 </button>
@@ -566,7 +568,7 @@ export default function Jobs() {
                                                         onClick={() => triggerReprocess(job.id)}
                                                         disabled={reprocessingJobId === job.id}
                                                         className="p-1 text-muted-foreground hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors disabled:opacity-50"
-                                                        title="Reprocess job"
+                                                        title={t('jobs.reprocess')}
                                                     >
                                                         <RotateCcw className="w-4 h-4" />
                                                     </button>
@@ -576,7 +578,7 @@ export default function Jobs() {
                                                         onClick={() => removeJob(job.id)}
                                                         disabled={deletingJobId === job.id}
                                                         className="p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md transition-colors disabled:opacity-50"
-                                                        title="Delete from history"
+                                                        title={t('jobs.deleteHistory')}
                                                     >
                                                         <Trash2 className="w-4 h-4" />
                                                     </button>
@@ -597,13 +599,13 @@ export default function Jobs() {
             <Modal
                 isOpen={!!selectedJob}
                 onClose={() => setSelectedJob(null)}
-                title="Job Details"
+                title={t('jobs.detailsTitle')}
             >
                 {selectedJob && (
                     <div className="space-y-6">
                         <div className="flex items-center justify-between pb-4 border-b">
                             <div>
-                                <span className="text-sm text-muted-foreground block mb-1">Status</span>
+                                <span className="text-sm text-muted-foreground block mb-1">{t('jobs.status')}</span>
                                 <div className={`flex items-center gap-2 font-medium ${selectedJob.status === 'COMPLETED' ? 'text-green-600' :
                                     selectedJob.status === 'FAILED' || selectedJob.status === 'DEAD_LETTER' ? 'text-red-500' :
                                         selectedJob.status === 'RUNNING' ? 'text-blue-500' :
@@ -611,18 +613,18 @@ export default function Jobs() {
                                                 selectedJob.status === 'CANCELLED' ? 'text-zinc-500' : 'text-zinc-500'
                                     }`}>
                                     {getStatusIcon(selectedJob.status)}
-                                    <span>{formatJobStatus(selectedJob.status)}</span>
+                                    <span>{formatJobStatus(selectedJob.status, t)}</span>
                                 </div>
                             </div>
                             <div className="text-right">
-                                <span className="text-sm text-muted-foreground block mb-1">Type</span>
+                                <span className="text-sm text-muted-foreground block mb-1">{t('jobs.type')}</span>
                                 <span className="font-medium text-foreground">
-                                    {formatJobType(selectedJob.type)}
+                                    {formatJobType(selectedJob.type, t)}
                                 </span>
                             </div>
                         </div>
                         <div className="space-y-2">
-                            <span className="text-sm text-muted-foreground block">Progress</span>
+                            <span className="text-sm text-muted-foreground block">{t('jobs.progress')}</span>
                             <div className="h-2 w-full bg-muted rounded overflow-hidden">
                                 <div
                                     className={`h-full ${selectedJob.status === 'FAILED' || selectedJob.status === 'DEAD_LETTER' ? 'bg-red-500' : 'bg-primary'}`}
@@ -633,39 +635,43 @@ export default function Jobs() {
                                 {selectedJob.progress_percent ?? 0}%
                             </div>
                             <div className="text-xs text-muted-foreground">
-                                Retry: {selectedJob.retry_count}/{selectedJob.max_retries}
+                                {t('jobs.retry', { current: selectedJob.retry_count, max: selectedJob.max_retries })}
                             </div>
                             {selectedJob.next_retry_at && (
                                 <div className="text-xs text-amber-600">
-                                    Next retry: {formatDate(selectedJob.next_retry_at)}
+                                    {t('jobs.nextRetry', { value: formatDate(selectedJob.next_retry_at) })}
                                 </div>
                             )}
                             {['PENDING', 'RETRY_SCHEDULED'].includes(selectedJob.status) && (
                                 <div className="text-xs text-muted-foreground">
-                                    Queue: {selectedJob.queue_position ? `#${selectedJob.queue_position}` : '-'} | ETA start: {formatDate(selectedJob.estimated_start_at)} | Wait: {formatDuration(selectedJob.estimated_wait_seconds)}
+                                    {t('jobs.queue', {
+                                        queue: selectedJob.queue_position ? `#${selectedJob.queue_position}` : '-',
+                                        eta: formatDate(selectedJob.estimated_start_at),
+                                        wait: formatDuration(selectedJob.estimated_wait_seconds),
+                                    })}
                                 </div>
                             )}
                             {selectedJob.dead_lettered_at && (
                                 <div className="text-xs text-red-600">
-                                    Dead Letter: {formatDate(selectedJob.dead_lettered_at)}
+                                    {t('jobs.deadLetter', { value: formatDate(selectedJob.dead_lettered_at) })}
                                 </div>
                             )}
                             {selectedMetricSummary && (
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-2">
                                     <div className="rounded border bg-muted/30 px-2 py-1 text-xs">
-                                        <div className="text-muted-foreground">Total</div>
+                                        <div className="text-muted-foreground">{t('jobs.total')}</div>
                                         <div className="font-semibold tabular-nums">{selectedMetricSummary.total}</div>
                                     </div>
                                     <div className="rounded border border-emerald-500/30 bg-emerald-500/5 px-2 py-1 text-xs">
-                                        <div className="text-emerald-700">Success</div>
+                                        <div className="text-emerald-700">{t('jobs.success')}</div>
                                         <div className="font-semibold tabular-nums text-emerald-700">{selectedMetricSummary.success}</div>
                                     </div>
                                     <div className={`rounded border px-2 py-1 text-xs ${selectedMetricSummary.failed > 0 ? 'border-red-500/30 bg-red-500/5' : 'border-muted bg-muted/20'}`}>
-                                        <div className={selectedMetricSummary.failed > 0 ? 'text-red-700' : 'text-muted-foreground'}>Failed</div>
+                                        <div className={selectedMetricSummary.failed > 0 ? 'text-red-700' : 'text-muted-foreground'}>{t('jobs.failed')}</div>
                                         <div className={`font-semibold tabular-nums ${selectedMetricSummary.failed > 0 ? 'text-red-700' : 'text-muted-foreground'}`}>{selectedMetricSummary.failed}</div>
                                     </div>
                                     <div className="rounded border border-amber-500/30 bg-amber-500/5 px-2 py-1 text-xs">
-                                        <div className="text-amber-700">Skipped</div>
+                                        <div className="text-amber-700">{t('jobs.skipped')}</div>
                                         <div className="font-semibold tabular-nums text-amber-700">{selectedMetricSummary.skipped}</div>
                                     </div>
                                 </div>
@@ -673,7 +679,7 @@ export default function Jobs() {
                         </div>
 
                         <div>
-                            <span className="text-sm font-medium mb-2 block">Payload</span>
+                            <span className="text-sm font-medium mb-2 block">{t('jobs.payload')}</span>
                             <div className="bg-muted/30 p-3 rounded-md border text-xs font-mono overflow-auto max-h-40">
                                 <pre className="whitespace-pre-wrap break-all text-muted-foreground">
                                     {JSON.stringify(selectedJob.payload, null, 2)}
@@ -685,7 +691,7 @@ export default function Jobs() {
                             <div>
                                 <span className="text-sm font-medium text-destructive mb-2 flex items-center gap-2">
                                     <AlertTriangle className="w-4 h-4" />
-                                    Error Details
+                                    {t('jobs.errorDetails')}
                                 </span>
                                 <div className="bg-destructive/5 p-3 rounded-md border border-destructive/20 text-xs font-mono overflow-auto max-h-60 text-destructive">
                                     <pre className="whitespace-pre-wrap break-all">
@@ -699,16 +705,23 @@ export default function Jobs() {
                             <div>
                                 <span className="text-sm font-medium text-destructive mb-2 flex items-center gap-2">
                                     <AlertTriangle className="w-4 h-4" />
-                                    Failed Items {selectedErrorItemsTruncated > 0 ? `(showing ${selectedErrorItems.length}, +${selectedErrorItemsTruncated} hidden)` : `(${selectedErrorItems.length})`}
+                                    {t('jobs.failedItems', {
+                                        details: selectedErrorItemsTruncated > 0
+                                            ? t('jobs.failedItemsShowing', {
+                                                shown: selectedErrorItems.length,
+                                                hidden: selectedErrorItemsTruncated,
+                                            })
+                                            : t('jobs.failedItemsCount', { count: selectedErrorItems.length }),
+                                    })}
                                 </span>
                                 <div className="bg-destructive/5 p-3 rounded-md border border-destructive/20 text-xs overflow-auto max-h-72">
                                     <div className="space-y-2">
                                         {selectedErrorItems.map((entry) => (
                                             <div key={entry.key} className="rounded border border-destructive/20 bg-background/70 p-2">
                                                 <div className="font-mono text-[11px] text-muted-foreground">
-                                                    {entry.itemId ? `item_id: ${entry.itemId}` : 'item_id: -'}
-                                                    {entry.itemName ? ` | name: ${entry.itemName}` : ''}
-                                                    {entry.stage ? ` | stage: ${entry.stage}` : ''}
+                                                    {entry.itemId ? t('jobs.itemId', { id: entry.itemId }) : t('jobs.itemIdMissing')}
+                                                    {entry.itemName ? t('jobs.itemName', { name: entry.itemName }) : ''}
+                                                    {entry.stage ? t('jobs.itemStage', { stage: entry.stage }) : ''}
                                                 </div>
                                                 <div className="mt-1 text-destructive break-all">
                                                     {entry.reason}
@@ -722,13 +735,13 @@ export default function Jobs() {
 
                         {selectedMetricSummary && selectedMetricSummary.failed > 0 && selectedErrorItems.length === 0 && !selectedErrorText && (
                             <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">
-                                Failed items were counted, but no per-item error details were persisted for this job execution.
+                                {t('jobs.failedItemsNoDetails')}
                             </div>
                         )}
 
                         {selectedJob.status === 'COMPLETED' && selectedJob.result && (
                             <div>
-                                <span className="text-sm font-medium text-green-600 mb-2 block">Result</span>
+                                <span className="text-sm font-medium text-green-600 mb-2 block">{t('jobs.result')}</span>
                                 <div className="bg-green-500/5 p-3 rounded-md border border-green-500/20 text-xs font-mono overflow-auto max-h-60 text-green-600">
                                     <pre className="whitespace-pre-wrap break-all">
                                         {JSON.stringify(selectedJob.result, null, 2)}
@@ -739,7 +752,7 @@ export default function Jobs() {
 
                         {selectedJob.metrics && (
                             <div>
-                                <span className="text-sm font-medium mb-2 block">Metrics</span>
+                                <span className="text-sm font-medium mb-2 block">{t('jobs.metrics')}</span>
                                 <div className="bg-muted/30 p-3 rounded-md border text-xs font-mono overflow-auto max-h-60">
                                     <pre className="whitespace-pre-wrap break-all text-muted-foreground">
                                         {JSON.stringify(selectedJob.metrics, null, 2)}
@@ -749,21 +762,25 @@ export default function Jobs() {
                         )}
 
                         <div>
-                            <span className="text-sm font-medium mb-2 block">Attempt History</span>
+                            <span className="text-sm font-medium mb-2 block">{t('jobs.attemptHistory')}</span>
                             <div className="bg-muted/30 p-3 rounded-md border text-xs overflow-auto max-h-60">
                                 {loadingAttempts ? (
-                                    <div className="text-muted-foreground">Loading attempts...</div>
+                                    <div className="text-muted-foreground">{t('jobs.loadingAttempts')}</div>
                                 ) : attempts.length === 0 ? (
-                                    <div className="text-muted-foreground">No attempts recorded.</div>
+                                    <div className="text-muted-foreground">{t('jobs.noAttempts')}</div>
                                 ) : (
                                     <div className="space-y-2">
                                         {attempts.map((attempt) => (
                                             <div key={attempt.id} className="border rounded p-2 bg-background">
                                                 <div className="font-medium text-foreground">
-                                                    Attempt #{attempt.attempt_number} - {formatJobStatus(attempt.status)}
+                                                    {t('jobs.attempt', { number: attempt.attempt_number, status: formatJobStatus(attempt.status, t) })}
                                                 </div>
                                                 <div className="text-muted-foreground">
-                                                    Started: {formatDate(attempt.started_at)} | Finished: {formatDate(attempt.completed_at)} | Duration: {attempt.duration_seconds ?? '-'}s
+                                                    {t('jobs.attemptLine', {
+                                                        started: formatDate(attempt.started_at),
+                                                        finished: formatDate(attempt.completed_at),
+                                                        duration: attempt.duration_seconds ?? '-',
+                                                    })}
                                                 </div>
                                                 {attempt.error && (
                                                     <pre className="whitespace-pre-wrap break-all text-destructive mt-1">{attempt.error}</pre>

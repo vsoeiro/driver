@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import Modal from './Modal';
 import { metadataService } from '../services/metadata';
 import { jobsService } from '../services/jobs';
@@ -51,6 +52,7 @@ export default function MetadataModal({
     onPrevious = null,
     onNext = null,
 }) {
+    const { t, i18n } = useTranslation();
     const { showToast } = useToast();
     const [categories, setCategories] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -111,11 +113,11 @@ export default function MetadataModal({
             setTagInputDrafts({});
         } catch (error) {
             console.error(error);
-            showToast('Failed to load metadata', 'error');
+            showToast(t('metadataModal.failedLoad'), 'error');
         } finally {
             setLoading(false);
         }
-    }, [accountId, providerItemId, showToast]);
+    }, [accountId, providerItemId, showToast, t]);
 
     useEffect(() => {
         if (isOpen && item) {
@@ -172,7 +174,7 @@ export default function MetadataModal({
                 });
 
             if (missingRequired.length > 0) {
-                showToast(`Missing required fields: ${missingRequired.map(a => a.name).join(', ')}`, 'error');
+                showToast(t('metadataModal.missingRequired', { fields: missingRequired.map(a => a.name).join(', ') }), 'error');
                 setSaving(false);
                 return;
             }
@@ -201,7 +203,7 @@ export default function MetadataModal({
                     metadata,
                     category.name
                 );
-                showToast('Bulk metadata update job started', 'success');
+                showToast(t('metadataModal.bulkStarted'), 'success');
             } else {
                 await metadataService.saveItemMetadata({
                     account_id: accountId,
@@ -209,7 +211,7 @@ export default function MetadataModal({
                     category_id: selectedCategoryId,
                     values: formValues,
                 });
-                showToast('Metadata saved successfully', 'success');
+                showToast(t('metadataModal.saved'), 'success');
             }
 
             if (onSuccess) onSuccess();
@@ -217,7 +219,7 @@ export default function MetadataModal({
             onClose();
         } catch (error) {
             console.error(error);
-            showToast('Failed to save metadata', 'error');
+            showToast(t('metadataModal.failedSave'), 'error');
         } finally {
             setSaving(false);
         }
@@ -374,7 +376,7 @@ export default function MetadataModal({
                             disabled={isReadOnlyComputed}
                             onChange={(e) => handleInputChange(attr.id, e.target.checked)}
                         />
-                        <span className="text-sm text-muted-foreground">Yes</span>
+                        <span className="text-sm text-muted-foreground">{t('common.yes')}</span>
                     </div>
                 )}
 
@@ -385,7 +387,7 @@ export default function MetadataModal({
                         disabled={isReadOnlyComputed}
                         onChange={(e) => handleInputChange(attr.id, e.target.value)}
                     >
-                        <option value="">Select...</option>
+                        <option value="">{t('metadataModal.select')}</option>
                         {getSelectOptions(attr.options).map((opt) => (
                             <option key={opt} value={opt}>{opt}</option>
                         ))}
@@ -398,7 +400,7 @@ export default function MetadataModal({
                             type="text"
                             className="w-full border rounded-md p-2 bg-background"
                             value={tagsValue}
-                            placeholder={!tagsValue ? 'tag1, tag2, tag3' : ''}
+                            placeholder={!tagsValue ? t('metadataModal.tagsPlaceholder') : ''}
                             disabled={isReadOnlyComputed}
                             onChange={(e) => {
                                 const text = e.target.value;
@@ -430,7 +432,7 @@ export default function MetadataModal({
 
                 {isReadOnlyComputed && (
                     <div className="mt-1 text-xs text-muted-foreground">
-                        Mapped field (read-only)
+                        {t('metadataModal.mappedReadOnly')}
                     </div>
                 )}
             </div>
@@ -441,7 +443,7 @@ export default function MetadataModal({
         <Modal
             isOpen={isOpen}
             onClose={onClose}
-            title={`Metadata for ${item?.name}`}
+            title={t('metadataModal.title', { name: item?.name || '' })}
             maxWidthClass="max-w-5xl"
         >
             {loading ? (
@@ -459,7 +461,7 @@ export default function MetadataModal({
                                 className="inline-flex items-center gap-1 rounded-md border border-border/70 px-2.5 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-50"
                             >
                                 <ChevronLeft size={14} />
-                                Previous
+                                {t('metadataModal.previous')}
                             </button>
                             <button
                                 type="button"
@@ -467,7 +469,7 @@ export default function MetadataModal({
                                 disabled={!hasNext || saving}
                                 className="inline-flex items-center gap-1 rounded-md border border-border/70 px-2.5 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-50"
                             >
-                                Next
+                                {t('metadataModal.next')}
                                 <ChevronRight size={14} />
                             </button>
                         </div>
@@ -477,7 +479,7 @@ export default function MetadataModal({
                             <aside className="border rounded-md bg-muted/20 p-3 h-fit lg:sticky lg:top-0">
                                 <div className="flex items-center justify-between gap-2 mb-2">
                                     <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                        Cover Preview
+                                        {t('metadataModal.coverPreview')}
                                     </div>
                                     {coverUrl && (
                                         <button
@@ -489,7 +491,7 @@ export default function MetadataModal({
                                             }}
                                         >
                                             <ZoomIn size={12} />
-                                            Zoom
+                                            {t('metadataModal.zoom')}
                                         </button>
                                     )}
                                 </div>
@@ -507,11 +509,11 @@ export default function MetadataModal({
                                                 setIsCoverZoomOpen(true);
                                             }}
                                         >
-                                            <img src={coverUrl} alt={item?.name || 'Cover'} className="w-full h-full object-cover" />
+                                            <img src={coverUrl} alt={item?.name || t('metadataModal.cover')} className="w-full h-full object-cover" />
                                         </button>
                                     ) : (
                                         <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground">
-                                            No cover available
+                                            {t('metadataModal.noCover')}
                                         </div>
                                     )}
                                 </div>
@@ -527,7 +529,7 @@ export default function MetadataModal({
                                         </div>
                                         <div className="ml-3">
                                             <p className="text-sm text-yellow-700 dark:text-yellow-400">
-                                                You are editing a folder. Changes will be applied effectively to <strong>all files</strong> inside this folder recursively. This process runs in the background.
+                                                {t('metadataModal.folderWarningBefore')} <strong>{t('metadataModal.folderWarningStrong')}</strong> {t('metadataModal.folderWarningAfter')}
                                             </p>
                                         </div>
                                     </div>
@@ -535,7 +537,7 @@ export default function MetadataModal({
                             )}
 
                             <div>
-                                <label className="block text-sm font-medium mb-1">Category</label>
+                                <label className="block text-sm font-medium mb-1">{t('metadataModal.category')}</label>
                                 <select
                                     className="w-full border rounded-md p-2 bg-background"
                                     value={selectedCategoryId}
@@ -543,7 +545,7 @@ export default function MetadataModal({
                                         setSelectedCategoryId(e.target.value);
                                     }}
                                 >
-                                    <option value="">Select a category...</option>
+                                    <option value="">{t('metadataModal.selectCategory')}</option>
                                     {categories.map(cat => (
                                         <option key={cat.id} value={cat.id}>{cat.name}</option>
                                     ))}
@@ -553,7 +555,7 @@ export default function MetadataModal({
                             {selectedCategory && (
                                 <div className="space-y-3 border-t pt-4">
                                     {orderedAttributes.length === 0 ? (
-                                        <p className="text-sm text-muted-foreground italic">No attributes defined for this category.</p>
+                                        <p className="text-sm text-muted-foreground italic">{t('metadataModal.noAttributes')}</p>
                                     ) : (
                                         categoryLayout ? (
                                             <div
@@ -575,7 +577,7 @@ export default function MetadataModal({
 
                                                     if (itemType === 'section') {
                                                         const sectionKey = String(layoutItem.item_id || `section_${index}`);
-                                                        const sectionTitle = String(layoutItem.title || '').trim() || 'Section';
+                                                        const sectionTitle = String(layoutItem.title || '').trim() || t('metadataModal.section');
                                                         return (
                                                             <div key={`section-${sectionKey}`} className="min-w-0 pt-1" style={style}>
                                                                 <div className="flex items-center gap-2">
@@ -627,7 +629,7 @@ export default function MetadataModal({
                                     onClick={onClose}
                                     className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent"
                                 >
-                                    Cancel
+                                    {t('common.cancel')}
                                 </button>
                                 <button
                                     type="submit"
@@ -635,23 +637,23 @@ export default function MetadataModal({
                                     className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
                                 >
                                     {saving && <Loader2 className="animate-spin" size={14} />}
-                                    Save
+                                    {t('common.save')}
                                 </button>
                             </div>
                             <div className="border-t pt-4">
-                                <h4 className="text-sm font-semibold mb-2">Metadata History</h4>
+                                <h4 className="text-sm font-semibold mb-2">{t('metadataModal.history')}</h4>
                                 {history.length === 0 ? (
-                                    <p className="text-xs text-muted-foreground">No metadata changes for this item yet.</p>
+                                    <p className="text-xs text-muted-foreground">{t('metadataModal.noHistory')}</p>
                                 ) : (
                                     <div className="max-h-48 overflow-auto border rounded-md divide-y">
                                         {history.map((entry) => (
                                             <div key={entry.id} className="px-3 py-2 text-xs">
                                                 <div className="font-medium">{entry.action}</div>
                                                 <div className="text-muted-foreground">
-                                                    {new Date(entry.created_at).toLocaleString('en-GB')}
+                                                    {new Date(entry.created_at).toLocaleString(i18n.language)}
                                                 </div>
                                                 {entry.batch_id && (
-                                                    <div className="text-muted-foreground">Batch: {entry.batch_id}</div>
+                                                    <div className="text-muted-foreground">{t('metadataModal.batch', { id: entry.batch_id })}</div>
                                                 )}
                                             </div>
                                         ))}
@@ -669,7 +671,7 @@ export default function MetadataModal({
                 >
                     <div className="flex items-center justify-between p-3 border-b border-white/10">
                         <div className="text-xs text-white/80 truncate pr-2">
-                            {item?.name || 'Cover'}
+                            {item?.name || t('metadataModal.cover')}
                         </div>
                         <div className="flex items-center gap-2">
                             <button
@@ -719,7 +721,7 @@ export default function MetadataModal({
                     >
                         <img
                             src={coverUrl}
-                            alt={item?.name || 'Cover zoom'}
+                            alt={item?.name || t('metadataModal.coverZoom')}
                             className="max-w-none rounded shadow-2xl"
                             style={{ transform: `scale(${coverZoomLevel})`, transformOrigin: 'center center' }}
                         />

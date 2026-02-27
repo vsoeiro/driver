@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2, RefreshCw, Save, Search } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { settingsService } from '../services/settings';
 import { useToast } from '../contexts/ToastContext';
 import FolderTargetPickerModal from '../components/FolderTargetPickerModal';
 import { accountsService } from '../services/accounts';
 import { jobsService } from '../services/jobs';
 import AdminTabs from '../components/AdminTabs';
+import { SUPPORTED_LANGUAGES } from '../i18n';
 
-function PluginField({ field, onChange, onOpenFolderPicker, accountLabelById }) {
+function PluginField({ field, onChange, onOpenFolderPicker, accountLabelById, t }) {
     const inputClass = 'input-shell w-full p-2 text-sm';
     const renderers = {
         number: () => (
@@ -31,20 +33,20 @@ function PluginField({ field, onChange, onOpenFolderPicker, accountLabelById }) 
         ),
         folder_target: () => {
             const target = field.value || {};
-            const accountLabel = target.account_id ? (accountLabelById[target.account_id] || target.account_id) : 'Not selected';
-            const folderLabel = target.folder_path || 'Root';
+            const accountLabel = target.account_id ? (accountLabelById[target.account_id] || target.account_id) : t('adminSettings.pluginField.notSelected');
+            const folderLabel = target.folder_path || t('adminSettings.pluginField.root');
             return (
                 <div className="space-y-2">
                     <div className="text-xs text-muted-foreground border rounded-md p-2 bg-muted/20">
-                        <div><span className="font-medium text-foreground">Account:</span> {accountLabel}</div>
-                        <div><span className="font-medium text-foreground">Folder:</span> {folderLabel}</div>
+                        <div><span className="font-medium text-foreground">{t('adminSettings.pluginField.account')}</span> {accountLabel}</div>
+                        <div><span className="font-medium text-foreground">{t('adminSettings.pluginField.folder')}</span> {folderLabel}</div>
                     </div>
                     <button
                         type="button"
                         onClick={() => onOpenFolderPicker(field)}
                         className="px-3 py-1.5 rounded-md border text-sm hover:bg-accent"
                     >
-                        Select Account and Folder
+                        {t('adminSettings.pluginField.selectAccountFolder')}
                     </button>
                 </div>
             );
@@ -62,13 +64,14 @@ function PluginField({ field, onChange, onOpenFolderPicker, accountLabelById }) 
                 onChange={(e) => onChange(field.key, e.target.value)}
             />
             <p className="text-xs text-amber-600">
-                Unsupported input type `{field.input_type}`. Rendering as plain text fallback.
+                {t('adminSettings.pluginField.unsupported', { inputType: field.input_type })}
             </p>
         </div>
     );
 }
 
 export default function AdminSettings() {
+    const { t, i18n } = useTranslation();
     const { showToast } = useToast();
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -114,13 +117,13 @@ export default function AdminSettings() {
                 });
             } catch (error) {
                 console.error(error);
-                showToast('Failed to load admin settings', 'error');
+                showToast(t('adminSettings.failedLoad'), 'error');
             } finally {
                 setLoading(false);
             }
         };
         load();
-    }, [showToast]);
+    }, [showToast, t]);
 
     const accountLabelById = useMemo(
         () => Object.fromEntries(accounts.map((acc) => [acc.id, `${acc.display_name} (${acc.email})`])),
@@ -131,21 +134,27 @@ export default function AdminSettings() {
         const baseGroups = [
             {
                 id: 'scheduler',
-                title: 'Daily Scheduler',
-                description: 'Configure recurring synchronization jobs.',
+                title: t('adminSettings.schedulerTitle'),
+                description: t('adminSettings.schedulerDescription'),
                 type: 'scheduler',
             },
             {
                 id: 'workers',
-                title: 'Workers',
-                description: 'Background worker execution limits and timeouts.',
+                title: t('adminSettings.workersTitle'),
+                description: t('adminSettings.workersDescription'),
                 type: 'workers',
             },
             {
                 id: 'ai',
-                title: 'AI',
-                description: 'AI assistant runtime model selection.',
+                title: t('adminSettings.aiTitle'),
+                description: t('adminSettings.aiDescription'),
                 type: 'ai',
+            },
+            {
+                id: 'interface',
+                title: t('adminSettings.interfaceTitle'),
+                description: t('adminSettings.interfaceDescription'),
+                type: 'interface',
             },
             ...form.plugin_settings.map((group) => ({
                 id: `plugin:${group.plugin_key}`,
@@ -162,7 +171,7 @@ export default function AdminSettings() {
             const description = (group.description || '').toLowerCase();
             return group.title.toLowerCase().includes(normalizedFilter) || description.includes(normalizedFilter);
         });
-    }, [form.plugin_settings, groupFilter]);
+    }, [form.plugin_settings, groupFilter, t]);
 
     useEffect(() => {
         if (!groups.some((group) => group.id === activeGroupId)) {
@@ -227,9 +236,9 @@ export default function AdminSettings() {
                 ai_api_key_remote: data.ai_api_key_remote || '',
                 plugin_settings: data.plugin_settings || [],
             });
-            showToast('Settings saved successfully', 'success');
+            showToast(t('adminSettings.saved'), 'success');
         } catch (error) {
-            const message = error?.response?.data?.detail || 'Failed to save settings';
+            const message = error?.response?.data?.detail || t('adminSettings.failedSave');
             showToast(message, 'error');
         } finally {
             setSaving(false);
@@ -241,9 +250,9 @@ export default function AdminSettings() {
         setPluginActionLoading((prev) => ({ ...prev, [`${group.plugin_key}:${action}`]: true }));
         try {
             const job = await jobsService.createReindexComicCoversJob(group.plugin_key);
-            showToast(`Cover re-index job started (${job.id}).`, 'success');
+            showToast(t('adminSettings.reindexStarted', { id: job.id }), 'success');
         } catch (error) {
-            const message = error?.response?.data?.detail || 'Failed to start cover re-index job';
+            const message = error?.response?.data?.detail || t('adminSettings.failedReindex');
             showToast(message, 'error');
         } finally {
             setPluginActionLoading((prev) => ({ ...prev, [`${group.plugin_key}:${action}`]: false }));
@@ -252,7 +261,7 @@ export default function AdminSettings() {
 
     const renderGroupContent = () => {
         if (!selectedGroup) {
-            return <p className="text-sm text-muted-foreground">No settings group found.</p>;
+            return <p className="text-sm text-muted-foreground">{t('adminSettings.noGroupFound')}</p>;
         }
 
         if (selectedGroup.type === 'scheduler') {
@@ -260,8 +269,8 @@ export default function AdminSettings() {
                 <div className="space-y-4">
                     <div className="flex items-center justify-between gap-4">
                         <div>
-                            <h2 className="font-medium">Daily Sync Scheduler</h2>
-                            <p className="text-sm text-muted-foreground">Toggle automatic sync jobs based on cron schedule.</p>
+                            <h2 className="font-medium">{t('adminSettings.dailySyncScheduler')}</h2>
+                            <p className="text-sm text-muted-foreground">{t('adminSettings.dailySyncHelp')}</p>
                         </div>
                         <label className="inline-flex items-center gap-2 text-sm">
                             <input
@@ -274,12 +283,12 @@ export default function AdminSettings() {
                                     }))
                                 }
                             />
-                            Enabled
+                            {t('adminSettings.enabled')}
                         </label>
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium mb-1">Cron Expression</label>
+                        <label className="block text-sm font-medium mb-1">{t('adminSettings.cronExpression')}</label>
                         <input
                             type="text"
                             className="w-full border rounded-md p-2 bg-background text-sm"
@@ -302,14 +311,14 @@ export default function AdminSettings() {
             return (
                 <div className="space-y-4">
                     <div>
-                        <h2 className="font-medium">Worker Runtime</h2>
+                        <h2 className="font-medium">{t('adminSettings.workerRuntime')}</h2>
                         <p className="text-sm text-muted-foreground">
-                            Configure execution timeout for a single background job.
+                            {t('adminSettings.workerRuntimeHelp')}
                         </p>
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium mb-1">Worker Job Timeout (seconds)</label>
+                        <label className="block text-sm font-medium mb-1">{t('adminSettings.workerTimeout')}</label>
                         <input
                             type="number"
                             min="1"
@@ -323,7 +332,7 @@ export default function AdminSettings() {
                             }
                         />
                         <p className="text-xs text-muted-foreground mt-1">
-                            This value is read by worker processes. Restart workers after saving.
+                            {t('adminSettings.workerTimeoutHelp')}
                         </p>
                     </div>
                 </div>
@@ -334,14 +343,14 @@ export default function AdminSettings() {
             return (
                 <div className="space-y-4">
                     <div>
-                        <h2 className="font-medium">AI Runtime</h2>
+                        <h2 className="font-medium">{t('adminSettings.aiRuntime')}</h2>
                         <p className="text-sm text-muted-foreground">
-                            Configure model, provider mode and OpenAI-compatible endpoint credentials for AI assistant.
+                            {t('adminSettings.aiRuntimeHelp')}
                         </p>
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium mb-1">AI Provider Mode</label>
+                        <label className="block text-sm font-medium mb-1">{t('adminSettings.aiProviderMode')}</label>
                         <select
                             className="w-full border rounded-md p-2 bg-background text-sm"
                             value={form.ai_provider_mode}
@@ -352,14 +361,14 @@ export default function AdminSettings() {
                                 }))
                             }
                         >
-                            <option value="local">Local only (Ollama)</option>
-                            <option value="openai_compatible">OpenAI compatible</option>
-                            <option value="gemini">Gemini (Google API)</option>
+                            <option value="local">{t('adminSettings.aiProviderLocal')}</option>
+                            <option value="openai_compatible">{t('adminSettings.aiProviderOpenAiCompatible')}</option>
+                            <option value="gemini">{t('adminSettings.aiProviderGemini')}</option>
                         </select>
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium mb-1">Default AI Model</label>
+                        <label className="block text-sm font-medium mb-1">{t('adminSettings.defaultAiModel')}</label>
                         <input
                             type="text"
                             className="w-full border rounded-md p-2 bg-background text-sm"
@@ -373,12 +382,16 @@ export default function AdminSettings() {
                             placeholder="e.g. llama3.1:8b"
                         />
                         <p className="text-xs text-muted-foreground mt-1">
-                            Examples: <code>llama3.1:8b</code> (Ollama), <code>gemini-2.0-flash</code> (Gemini, sem <code>models/</code>).
+                            {t('adminSettings.modelExamples', {
+                                ollama: 'llama3.1:8b',
+                                gemini: 'gemini-2.0-flash',
+                                models: 'models/',
+                            })}
                         </p>
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium mb-1">OpenAI-compatible Base URL</label>
+                        <label className="block text-sm font-medium mb-1">{t('adminSettings.baseUrl')}</label>
                         <input
                             type="text"
                             className="w-full border rounded-md p-2 bg-background text-sm"
@@ -392,12 +405,14 @@ export default function AdminSettings() {
                             placeholder="e.g. https://api.openai.com/v1"
                         />
                         <p className="text-xs text-muted-foreground mt-1">
-                            For Gemini mode, use <code>https://generativelanguage.googleapis.com/v1beta/openai</code>.
+                            {t('adminSettings.geminiModeHelp', {
+                                url: 'https://generativelanguage.googleapis.com/v1beta/openai',
+                            })}
                         </p>
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium mb-1">OpenAI-compatible API Key</label>
+                        <label className="block text-sm font-medium mb-1">{t('adminSettings.apiKey')}</label>
                         <input
                             type="password"
                             autoComplete="new-password"
@@ -416,20 +431,48 @@ export default function AdminSettings() {
             );
         }
 
+        if (selectedGroup.type === 'interface') {
+            return (
+                <div className="space-y-4">
+                    <div>
+                        <h2 className="font-medium">{t('adminSettings.languageTitle')}</h2>
+                        <p className="text-sm text-muted-foreground">
+                            {t('adminSettings.languageDescription')}
+                        </p>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium mb-1">{t('language.label')}</label>
+                        <select
+                            className="input-shell w-full p-2 text-sm"
+                            value={i18n.language}
+                            onChange={(e) => i18n.changeLanguage(e.target.value)}
+                        >
+                            {SUPPORTED_LANGUAGES.map((language) => (
+                                <option key={language} value={language}>
+                                    {language === 'pt-BR' ? t('language.portuguese') : t('language.english')}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+            );
+        }
+
         const pluginKey = selectedGroup.pluginKey;
         const group = form.plugin_settings.find((item) => item.plugin_key === pluginKey);
         if (!group) {
-            return <p className="text-sm text-muted-foreground">Metadata library group not found.</p>;
+            return <p className="text-sm text-muted-foreground">{t('adminSettings.metadataGroupNotFound')}</p>;
         }
 
         return (
             <div className="space-y-4">
                 <div>
                     <h2 className="font-medium">{group.plugin_name}</h2>
-                    <p className="text-sm text-muted-foreground">{group.plugin_description || 'Metadata-library-specific runtime settings.'}</p>
+                    <p className="text-sm text-muted-foreground">{group.plugin_description || t('adminSettings.metadataSettingsFallback')}</p>
                     {group.capabilities?.supported_input_types?.length > 0 && (
                         <p className="text-xs text-muted-foreground mt-1">
-                            Supported field types: {group.capabilities.supported_input_types.join(', ')}
+                            {t('adminSettings.supportedFieldTypes', { types: group.capabilities.supported_input_types.join(', ') })}
                         </p>
                     )}
                 </div>
@@ -447,7 +490,7 @@ export default function AdminSettings() {
                                 {pluginActionLoading[`${group.plugin_key}:${action}`]
                                     ? <Loader2 className="w-4 h-4 animate-spin" />
                                     : <RefreshCw className="w-4 h-4" />}
-                                {action === 'reindex_covers' ? 'Re-index Covers' : action}
+                                {action === 'reindex_covers' ? t('adminSettings.reindexCovers') : action}
                             </button>
                         ))}
                     </div>
@@ -463,6 +506,7 @@ export default function AdminSettings() {
                             <PluginField
                                 field={field}
                                 accountLabelById={accountLabelById}
+                                t={t}
                                 onChange={(fieldKey, value) => updatePluginField(group.plugin_key, fieldKey, value)}
                                 onOpenFolderPicker={(f) => openFolderPicker(group.plugin_key, f)}
                             />
@@ -480,8 +524,8 @@ export default function AdminSettings() {
         <div className="app-page">
             <div className="page-header flex flex-wrap items-start justify-between gap-3">
                 <div>
-                    <h1 className="page-title">Admin Settings</h1>
-                    <p className="page-subtitle">Grouped runtime configuration panel.</p>
+                    <h1 className="page-title">{t('adminSettings.title')}</h1>
+                    <p className="page-subtitle">{t('adminSettings.subtitle')}</p>
                 </div>
                 <AdminTabs />
             </div>
@@ -499,7 +543,7 @@ export default function AdminSettings() {
                                 type="text"
                                 value={groupFilter}
                                 onChange={(e) => setGroupFilter(e.target.value)}
-                                placeholder="Search settings"
+                                placeholder={t('adminSettings.searchPlaceholder')}
                                 className="input-shell w-full pl-8 pr-2 py-2 text-sm"
                             />
                         </div>
@@ -528,8 +572,8 @@ export default function AdminSettings() {
                     <section className="surface-card flex-1 min-h-0 overflow-auto p-5 space-y-5">
                         <div className="flex items-center justify-between gap-3 border-b border-border/70 pb-4">
                             <div>
-                                <h2 className="text-base font-semibold">{selectedGroup?.title || 'Settings group'}</h2>
-                                <p className="text-sm text-muted-foreground">{selectedGroup?.description || 'Select a group on the left.'}</p>
+                                <h2 className="text-base font-semibold">{selectedGroup?.title || t('adminSettings.settingsGroup')}</h2>
+                                <p className="text-sm text-muted-foreground">{selectedGroup?.description || t('adminSettings.selectGroup')}</p>
                             </div>
                             <button
                                 type="submit"
@@ -537,7 +581,7 @@ export default function AdminSettings() {
                                 className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-lg shadow-primary/20 transition-transform hover:-translate-y-[1px] hover:bg-primary/92 disabled:opacity-50"
                             >
                                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                                Save
+                                {t('adminSettings.save')}
                             </button>
                         </div>
 

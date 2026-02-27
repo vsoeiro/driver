@@ -9,8 +9,8 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       COMIC_RAR_TOOLS_DIR: /app/.tools
-      DB_POOL_SIZE: 6
-      DB_MAX_OVERFLOW: 0
+      DB_POOL_SIZE: 12
+      DB_MAX_OVERFLOW: 8
     command: >
       sh -c "uv run alembic upgrade head &&
              uv run uvicorn backend.main:app --host 0.0.0.0 --port 8000"
@@ -21,6 +21,8 @@ services:
       - "host.docker.internal:host-gateway"
     ports:
       - "8000:8000"
+    volumes:
+      - upload_tmp:/tmp/onedrive_uploads
     restart: unless-stopped
 
   worker-light:
@@ -35,12 +37,14 @@ services:
       COMIC_RAR_TOOLS_DIR: /app/.tools
       WORKER_QUEUE_NAME: driver:jobs:light
       WORKER_CONCURRENCY: 8
-      DB_POOL_SIZE: 3
-      DB_MAX_OVERFLOW: 0
+      DB_POOL_SIZE: 12
+      DB_MAX_OVERFLOW: 8
     command: uv run arq backend.workers.arq_worker.WorkerSettings
     depends_on:
       redis:
         condition: service_healthy
+    volumes:
+      - upload_tmp:/tmp/onedrive_uploads
     restart: unless-stopped
 
   worker-default:
@@ -55,12 +59,14 @@ services:
       COMIC_RAR_TOOLS_DIR: /app/.tools
       WORKER_QUEUE_NAME: driver:jobs
       WORKER_CONCURRENCY: 3
-      DB_POOL_SIZE: 2
-      DB_MAX_OVERFLOW: 0
+      DB_POOL_SIZE: 8
+      DB_MAX_OVERFLOW: 4
     command: uv run arq backend.workers.arq_worker.WorkerSettings
     depends_on:
       redis:
         condition: service_healthy
+    volumes:
+      - upload_tmp:/tmp/onedrive_uploads
     restart: unless-stopped
 
   worker-heavy:
@@ -75,12 +81,14 @@ services:
       COMIC_RAR_TOOLS_DIR: /app/.tools
       WORKER_QUEUE_NAME: driver:jobs:heavy
       WORKER_CONCURRENCY: 1
-      DB_POOL_SIZE: 1
-      DB_MAX_OVERFLOW: 0
+      DB_POOL_SIZE: 4
+      DB_MAX_OVERFLOW: 2
     command: uv run arq backend.workers.arq_worker.WorkerSettings
     depends_on:
       redis:
         condition: service_healthy
+    volumes:
+      - upload_tmp:/tmp/onedrive_uploads
     restart: unless-stopped
 
   redis:
@@ -105,3 +113,6 @@ services:
     ports:
       - "5173:80"
     restart: unless-stopped
+
+volumes:
+  upload_tmp:

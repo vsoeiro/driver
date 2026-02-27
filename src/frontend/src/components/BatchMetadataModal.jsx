@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { metadataService } from '../services/metadata';
 import { itemsService } from '../services/items';
 import { jobsService } from '../services/jobs';
@@ -18,6 +19,7 @@ import { Loader2 } from 'lucide-react';
 import Modal from './Modal';
 
 const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToast }) => {
+    const { t } = useTranslation();
     const [categories, setCategories] = useState([]);
     const [selectedCategory, setSelectedCategory] = useState('');
     const [attributeValues, setAttributeValues] = useState({});
@@ -172,15 +174,15 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
             await Promise.all(promises);
 
             if (applyRecursive && recursiveJobs > 0) {
-                showToast(`${recursiveJobs} recursive job(s) created for folder contents.`, 'success');
+                showToast(t('batchMetadata.recursiveJobsCreated', { count: recursiveJobs }), 'success');
             } else {
-                showToast('Metadata updated successfully.', 'success');
+                showToast(t('batchMetadata.saved'), 'success');
             }
 
             onSuccess();
             onClose();
         } catch (error) {
-            showToast('Failed to update metadata: ' + error.message, 'error');
+            showToast(`${t('batchMetadata.failed')}: ${error.message}`, 'error');
         } finally {
             setSaving(false);
         }
@@ -286,7 +288,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                         disabled={isReadOnlyComputed}
                         onChange={(e) => setAttributeValues((prev) => ({ ...prev, [attr.id]: e.target.value }))}
                     >
-                        <option value="">Select...</option>
+                        <option value="">{t('batchMetadata.select')}</option>
                         {getSelectOptions(attr.options).map((opt) => (
                             <option key={opt} value={opt}>{opt}</option>
                         ))}
@@ -303,9 +305,9 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                             setAttributeValues((prev) => ({ ...prev, [attr.id]: next }));
                         }}
                     >
-                        <option value="">Select...</option>
-                        <option value="true">Yes</option>
-                        <option value="false">No</option>
+                        <option value="">{t('batchMetadata.select')}</option>
+                        <option value="true">{t('common.yes')}</option>
+                        <option value="false">{t('common.no')}</option>
                     </select>
                 )}
 
@@ -314,7 +316,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                         type="text"
                         className="w-full border rounded-md p-2 text-sm bg-background"
                         value={tagInputDrafts[attr.id] ?? tagsToInputValue(rawValue ?? [])}
-                        placeholder="tag1, tag2, tag3"
+                        placeholder={t('batchMetadata.tagsPlaceholder')}
                         disabled={isReadOnlyComputed}
                         onChange={(e) => {
                             const text = e.target.value;
@@ -346,7 +348,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
 
                 {isReadOnlyComputed && (
                     <div className="mt-1 text-xs text-muted-foreground">
-                        Mapped field (read-only)
+                        {t('batchMetadata.mappedReadOnly')}
                     </div>
                 )}
             </div>
@@ -357,14 +359,14 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
         <Modal
             isOpen={isOpen}
             onClose={onClose}
-            title={`Edit Metadata for ${selectedItems.length} item${selectedItems.length > 1 ? 's' : ''}`}
+            title={t('batchMetadata.title', { count: selectedItems.length })}
             maxWidthClass={showCoverPanel ? 'max-w-5xl' : 'max-w-2xl'}
         >
             <div className={`grid gap-4 ${showCoverPanel ? 'grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]' : 'grid-cols-1'}`}>
                 {showCoverPanel && (
                     <aside className="border rounded-md bg-muted/20 p-3 h-fit lg:sticky lg:top-0">
                         <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                            Cover Preview
+                            {t('batchMetadata.coverPreview')}
                         </div>
                         <div className="w-full aspect-[3/4] rounded-md overflow-hidden border bg-background">
                             {coverLoading ? (
@@ -372,10 +374,10 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                                     <Loader2 className="animate-spin text-primary" size={24} />
                                 </div>
                             ) : coverUrl ? (
-                                <img src={coverUrl} alt={singleItem?.name || 'Cover'} className="w-full h-full object-cover" />
+                                <img src={coverUrl} alt={singleItem?.name || t('batchMetadata.cover')} className="w-full h-full object-cover" />
                             ) : (
                                 <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground">
-                                    No cover available
+                                    {t('batchMetadata.noCover')}
                                 </div>
                             )}
                         </div>
@@ -388,7 +390,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                 ) : (
                     <>
                         <div>
-                            <label className="block text-sm font-medium mb-1">Category</label>
+                            <label className="block text-sm font-medium mb-1">{t('batchMetadata.category')}</label>
                             <select
                                 className="w-full border rounded-md p-2 bg-background"
                                 value={selectedCategory}
@@ -397,7 +399,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                                     setAttributeValues({});
                                 }}
                             >
-                                <option value="">Select Category...</option>
+                                <option value="">{t('batchMetadata.selectCategory')}</option>
                                 {categories.map(c => (
                                     <option key={c.id} value={c.id}>{c.name}</option>
                                 ))}
@@ -426,7 +428,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
 
                                             if (itemType === 'section') {
                                                 const sectionKey = String(layoutItem.item_id || `section_${index}`);
-                                                const sectionTitle = String(layoutItem.title || '').trim() || 'Section';
+                                                const sectionTitle = String(layoutItem.title || '').trim() || t('batchMetadata.section');
                                                 return (
                                                     <div key={`section-${sectionKey}`} className="min-w-0 pt-1" style={style}>
                                                         <div className="flex items-center gap-2">
@@ -459,21 +461,21 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                                     checked={applyRecursive}
                                     onChange={(e) => setApplyRecursive(e.target.checked)}
                                 />
-                                Apply recursively to folder contents (background job)
+                                {t('batchMetadata.applyRecursive')}
                             </label>
                         )}
                     </>
                 )}
 
                 <div className="flex justify-end gap-2 pt-2">
-                    <button onClick={onClose} className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent">Cancel</button>
+                    <button onClick={onClose} className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent">{t('common.cancel')}</button>
                     <button
                         onClick={handleSave}
                         disabled={saving || !selectedCategory}
                         className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
                     >
                         {saving && <Loader2 className="animate-spin" size={14} />}
-                        Save Changes
+                        {t('batchMetadata.saveChanges')}
                     </button>
                 </div>
                 </div>

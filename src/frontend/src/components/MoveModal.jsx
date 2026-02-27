@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, Fragment } from 'react';
 import { X, FolderInput, Check, ChevronRight, Folder } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { getAccounts } from '../services/accounts';
 import { getFiles, getFolderFiles } from '../services/drive';
 import { createMoveJob } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
 
 export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSuccess }) {
+    const { t } = useTranslation();
     const [accounts, setAccounts] = useState([]);
     const [selectedAccount, setSelectedAccount] = useState('');
     const [currentPath, setCurrentPath] = useState([]); // [{id: 'root', name: 'Root'}]
@@ -27,7 +29,7 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
             });
         } catch (error) {
             console.error('Failed to load accounts:', error);
-            showToast('Failed to load accounts', 'error');
+            showToast(t('moveModal.failedLoadAccounts'), 'error');
         }
     }, [sourceAccountId, showToast]);
 
@@ -44,7 +46,7 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
             setFolders(data.items);
         } catch (error) {
             console.error('Failed to load folders:', error);
-            showToast(`Error loading folder: ${error.message}`, 'error');
+            showToast(`${t('moveModal.failedLoadFolder')}: ${error.message}`, 'error');
             setFolders([]);
         } finally {
             setLoading(false);
@@ -74,12 +76,12 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
                 selectedAccount,
                 currentFolderId
             );
-            showToast(`Move job started for ${item.name}`, 'success');
+            showToast(t('moveModal.jobStarted', { name: item.name }), 'success');
             onSuccess();
             onClose();
         } catch (error) {
             console.error('Failed to create move job:', error);
-            showToast(`Failed to start move job: ${error.message}`, 'error');
+            showToast(`${t('moveModal.failedStart')}: ${error.message}`, 'error');
         } finally {
             setSubmitting(false);
         }
@@ -88,7 +90,7 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
     const navigateToFolder = (folder) => {
         console.log('Navigating to folder:', folder);
         if (!folder.id) {
-            showToast('Folder ID is missing', 'error');
+            showToast(t('moveModal.missingFolderId'), 'error');
             return;
         }
         setCurrentPath([...currentPath, folder]);
@@ -111,7 +113,7 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
                 <div className="flex items-center justify-between p-4 border-b">
                     <h3 className="text-lg font-semibold flex items-center gap-2">
                         <FolderInput className="w-5 h-5 text-primary" />
-                        Move Item
+                        {t('moveModal.title')}
                     </h3>
                     <button onClick={onClose} className="p-1 hover:bg-accent rounded-md transition-colors">
                         <X className="w-5 h-5 text-muted-foreground" />
@@ -121,12 +123,12 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
                 {/* Body */}
                 <div className="p-4 space-y-4">
                     <div className="p-3 bg-muted/50 rounded-md border text-sm">
-                        <p className="text-muted-foreground mb-1">Moving:</p>
+                        <p className="text-muted-foreground mb-1">{t('moveModal.moving')}</p>
                         <p className="font-medium text-foreground truncate">{item?.name}</p>
                     </div>
 
                     <div className="space-y-2">
-                        <label className="text-sm font-medium text-foreground">Destination Account</label>
+                        <label className="text-sm font-medium text-foreground">{t('moveModal.destinationAccount')}</label>
                         <select
                             value={selectedAccount}
                             onChange={(e) => {
@@ -146,19 +148,19 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
 
                     <div className="space-y-2">
                         <div className="flex items-center justify-between">
-                            <label className="text-sm font-medium text-foreground">Destination Folder</label>
+                            <label className="text-sm font-medium text-foreground">{t('moveModal.destinationFolder')}</label>
                             <button
                                 onClick={navigateUp}
                                 disabled={currentPath.length === 0}
                                 className="text-xs text-primary hover:underline disabled:opacity-50"
                             >
-                                Go Up
+                                {t('moveModal.goUp')}
                             </button>
                         </div>
 
                         <div className="border rounded-md overflow-hidden">
                             <div className="bg-muted/50 px-3 py-2 text-xs text-muted-foreground border-b flex items-center gap-1 overflow-x-auto">
-                                <span onClick={() => { setCurrentPath([]); setCurrentFolderId('root'); }} className="cursor-pointer hover:text-foreground">Root</span>
+                                <span onClick={() => { setCurrentPath([]); setCurrentFolderId('root'); }} className="cursor-pointer hover:text-foreground">{t('moveModal.root')}</span>
                                 {currentPath.map((p) => (
                                     <Fragment key={p.id}>
                                         <ChevronRight className="w-3 h-3" />
@@ -174,7 +176,7 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
                                     </div>
                                 ) : folders.length === 0 ? (
                                     <div className="text-center py-8 text-muted-foreground text-sm">
-                                        Empty folder
+                                        {t('moveModal.emptyFolder')}
                                     </div>
                                 ) : (
                                     folders.map(item => (
@@ -212,7 +214,7 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
                         onClick={onClose}
                         className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
                     >
-                        Cancel
+                        {t('common.cancel')}
                     </button>
                     <button
                         onClick={handleMove}
@@ -220,11 +222,11 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
                         className="px-4 py-2 bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium rounded-md transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {submitting ? (
-                            <>Processing...</>
+                            <>{t('moveModal.processing')}</>
                         ) : (
                             <>
                                 <Check className="w-4 h-4" />
-                                Move Here
+                                {t('moveModal.moveHere')}
                             </>
                         )}
                     </button>

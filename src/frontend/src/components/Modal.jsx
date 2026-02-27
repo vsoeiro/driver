@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 
 export default function Modal({
     isOpen,
@@ -9,6 +10,8 @@ export default function Modal({
     maxWidthClass = 'max-w-md',
     bodyClassName = '',
 }) {
+    const { t } = useTranslation();
+
     if (!isOpen) return null;
 
     if (typeof document === 'undefined') return null;
@@ -21,7 +24,7 @@ export default function Modal({
                     <button
                         onClick={onClose}
                         className="ghost-icon-button"
-                        aria-label="Close modal"
+                        aria-label={t('modal.close')}
                     >
                         <X size={18} />
                     </button>

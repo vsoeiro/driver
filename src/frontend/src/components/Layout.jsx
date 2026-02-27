@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Link2, Settings } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import Sidebar from './Sidebar';
 import NotificationBell from './NotificationBell';
 import ProviderPickerModal from './ProviderPickerModal';
@@ -14,6 +15,7 @@ const LAST_ACCOUNT_STORAGE_KEY = 'driver-last-account-id';
 export default function Layout() {
     const navigate = useNavigate();
     const location = useLocation();
+    const { t } = useTranslation();
     const [pickerOpen, setPickerOpen] = useState(false);
     const [accountMenuOpen, setAccountMenuOpen] = useState(false);
     const accountMenuRef = useRef(null);
@@ -66,7 +68,7 @@ export default function Layout() {
                             <div className="flex w-full items-center justify-between gap-3">
                                 {showAccountSelector ? (
                                     <div className="relative flex min-w-0 items-center gap-3" ref={accountMenuRef}>
-                                        <span className="text-sm font-medium text-muted-foreground">Account</span>
+                                        <span className="text-sm font-medium text-muted-foreground">{t('layout.account')}</span>
                                         <button
                                             type="button"
                                             className="input-shell inline-flex h-10 min-w-[240px] max-w-[360px] items-center justify-between gap-2 px-3 text-sm"
@@ -80,7 +82,7 @@ export default function Layout() {
                                                         <span className="truncate">{selectedAccount.email}</span>
                                                     </>
                                                 ) : (
-                                                    <span className="text-muted-foreground">Select an account</span>
+                                                    <span className="text-muted-foreground">{t('layout.selectAccount')}</span>
                                                 )}
                                             </span>
                                             <ChevronDown size={16} className="shrink-0 text-muted-foreground" />
@@ -116,8 +118,8 @@ export default function Layout() {
                                         type="button"
                                         onClick={() => setPickerOpen(true)}
                                         className="ghost-icon-button"
-                                        title="Link Account"
-                                        aria-label="Link Account"
+                                        title={t('layout.linkAccount')}
+                                        aria-label={t('layout.linkAccount')}
                                     >
                                         <Link2 size={16} />
                                     </button>
@@ -125,8 +127,8 @@ export default function Layout() {
                                         type="button"
                                         onClick={() => navigate('/admin/settings')}
                                         className="ghost-icon-button"
-                                        title="Settings"
-                                        aria-label="Settings"
+                                        title={t('layout.settings')}
+                                        aria-label={t('layout.settings')}
                                     >
                                         <Settings size={16} />
                                     </button>

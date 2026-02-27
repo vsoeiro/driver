@@ -63,6 +63,8 @@
     body {
         @apply bg-background text-foreground antialiased;
         font-family: 'Manrope', 'Segoe UI', sans-serif;
+        font-size: 15px;
+        line-height: 1.45;
         background-image:
             radial-gradient(circle at 8% 8%, hsl(var(--accent) / 0.6), transparent 36%),
             radial-gradient(circle at 90% 0%, hsl(var(--primary) / 0.14), transparent 42%),
@@ -151,7 +153,7 @@
     }
 
     .page-title {
-        @apply text-[1.42rem] font-semibold tracking-tight;
+        @apply text-[1.3rem] font-semibold tracking-tight;
     }
 
     .page-subtitle {

@@ -1,11 +1,13 @@
 import { NavLink } from 'react-router-dom';
-
-const tabs = [
-    { to: '/admin/dashboard', label: 'Dashboard' },
-    { to: '/admin/settings', label: 'Settings' },
-];
+import { useTranslation } from 'react-i18next';
 
 export default function AdminTabs() {
+    const { t } = useTranslation();
+    const tabs = [
+        { to: '/admin/dashboard', label: t('adminTabs.dashboard') },
+        { to: '/admin/settings', label: t('adminTabs.settings') },
+    ];
+
     return (
         <div className="inline-flex rounded-xl border border-border/70 bg-card/85 p-1 backdrop-blur-sm shadow-sm">
             {tabs.map((tab) => (

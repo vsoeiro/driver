@@ -1,6 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import {
     Cloud,
     Activity,
@@ -26,6 +27,7 @@ function formatSize(bytes) {
 }
 
 export default function Sidebar() {
+    const { t } = useTranslation();
     const location = useLocation();
     const showQuotaCard = location.pathname === '/accounts' || location.pathname.startsWith('/drive/');
 
@@ -53,12 +55,12 @@ export default function Sidebar() {
     const usedPercent = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0;
 
     const quickLinks = [
-        { to: '/accounts', label: 'Accounts', icon: HardDrive },
-        { to: '/all-files', label: 'Files', icon: FileText },
-        { to: '/metadata', label: 'Metadata', icon: Database },
-        { to: '/rules', label: 'Rules', icon: Wand2 },
-        { to: '/jobs', label: 'Jobs', icon: Activity },
-        { to: '/ai', label: 'AI (Experimental)', icon: Bot },
+        { to: '/accounts', label: t('sidebar.accounts'), icon: HardDrive },
+        { to: '/all-files', label: t('sidebar.files'), icon: FileText },
+        { to: '/metadata', label: t('sidebar.metadata'), icon: Database },
+        { to: '/rules', label: t('sidebar.rules'), icon: Wand2 },
+        { to: '/jobs', label: t('sidebar.jobs'), icon: Activity },
+        { to: '/ai', label: t('sidebar.aiExperimental'), icon: Bot },
     ];
 
     return (
@@ -69,15 +71,15 @@ export default function Sidebar() {
                         <Cloud size={18} />
                     </div>
                     <div className="min-w-0">
-                        <div className="text-base font-semibold">Driver Hub</div>
-                        <div className="text-xs text-muted-foreground">Storage orchestration</div>
+                        <div className="text-base font-semibold">{t('sidebar.product')}</div>
+                        <div className="text-xs text-muted-foreground">{t('sidebar.subtitle')}</div>
                     </div>
                 </div>
             </div>
 
             <div className="flex-1 min-h-0 flex flex-col px-3 pt-3 pb-3">
                 <div className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    Navigation
+                    {t('sidebar.navigation')}
                 </div>
                 <nav className="space-y-1">
                     {quickLinks.map(({ to, label, icon: Icon }) => (
@@ -108,15 +110,15 @@ export default function Sidebar() {
                         <div className="rounded-lg border border-border/80 bg-background/60 px-3 py-3">
                             <div className="mb-2 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                                 <Gauge size={12} />
-                                <span>Quota</span>
+                                <span>{t('sidebar.quota')}</span>
                             </div>
                             {isQuotaLoading ? (
-                                <div className="text-xs text-muted-foreground">Loading...</div>
+                                <div className="text-xs text-muted-foreground">{t('common.loading')}</div>
                             ) : isQuotaError ? (
-                                <div className="text-xs text-muted-foreground">Unavailable</div>
+                                <div className="text-xs text-muted-foreground">{t('common.unavailable')}</div>
                             ) : (
                                 <>
-                                    <div className="mb-1 text-sm font-semibold">{usedPercent}% used</div>
+                                    <div className="mb-1 text-sm font-semibold">{t('sidebar.quotaUsed', { percent: usedPercent })}</div>
                                     <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-muted">
                                         <div
                                             className="h-full rounded-full bg-primary transition-[width] duration-300"

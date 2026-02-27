@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState } from 'react';
 import { Check, ChevronRight, Folder, FolderInput, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { accountsService } from '../services/accounts';
 import { driveService } from '../services/drive';
 
@@ -9,6 +10,7 @@ export default function FolderTargetPickerModal({
     onClose,
     onConfirm,
 }) {
+    const { t } = useTranslation();
     const [accounts, setAccounts] = useState([]);
     const [selectedAccount, setSelectedAccount] = useState('');
     const [currentFolderId, setCurrentFolderId] = useState('root');
@@ -67,8 +69,8 @@ export default function FolderTargetPickerModal({
 
     const handleConfirm = () => {
         const folderPath = currentPath.length === 0
-            ? 'Root'
-            : `Root/${currentPath.map((p) => p.name).join('/')}`;
+            ? t('folderPicker.root')
+            : `${t('folderPicker.root')}/${currentPath.map((p) => p.name).join('/')}`;
         onConfirm({
             account_id: selectedAccount || '',
             folder_id: currentFolderId || 'root',
@@ -82,7 +84,7 @@ export default function FolderTargetPickerModal({
                 <div className="flex items-center justify-between p-4 border-b">
                     <h3 className="text-lg font-semibold flex items-center gap-2">
                         <FolderInput className="w-5 h-5 text-primary" />
-                        Select Cover Destination
+                        {t('folderPicker.title')}
                     </h3>
                     <button onClick={onClose} className="p-1 hover:bg-accent rounded-md transition-colors">
                         <X className="w-5 h-5 text-muted-foreground" />
@@ -91,7 +93,7 @@ export default function FolderTargetPickerModal({
 
                 <div className="p-4 space-y-4">
                     <div className="space-y-2">
-                        <label className="text-sm font-medium text-foreground">Account</label>
+                        <label className="text-sm font-medium text-foreground">{t('folderPicker.account')}</label>
                         <select
                             value={selectedAccount}
                             onChange={(e) => {
@@ -112,13 +114,13 @@ export default function FolderTargetPickerModal({
 
                     <div className="space-y-2">
                         <div className="flex items-center justify-between">
-                            <label className="text-sm font-medium text-foreground">Folder</label>
+                            <label className="text-sm font-medium text-foreground">{t('folderPicker.folder')}</label>
                             <button
                                 onClick={handleGoUp}
                                 disabled={currentPath.length === 0}
                                 className="text-xs text-primary hover:underline disabled:opacity-50"
                             >
-                                Go Up
+                                {t('folderPicker.goUp')}
                             </button>
                         </div>
                         <div className="border rounded-md overflow-hidden">
@@ -127,7 +129,7 @@ export default function FolderTargetPickerModal({
                                     onClick={() => { setCurrentPath([]); setCurrentFolderId('root'); }}
                                     className="cursor-pointer hover:text-foreground"
                                 >
-                                    Root
+                                    {t('folderPicker.root')}
                                 </span>
                                 {currentPath.map((part) => (
                                     <Fragment key={part.id}>
@@ -142,7 +144,7 @@ export default function FolderTargetPickerModal({
                                         <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
                                     </div>
                                 ) : folders.length === 0 ? (
-                                    <div className="text-center py-8 text-muted-foreground text-sm">No folders</div>
+                                    <div className="text-center py-8 text-muted-foreground text-sm">{t('folderPicker.noFolders')}</div>
                                 ) : (
                                     folders.map((item) => (
                                         <button
@@ -165,7 +167,7 @@ export default function FolderTargetPickerModal({
                         onClick={onClose}
                         className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
                     >
-                        Cancel
+                        {t('common.cancel')}
                     </button>
                     <button
                         onClick={handleConfirm}
@@ -173,7 +175,7 @@ export default function FolderTargetPickerModal({
                         className="px-4 py-2 bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium rounded-md transition-colors flex items-center gap-2 disabled:opacity-50"
                     >
                         <Check className="w-4 h-4" />
-                        Use This Folder
+                        {t('folderPicker.useFolder')}
                     </button>
                 </div>
             </div>

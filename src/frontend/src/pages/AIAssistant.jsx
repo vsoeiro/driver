@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bot, ChevronRight, Loader2, Plus, Send, ShieldAlert, Square, Trash2, Wrench } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { aiService } from '../services/ai';
 import { useToast } from '../contexts/ToastContext';
 
@@ -58,6 +59,7 @@ function extractToolSources(payload) {
 }
 
 export default function AIAssistant() {
+    const { t } = useTranslation();
     const queryClient = useQueryClient();
     const { showToast } = useToast();
     const [selectedSessionId, setSelectedSessionId] = useState('');
@@ -102,13 +104,13 @@ export default function AIAssistant() {
         return [
             {
                 id: DRAFT_SESSION_ID,
-                title: 'New Session',
+                title: t('aiAssistant.newSession'),
                 updated_at: null,
                 title_pending: false,
             },
             ...persisted,
         ];
-    }, [sessionsQuery.data, hasDraftSession]);
+    }, [sessionsQuery.data, hasDraftSession, t]);
 
     const createSessionMutation = useMutation({
         mutationFn: () => aiService.createChatSession(null),
@@ -116,7 +118,7 @@ export default function AIAssistant() {
             queryClient.invalidateQueries({ queryKey: ['ai-sessions'] });
         },
         onError: (error) => {
-            showToast(error?.response?.data?.detail || 'Failed to create chat session', 'error');
+            showToast(error?.response?.data?.detail || t('aiAssistant.failedCreateSession'), 'error');
         },
     });
 
@@ -159,13 +161,13 @@ export default function AIAssistant() {
                 generateTitleMutation.mutate(variables.sessionId);
             }
             if (response.tool_trace?.some((trace) => trace.status === 'failed')) {
-                showToast('Some tool calls failed. Check the trace details.', 'warning');
+                showToast(t('aiAssistant.toolFailed'), 'warning');
             }
         },
         onError: (error) => {
             if (error?.code === 'ERR_CANCELED') return;
             setOptimisticMessages((prev) => prev.filter((msg) => !msg.isOptimistic));
-            showToast(error?.response?.data?.detail || 'Failed to send message', 'error');
+            showToast(error?.response?.data?.detail || t('aiAssistant.failedSend'), 'error');
         },
         onSettled: () => {
             activeRequestRef.current = null;
@@ -180,7 +182,7 @@ export default function AIAssistant() {
             queryClient.invalidateQueries({ queryKey: ['ai-sessions'] });
         },
         onError: (error) => {
-            showToast(error?.response?.data?.detail || 'Failed to resolve confirmation', 'error');
+            showToast(error?.response?.data?.detail || t('aiAssistant.failedConfirm'), 'error');
         },
     });
 
@@ -196,7 +198,7 @@ export default function AIAssistant() {
             }
         },
         onError: (error) => {
-            showToast(error?.response?.data?.detail || 'Failed to delete chat session', 'error');
+            showToast(error?.response?.data?.detail || t('aiAssistant.failedDeleteSession'), 'error');
         },
     });
 
@@ -308,7 +310,7 @@ export default function AIAssistant() {
         if (!activeRequestRef.current) return;
         activeRequestRef.current.abort();
         activeRequestRef.current = null;
-        showToast('Response interrupted.', 'info', 2500);
+        showToast(t('aiAssistant.responseInterrupted'), 'info', 2500);
     };
 
     const toggleToolCard = (messageId) => {
@@ -323,14 +325,14 @@ export default function AIAssistant() {
     return (
         <div className="app-page">
             <div className="page-header">
-                <h1 className="page-title">AI Assistant</h1>
-                <p className="page-subtitle">Operational chat with tool execution trace and sources.</p>
+                <h1 className="page-title">{t('aiAssistant.title')}</h1>
+                <p className="page-subtitle">{t('aiAssistant.subtitle')}</p>
             </div>
 
             <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
                 <section className="surface-card flex min-h-0 flex-col p-3">
                     <div className="mb-3 flex items-center justify-between">
-                        <div className="text-sm font-semibold">Sessions</div>
+                        <div className="text-sm font-semibold">{t('aiAssistant.sessions')}</div>
                         <button
                             type="button"
                             className="ghost-icon-button"
@@ -340,7 +342,7 @@ export default function AIAssistant() {
                                 setPendingConfirmation(null);
                                 setOptimisticMessages([]);
                             }}
-                            title="New session"
+                            title={t('aiAssistant.newSession')}
                         >
                             <Plus size={16} />
                         </button>
@@ -365,7 +367,7 @@ export default function AIAssistant() {
                                         }}
                                         className="min-w-0 flex-1 text-left"
                                     >
-                                        <div className="truncate font-medium">{session.title || 'New Session'}</div>
+                                        <div className="truncate font-medium">{session.title || t('aiAssistant.newSession')}</div>
                                         <div className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground">
                                             {(session.title_pending || generatingTitleSessionIds.has(session.id)) && (
                                                 <Loader2 size={12} className="animate-spin" />
@@ -376,7 +378,7 @@ export default function AIAssistant() {
                                     <button
                                         type="button"
                                         className="ghost-icon-button h-7 w-7 p-0 opacity-0 group-hover:opacity-100"
-                                        title="Delete session"
+                                        title={t('aiAssistant.deleteSession')}
                                         onClick={() => deleteSessionMutation.mutate(session.id)}
                                         disabled={session.id === DRAFT_SESSION_ID}
                                     >
@@ -391,12 +393,12 @@ export default function AIAssistant() {
                 <section className="surface-card flex min-h-0 flex-col">
                     <header className="flex h-14 items-center gap-2 border-b border-border/70 px-4">
                         <Bot size={16} className="text-primary" />
-                        <h1 className="text-sm font-semibold">AI Assistant</h1>
+                        <h1 className="text-sm font-semibold">{t('aiAssistant.title')}</h1>
                     </header>
 
                     <div ref={messagesContainerRef} className="min-h-0 flex-1 space-y-3 overflow-auto px-4 py-4">
                         {!selectedSessionId && (
-                            <div className="text-sm text-muted-foreground">Create a session to start chatting.</div>
+                            <div className="text-sm text-muted-foreground">{t('aiAssistant.createSessionHelp')}</div>
                         )}
                         {selectedSessionId && messages.map((message) => (
                             <div key={message.id} className={animatedMessageIds.has(message.id) ? 'ai-message-fade-in' : ''}>
@@ -405,7 +407,7 @@ export default function AIAssistant() {
                                         const payload = parseToolPayload(message.content_redacted);
                                         const sources = extractToolSources(payload);
                                         const expanded = expandedToolIds.has(message.id);
-                                        const fnName = payload?.tool_name || 'tool';
+                                        const fnName = payload?.tool_name || t('aiAssistant.tool');
                                         return (
                                             <div className="max-w-[94%] rounded-lg border border-slate-500/60 bg-slate-900 text-slate-100">
                                                 <button
@@ -422,27 +424,27 @@ export default function AIAssistant() {
                                                         <span>{fnName}</span>
                                                     </div>
                                                     <div className="text-xs text-slate-300">
-                                                        {payload?.status || 'unknown'} • {payload?.duration_ms ?? '-'} ms
+                                                        {payload?.status || t('aiAssistant.unknown')} • {payload?.duration_ms ?? '-'} ms
                                                     </div>
                                                 </button>
 
                                                 {expanded && (
                                                     <div className="space-y-3 border-t border-slate-600/70 px-3 py-3 text-xs">
                                                         <div>
-                                                            <div className="mb-1 font-semibold uppercase tracking-[0.08em] text-slate-300">Input</div>
+                                                            <div className="mb-1 font-semibold uppercase tracking-[0.08em] text-slate-300">{t('aiAssistant.input')}</div>
                                                             <pre className="max-h-40 overflow-auto rounded bg-slate-950 px-2 py-1.5 text-[11px] text-slate-100">
                                                                 {JSON.stringify(payload?.arguments || {}, null, 2)}
                                                             </pre>
                                                         </div>
                                                         <div>
-                                                            <div className="mb-1 font-semibold uppercase tracking-[0.08em] text-slate-300">Output</div>
+                                                            <div className="mb-1 font-semibold uppercase tracking-[0.08em] text-slate-300">{t('aiAssistant.output')}</div>
                                                             <pre className="max-h-44 overflow-auto rounded bg-slate-950 px-2 py-1.5 text-[11px] text-slate-100">
                                                                 {JSON.stringify(payload?.result_summary || payload?.error_summary || {}, null, 2)}
                                                             </pre>
                                                         </div>
                                                         {sources.length > 0 && (
                                                             <div>
-                                                                <div className="mb-1 font-semibold uppercase tracking-[0.08em] text-slate-300">Sources</div>
+                                                                <div className="mb-1 font-semibold uppercase tracking-[0.08em] text-slate-300">{t('aiAssistant.sources')}</div>
                                                                 <div className="space-y-1 text-[11px] text-slate-200">
                                                                     {sources.map((source, index) => (
                                                                         <div key={`${message.id}-source-${index}`}>
@@ -478,10 +480,10 @@ export default function AIAssistant() {
                             <div className="mb-3 rounded-lg border border-amber-500/35 bg-amber-500/10 p-3">
                                 <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-amber-200">
                                     <ShieldAlert size={14} />
-                                    Confirmation required
+                                    {t('aiAssistant.confirmationRequired')}
                                 </div>
                                 <div className="text-xs text-amber-100">
-                                    Tool: <strong>{pendingConfirmation.tool_name}</strong>
+                                    {t('aiAssistant.toolLabel')}: <strong>{pendingConfirmation.tool_name}</strong>
                                 </div>
                                 <pre className="mt-2 max-h-32 overflow-auto rounded bg-black/20 p-2 text-[11px]">
                                     {JSON.stringify(pendingConfirmation.input_redacted || {}, null, 2)}
@@ -493,7 +495,7 @@ export default function AIAssistant() {
                                         onClick={() => confirmationMutation.mutate({ approve: true })}
                                         disabled={confirmationMutation.isPending}
                                     >
-                                        Approve
+                                        {t('aiAssistant.approve')}
                                     </button>
                                     <button
                                         type="button"
@@ -501,7 +503,7 @@ export default function AIAssistant() {
                                         onClick={() => confirmationMutation.mutate({ approve: false })}
                                         disabled={confirmationMutation.isPending}
                                     >
-                                        Reject
+                                        {t('aiAssistant.reject')}
                                     </button>
                                 </div>
                             </div>
@@ -523,7 +525,7 @@ export default function AIAssistant() {
                                         submitMessage();
                                     }
                                 }}
-                                placeholder="Ask anything about your library and operations..."
+                                placeholder={t('aiAssistant.placeholder')}
                                 className="input-shell h-12 min-h-12 max-h-12 flex-1 resize-none px-3 py-3 text-sm"
                                 disabled={!selectedSessionId || isConfirming}
                             />
@@ -534,7 +536,7 @@ export default function AIAssistant() {
                                     className="inline-flex h-12 items-center gap-2 rounded-md bg-rose-600 px-3 text-xs font-semibold text-white"
                                 >
                                     <Square size={12} />
-                                    Stop
+                                    {t('aiAssistant.stop')}
                                 </button>
                             ) : (
                                 <button
@@ -543,7 +545,7 @@ export default function AIAssistant() {
                                     disabled={!selectedSessionId || isBusy || !inputMessage.trim()}
                                 >
                                     <Send size={14} />
-                                    Send
+                                    {t('aiAssistant.send')}
                                 </button>
                             )}
                         </form>

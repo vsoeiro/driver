@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { PlayCircle, Trash2, Plus, Eye, Loader2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { metadataService } from '../services/metadata';
 import { accountsService } from '../services/accounts';
 import { jobsService } from '../services/jobs';
@@ -24,6 +25,7 @@ const DEFAULT_FORM = {
 };
 
 export default function RulesManager() {
+    const { t } = useTranslation();
     const { showToast } = useToast();
     const [rules, setRules] = useState([]);
     const [categories, setCategories] = useState([]);
@@ -62,11 +64,11 @@ export default function RulesManager() {
             setCategories(categoriesData);
             setAccounts(accountsData);
         } catch (error) {
-            showToast('Failed to load rules', 'error');
+            showToast(t('rules.failedLoad'), 'error');
         } finally {
             setLoading(false);
         }
-    }, [showToast]);
+    }, [showToast, t]);
 
     useEffect(() => {
         loadData();
@@ -79,7 +81,7 @@ export default function RulesManager() {
     const handleCreateRule = async (e) => {
         e.preventDefault();
         if (!form.target_category_id) {
-            showToast('Choose a target category', 'error');
+            showToast(t('rules.chooseCategory'), 'error');
             return;
         }
 
@@ -107,10 +109,10 @@ export default function RulesManager() {
             setForm(DEFAULT_FORM);
             setTargetValues({});
             setPreview(null);
-            showToast('Rule created', 'success');
+            showToast(t('rules.created'), 'success');
             loadData();
         } catch (error) {
-            showToast('Failed to create rule', 'error');
+            showToast(t('rules.failedCreate'), 'error');
         } finally {
             setSaving(false);
         }
@@ -137,7 +139,7 @@ export default function RulesManager() {
             });
             setPreview(data);
         } catch (error) {
-            showToast('Failed to preview rule', 'error');
+            showToast(t('rules.failedPreview'), 'error');
         } finally {
             setPreviewing(false);
         }
@@ -146,19 +148,19 @@ export default function RulesManager() {
     const handleApplyRule = async (ruleId) => {
         try {
             await jobsService.createApplyRuleJob(ruleId);
-            showToast('Rule apply job created', 'success');
+            showToast(t('rules.applyJobCreated'), 'success');
         } catch {
-            showToast('Failed to create apply job', 'error');
+            showToast(t('rules.failedApplyJob'), 'error');
         }
     };
 
     const handleDeleteRule = async (ruleId) => {
         try {
             await metadataService.deleteRule(ruleId);
-            showToast('Rule deleted', 'success');
+            showToast(t('rules.deleted'), 'success');
             loadData();
         } catch {
-            showToast('Failed to delete rule', 'error');
+            showToast(t('rules.failedDelete'), 'error');
         }
     };
 
@@ -180,7 +182,7 @@ export default function RulesManager() {
                     value={value}
                     onChange={(e) => setAttributeValue(attribute, e.target.value)}
                 >
-                    <option value="">Ignore</option>
+                    <option value="">{t('rules.ignore')}</option>
                     {getSelectOptions(attribute.options).map((option) => (
                         <option key={option} value={option}>{option}</option>
                     ))}
@@ -199,9 +201,9 @@ export default function RulesManager() {
                         else setAttributeValue(attribute, next === 'true');
                     }}
                 >
-                    <option value="">Ignore</option>
-                    <option value="true">Yes</option>
-                    <option value="false">No</option>
+                    <option value="">{t('rules.ignore')}</option>
+                    <option value="true">{t('common.yes')}</option>
+                    <option value="false">{t('common.no')}</option>
                 </select>
             );
         }
@@ -213,7 +215,7 @@ export default function RulesManager() {
                     className="w-full border rounded-md p-2 text-sm bg-background"
                     value={tagsToInputValue(value)}
                     onChange={(e) => setAttributeValue(attribute, parseTagsInput(e.target.value))}
-                    placeholder={`Set ${attribute.name} tags (comma separated)`}
+                    placeholder={t('rules.setTags', { name: attribute.name })}
                 />
             );
         }
@@ -224,7 +226,7 @@ export default function RulesManager() {
                 className="w-full border rounded-md p-2 text-sm bg-background"
                 value={value}
                 onChange={(e) => setAttributeValue(attribute, e.target.value)}
-                placeholder={`Set ${attribute.name} (optional)`}
+                placeholder={t('rules.setOptional', { name: attribute.name })}
             />
         );
     };
@@ -232,15 +234,15 @@ export default function RulesManager() {
     return (
         <div className="app-page">
             <div className="page-header">
-                <h1 className="page-title">Automatic Rules</h1>
-                <p className="page-subtitle">Preview before apply, then run in background.</p>
+                <h1 className="page-title">{t('rules.title')}</h1>
+                <p className="page-subtitle">{t('rules.subtitle')}</p>
             </div>
 
             <div className="surface-card mb-4 p-4">
                 <form onSubmit={handleCreateRule} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                     <input
                         className="border rounded-md p-2 bg-background text-sm"
-                        placeholder="Rule name"
+                        placeholder={t('rules.ruleName')}
                         value={form.name}
                         onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
                         required
@@ -250,7 +252,7 @@ export default function RulesManager() {
                         value={form.account_id}
                         onChange={(e) => setForm((prev) => ({ ...prev, account_id: e.target.value }))}
                     >
-                        <option value="">All Accounts</option>
+                        <option value="">{t('rules.allAccounts')}</option>
                         {accounts.map((account) => (
                             <option key={account.id} value={account.id}>{account.email || account.display_name}</option>
                         ))}
@@ -261,32 +263,32 @@ export default function RulesManager() {
                         onChange={(e) => setForm((prev) => ({ ...prev, target_category_id: e.target.value }))}
                         required
                     >
-                        <option value="">Target category</option>
+                        <option value="">{t('rules.targetCategory')}</option>
                         {categories.map((category) => (
                             <option key={category.id} value={category.id}>{category.name}</option>
                         ))}
                     </select>
                     <input
                         className="border rounded-md p-2 bg-background text-sm"
-                        placeholder="Path prefix (ex.: /Comics/Marvel)"
+                        placeholder={t('rules.pathPrefix')}
                         value={form.path_prefix}
                         onChange={(e) => setForm((prev) => ({ ...prev, path_prefix: e.target.value }))}
                     />
                     <input
                         className="border rounded-md p-2 bg-background text-sm"
-                        placeholder="Path contains (ex.: Batman)"
+                        placeholder={t('rules.pathContains')}
                         value={form.path_contains}
                         onChange={(e) => setForm((prev) => ({ ...prev, path_contains: e.target.value }))}
                     />
                     <input
                         className="border rounded-md p-2 bg-background text-sm"
-                        placeholder="Description"
+                        placeholder={t('rules.description')}
                         value={form.description}
                         onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
                     />
 
                     <div className="md:col-span-2 lg:col-span-3 rounded-lg border border-border/70 p-3 bg-background">
-                        <div className="text-sm font-medium mb-3">Actions</div>
+                        <div className="text-sm font-medium mb-3">{t('rules.actions')}</div>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                             <label className="flex items-center gap-2 text-sm">
                                 <input
@@ -294,7 +296,7 @@ export default function RulesManager() {
                                     checked={form.apply_metadata}
                                     onChange={(e) => setForm((prev) => ({ ...prev, apply_metadata: e.target.checked }))}
                                 />
-                                Apply Metadata Values
+                                {t('rules.applyMetadataValues')}
                             </label>
                             <label className="flex items-center gap-2 text-sm">
                                 <input
@@ -302,7 +304,7 @@ export default function RulesManager() {
                                     checked={form.apply_rename}
                                     onChange={(e) => setForm((prev) => ({ ...prev, apply_rename: e.target.checked }))}
                                 />
-                                Rename Item
+                                {t('rules.renameItem')}
                             </label>
                             <label className="flex items-center gap-2 text-sm">
                                 <input
@@ -310,12 +312,12 @@ export default function RulesManager() {
                                     checked={form.apply_move}
                                     onChange={(e) => setForm((prev) => ({ ...prev, apply_move: e.target.checked }))}
                                 />
-                                Move Item
+                                {t('rules.moveItem')}
                             </label>
                         </div>
                         {(form.apply_rename || form.apply_move) && (
                             <div className="mt-3 text-xs text-muted-foreground">
-                                Placeholders: use attribute names like <code>[SERIES]</code>, <code>[TITLE]</code> plus <code>[EXTENSAO]</code>, <code>[NOME_ATUAL]</code>.
+                                {t('rules.placeholdersHelp')}
                             </div>
                         )}
                     </div>
@@ -323,7 +325,7 @@ export default function RulesManager() {
                     {form.apply_rename && (
                         <input
                             className="border rounded-md p-2 bg-background text-sm md:col-span-2 lg:col-span-3"
-                            placeholder="Rename template (e.g. [SERIES] - [TITLE].[EXTENSAO])"
+                            placeholder={t('rules.renameTemplate')}
                             value={form.rename_template}
                             onChange={(e) => setForm((prev) => ({ ...prev, rename_template: e.target.value }))}
                             required={form.apply_rename}
@@ -337,20 +339,20 @@ export default function RulesManager() {
                                 value={form.destination_account_id}
                                 onChange={(e) => setForm((prev) => ({ ...prev, destination_account_id: e.target.value }))}
                             >
-                                <option value="">Destination account (same as source)</option>
+                                <option value="">{t('rules.destinationAccount')}</option>
                                 {accounts.map((account) => (
                                     <option key={account.id} value={account.id}>{account.email || account.display_name}</option>
                                 ))}
                             </select>
                             <input
                                 className="border rounded-md p-2 bg-background text-sm"
-                                placeholder="Destination folder id (default: root)"
+                                placeholder={t('rules.destinationFolder')}
                                 value={form.destination_folder_id}
                                 onChange={(e) => setForm((prev) => ({ ...prev, destination_folder_id: e.target.value }))}
                             />
                             <input
                                 className="border rounded-md p-2 bg-background text-sm"
-                                placeholder="Destination path template (e.g. Quadrinhos/[SERIES])"
+                                placeholder={t('rules.destinationPath')}
                                 value={form.destination_path_template}
                                 onChange={(e) => setForm((prev) => ({ ...prev, destination_path_template: e.target.value }))}
                             />
@@ -359,9 +361,9 @@ export default function RulesManager() {
 
                     {selectedCategory && (
                         <div className="md:col-span-2 lg:col-span-3 border rounded-md p-3 bg-background">
-                            <div className="text-sm font-medium mb-3">Metadata Values</div>
+                            <div className="text-sm font-medium mb-3">{t('rules.metadataValues')}</div>
                             {selectedCategory.attributes.length === 0 ? (
-                                <p className="text-sm text-muted-foreground">Selected category has no attributes.</p>
+                                <p className="text-sm text-muted-foreground">{t('rules.noAttributes')}</p>
                             ) : (
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                                     {selectedCategory.attributes.map((attribute) => (
@@ -383,7 +385,7 @@ export default function RulesManager() {
                             checked={form.include_folders}
                             onChange={(e) => setForm((prev) => ({ ...prev, include_folders: e.target.checked }))}
                         />
-                        Include folders
+                        {t('rules.includeFolders')}
                     </label>
                     <div className="flex items-center gap-2">
                         <button
@@ -393,7 +395,7 @@ export default function RulesManager() {
                             className="btn-refresh disabled:opacity-50"
                         >
                             {previewing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
-                            Preview
+                            {t('rules.preview')}
                         </button>
                         <button
                             type="submit"
@@ -401,15 +403,19 @@ export default function RulesManager() {
                             className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-lg shadow-primary/20 transition-transform hover:-translate-y-[1px] hover:bg-primary/92 disabled:opacity-50"
                         >
                             <Plus className="w-4 h-4" />
-                            Create Rule
+                            {t('rules.createRule')}
                         </button>
                     </div>
                 </form>
                 {preview && (
                     <div className="mt-3 text-sm rounded-lg border border-border/70 p-3 bg-background">
-                        <div className="font-medium mb-1">Preview</div>
+                        <div className="font-medium mb-1">{t('rules.preview')}</div>
                         <div className="text-muted-foreground">
-                            Matches: {preview.total_matches} | Change: {preview.to_change} | Already compliant: {preview.already_compliant}
+                            {t('rules.previewLine', {
+                                matches: preview.total_matches,
+                                change: preview.to_change,
+                                compliant: preview.already_compliant,
+                            })}
                         </div>
                     </div>
                 )}
@@ -422,17 +428,17 @@ export default function RulesManager() {
                     </div>
                 ) : rules.length === 0 ? (
                     <div className="empty-state">
-                        <div className="empty-state-title">No rules created yet</div>
-                        <p className="empty-state-text">Create your first automation rule above to process files in bulk.</p>
+                        <div className="empty-state-title">{t('rules.noRules')}</div>
+                        <p className="empty-state-text">{t('rules.noRulesHelp')}</p>
                     </div>
                 ) : (
                     <div className="surface-card overflow-hidden">
                         <div className="grid grid-cols-[1fr_150px_240px_200px_160px] gap-3 p-3 border-b border-border/70 bg-muted/45 text-xs font-medium uppercase text-muted-foreground">
-                            <div>Rule</div>
-                            <div>Category</div>
-                            <div>Actions</div>
-                            <div>Scope</div>
-                            <div className="text-right">Actions</div>
+                            <div>{t('rules.rule')}</div>
+                            <div>{t('rules.category')}</div>
+                            <div>{t('rules.actions')}</div>
+                            <div>{t('rules.scope')}</div>
+                            <div className="text-right">{t('rules.actions')}</div>
                         </div>
                         <div className="divide-y">
                             {rules.map((rule) => (
@@ -445,25 +451,25 @@ export default function RulesManager() {
                                         {categories.find((category) => category.id === rule.target_category_id)?.name || rule.target_category_id}
                                     </div>
                                     <div className="text-xs text-muted-foreground space-y-0.5">
-                                        <div>Metadata: {rule.apply_metadata ? 'on' : 'off'}</div>
-                                        <div>Rename: {rule.apply_rename ? (rule.rename_template || '-') : 'off'}</div>
-                                        <div>Move: {rule.apply_move ? `${rule.destination_folder_id || 'root'} / ${rule.destination_path_template || '-'}` : 'off'}</div>
+                                        <div>{t('rules.metadata')}: {rule.apply_metadata ? t('rules.on') : t('rules.off')}</div>
+                                        <div>{t('rules.rename')}: {rule.apply_rename ? (rule.rename_template || '-') : t('rules.off')}</div>
+                                        <div>{t('rules.move')}: {rule.apply_move ? `${rule.destination_folder_id || 'root'} / ${rule.destination_path_template || '-'}` : t('rules.off')}</div>
                                     </div>
                                     <div className="text-xs text-muted-foreground truncate">
-                                        {rule.path_prefix || '-'} {rule.path_contains ? `| contains: ${rule.path_contains}` : ''}
+                                        {rule.path_prefix || '-'} {rule.path_contains ? `| ${t('rules.contains')}: ${rule.path_contains}` : ''}
                                     </div>
                                     <div className="flex justify-end gap-1">
                                         <button
                                             onClick={() => handleApplyRule(rule.id)}
                                             className="p-2 rounded-md hover:bg-accent"
-                                            title="Apply Rule"
+                                            title={t('rules.applyRule')}
                                         >
                                             <PlayCircle className="w-4 h-4" />
                                         </button>
                                         <button
                                             onClick={() => handleDeleteRule(rule.id)}
                                             className="p-2 rounded-md hover:bg-destructive/10 text-destructive"
-                                            title="Delete Rule"
+                                            title={t('rules.deleteRule')}
                                         >
                                             <Trash2 className="w-4 h-4" />
                                         </button>

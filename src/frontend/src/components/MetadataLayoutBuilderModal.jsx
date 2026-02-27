@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GripVertical, Loader2, MoveHorizontal, Plus, RefreshCcw, Save, Trash2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import Modal from './Modal';
 import { metadataService } from '../services/metadata';
 import { formLayoutToPayload, normalizeFormLayoutForCategory } from '../utils/metadata';
@@ -135,6 +136,7 @@ export default function MetadataLayoutBuilderModal({
     categories = [],
     onSaved,
 }) {
+    const { t } = useTranslation();
     const { showToast } = useToast();
     const gridRef = useRef(null);
 
@@ -190,12 +192,12 @@ export default function MetadataLayoutBuilderModal({
                 return preferred ? String(preferred.id) : '';
             });
         } catch (error) {
-            const message = error?.response?.data?.detail || 'Failed to load metadata layouts';
+            const message = error?.response?.data?.detail || t('layoutBuilder.failedLoad');
             showToast(message, 'error');
         } finally {
             setLoading(false);
         }
-    }, [categories, showToast]);
+    }, [categories, showToast, t]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -301,7 +303,7 @@ export default function MetadataLayoutBuilderModal({
                 item_type: 'section',
                 item_id: `section_${Date.now()}_${sectionCount + 1}`,
                 attribute_id: null,
-                title: `Section ${sectionCount + 1}`,
+                title: `${t('layoutBuilder.section')} ${sectionCount + 1}`,
                 x: 0,
                 y: maxY + 1,
                 w: columns,
@@ -358,10 +360,10 @@ export default function MetadataLayoutBuilderModal({
                     half_width_attribute_ids: (saved.half_width_attribute_ids || []).map(String),
                 },
             }));
-            showToast('Metadata layout saved', 'success');
+            showToast(t('layoutBuilder.saved'), 'success');
             if (onSaved) onSaved(saved);
         } catch (error) {
-            const message = error?.response?.data?.detail || 'Failed to save metadata layout';
+            const message = error?.response?.data?.detail || t('layoutBuilder.failedSave');
             showToast(message, 'error');
         } finally {
             setSaving(false);
@@ -386,7 +388,7 @@ export default function MetadataLayoutBuilderModal({
                 if (saving) return;
                 onClose();
             }}
-            title="Metadata Layout Builder"
+            title={t('layoutBuilder.title')}
             maxWidthClass="max-w-6xl"
         >
             {loading ? (
@@ -397,7 +399,7 @@ export default function MetadataLayoutBuilderModal({
                 <div className="space-y-4">
                     <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_auto_auto_auto] items-end">
                         <div>
-                            <label className="block text-sm font-medium mb-1">Category</label>
+                            <label className="block text-sm font-medium mb-1">{t('layoutBuilder.category')}</label>
                             <select
                                 className="w-full border rounded-md p-2 bg-background"
                                 value={selectedCategoryId}
@@ -412,7 +414,7 @@ export default function MetadataLayoutBuilderModal({
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium mb-1">Grid Columns</label>
+                            <label className="block text-sm font-medium mb-1">{t('layoutBuilder.gridColumns')}</label>
                             <select
                                 className="w-full border rounded-md p-2 bg-background"
                                 value={columns}
@@ -421,7 +423,7 @@ export default function MetadataLayoutBuilderModal({
                             >
                                 {COLUMN_OPTIONS.map((option) => (
                                     <option key={option} value={option}>
-                                        {option} columns
+                                        {t('layoutBuilder.columns', { count: option })}
                                     </option>
                                 ))}
                             </select>
@@ -434,7 +436,7 @@ export default function MetadataLayoutBuilderModal({
                             className="px-3 py-2 rounded-md border text-sm hover:bg-accent disabled:opacity-50 inline-flex items-center gap-2"
                         >
                             <Plus size={14} />
-                            Add Section
+                            {t('layoutBuilder.addSection')}
                         </button>
 
                         <button
@@ -444,7 +446,7 @@ export default function MetadataLayoutBuilderModal({
                             className="px-3 py-2 rounded-md border text-sm hover:bg-accent disabled:opacity-50 inline-flex items-center gap-2"
                         >
                             <RefreshCcw size={14} />
-                            Reset
+                            {t('layoutBuilder.reset')}
                         </button>
 
                         <button
@@ -454,12 +456,12 @@ export default function MetadataLayoutBuilderModal({
                             className="px-3 py-2 rounded-md bg-primary text-primary-foreground text-sm hover:bg-primary/90 disabled:opacity-50 inline-flex items-center gap-2"
                         >
                             {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                            Save Layout
+                            {t('layoutBuilder.saveLayout')}
                         </button>
                     </div>
 
                     <div className="text-xs text-muted-foreground">
-                        Drag blocks to reorder. Fields resize by columns; sections are full width with a compact title.
+                        {t('layoutBuilder.help')}
                     </div>
 
                     <div className="border rounded-md bg-muted/20 p-2 overflow-auto">
@@ -514,7 +516,7 @@ export default function MetadataLayoutBuilderModal({
                                                 });
                                             }}
                                             className="h-full w-7 border-r bg-muted/35 hover:bg-muted/50 cursor-grab active:cursor-grabbing flex items-center justify-center"
-                                            title="Move"
+                                            title={t('layoutBuilder.move')}
                                             >
                                                 <GripVertical size={12} className="text-muted-foreground" />
                                             </button>
@@ -527,7 +529,7 @@ export default function MetadataLayoutBuilderModal({
                                                                 type="text"
                                                                 className="w-full text-xs font-semibold uppercase tracking-wide bg-transparent border rounded px-1.5 py-0.5"
                                                                 value={item.title || ''}
-                                                                placeholder="Section title"
+                                                                placeholder={t('layoutBuilder.sectionTitle')}
                                                                 onMouseDown={(event) => event.stopPropagation()}
                                                                 onChange={(event) => handleSectionTitleChange(itemKey, event.target.value)}
                                                             />
@@ -539,7 +541,7 @@ export default function MetadataLayoutBuilderModal({
                                                                     event.stopPropagation();
                                                                     handleRemoveSection(itemKey);
                                                                 }}
-                                                                title="Remove section"
+                                                                title={t('layoutBuilder.removeSection')}
                                                             >
                                                                 <Trash2 size={12} />
                                                             </button>
@@ -576,7 +578,7 @@ export default function MetadataLayoutBuilderModal({
                                                         });
                                                     }}
                                                     className="h-full w-3 border-l bg-muted/30 hover:bg-muted/50 cursor-ew-resize flex items-center justify-center"
-                                                    title="Resize width"
+                                                    title={t('layoutBuilder.resizeWidth')}
                                                 >
                                                     <MoveHorizontal size={10} className="text-muted-foreground" />
                                                 </button>

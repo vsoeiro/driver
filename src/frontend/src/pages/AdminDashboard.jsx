@@ -1,19 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, RefreshCw, RotateCcw } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { settingsService } from '../services/settings';
 import { jobsService } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
 import AdminTabs from '../components/AdminTabs';
 import { usePolling } from '../hooks/usePolling';
-
-const PERIOD_OPTIONS = [
-    { value: '24h', label: 'Last 24h' },
-    { value: '3d', label: 'Last 3 days' },
-    { value: '7d', label: 'Last 7 days' },
-    { value: '30d', label: 'Last 30 days' },
-    { value: '90d', label: 'Last 90 days' },
-];
 
 function PercentRing({ value }) {
     const safe = Math.max(0, Math.min(100, Number(value) || 0));
@@ -51,6 +44,7 @@ function MiniBars({ items, max }) {
 }
 
 export default function AdminDashboard() {
+    const { t } = useTranslation();
     const { showToast } = useToast();
     const [refreshing, setRefreshing] = useState(false);
     const [period, setPeriod] = useState('24h');
@@ -70,10 +64,10 @@ export default function AdminDashboard() {
 
     useEffect(() => {
         if (error) {
-            const message = error?.response?.data?.detail || 'Failed to load observability snapshot';
+            const message = error?.response?.data?.detail || t('adminDashboard.failedLoad');
             showToast(message, 'error');
         }
-    }, [error, showToast]);
+    }, [error, showToast, t]);
 
     const refreshSnapshot = useCallback(async ({ forceRefresh = false } = {}) => {
         setRefreshing(true);
@@ -84,12 +78,12 @@ export default function AdminDashboard() {
             });
             queryClient.setQueryData(['observability', period], data);
         } catch (error) {
-            const message = error?.response?.data?.detail || 'Failed to load observability snapshot';
+            const message = error?.response?.data?.detail || t('adminDashboard.failedLoad');
             showToast(message, 'error');
         } finally {
             setRefreshing(false);
         }
-    }, [period, queryClient, showToast]);
+    }, [period, queryClient, showToast, t]);
 
     usePolling({
         callback: () => refetch(),
@@ -107,31 +101,31 @@ export default function AdminDashboard() {
     const queueBars = useMemo(() => {
         if (!snapshot) return [];
         return [
-            { label: 'Pending', value: snapshot.pending_jobs || 0 },
-            { label: 'Running', value: snapshot.running_jobs || 0 },
-            { label: 'Retry Scheduled', value: snapshot.retry_scheduled_jobs || 0 },
-            { label: 'Queue Depth', value: snapshot.queue_depth || 0 },
+            { label: t('adminDashboard.bars.pending'), value: snapshot.pending_jobs || 0 },
+            { label: t('adminDashboard.bars.running'), value: snapshot.running_jobs || 0 },
+            { label: t('adminDashboard.bars.retryScheduled'), value: snapshot.retry_scheduled_jobs || 0 },
+            { label: t('adminDashboard.bars.queueDepth'), value: snapshot.queue_depth || 0 },
         ];
-    }, [snapshot]);
+    }, [snapshot, t]);
 
     const throughputBars = useMemo(() => {
         if (!snapshot) return [];
         const windowValue = snapshot.throughput_window ?? snapshot.throughput_last_24h ?? 0;
         return [
-            { label: 'Last hour', value: snapshot.throughput_last_hour || 0 },
-            { label: `Selected (${windowLabel})`, value: windowValue },
+            { label: t('adminDashboard.bars.lastHour'), value: snapshot.throughput_last_hour || 0 },
+            { label: t('adminDashboard.bars.selected', { window: windowLabel }), value: windowValue },
         ];
-    }, [snapshot, windowLabel]);
+    }, [snapshot, t, windowLabel]);
 
     const durationBars = useMemo(() => {
         if (!snapshot) return [];
         const avgDuration = snapshot.avg_duration_seconds_window ?? snapshot.avg_duration_seconds_last_24h ?? 0;
         const p95Duration = snapshot.p95_duration_seconds_window ?? snapshot.p95_duration_seconds_last_24h ?? 0;
         return [
-            { label: 'Average (s)', value: Number(avgDuration) },
-            { label: 'P95 (s)', value: Number(p95Duration) },
+            { label: t('adminDashboard.bars.average'), value: Number(avgDuration) },
+            { label: t('adminDashboard.bars.p95'), value: Number(p95Duration) },
         ];
-    }, [snapshot]);
+    }, [snapshot, t]);
 
     const metricsBars = useMemo(() => {
         if (!snapshot) return [];
@@ -140,12 +134,12 @@ export default function AdminDashboard() {
         const failed = snapshot.metrics_failed_window ?? snapshot.metrics_failed_24h ?? 0;
         const skipped = snapshot.metrics_skipped_window ?? snapshot.metrics_skipped_24h ?? 0;
         return [
-            { label: 'Total', value: total },
-            { label: 'Success', value: success },
-            { label: 'Failed', value: failed },
-            { label: 'Skipped', value: skipped },
+            { label: t('adminDashboard.bars.total'), value: total },
+            { label: t('adminDashboard.bars.success'), value: success },
+            { label: t('adminDashboard.bars.failed'), value: failed },
+            { label: t('adminDashboard.bars.skipped'), value: skipped },
         ];
-    }, [snapshot]);
+    }, [snapshot, t]);
 
     const providerUsageRows = useMemo(
         () => snapshot?.provider_request_usage || [],
@@ -159,22 +153,22 @@ export default function AdminDashboard() {
         setReprocessingJobId(jobId);
         try {
             const job = await jobsService.reprocessJob(jobId);
-            showToast(`Reprocess job queued (${job.id}).`, 'success');
+            showToast(t('adminDashboard.reprocessQueued', { id: job.id }), 'success');
             await refreshSnapshot({ forceRefresh: true });
         } catch (error) {
-            const message = error?.response?.data?.detail || 'Failed to reprocess dead-letter job';
+            const message = error?.response?.data?.detail || t('adminDashboard.failedReprocess');
             showToast(message, 'error');
         } finally {
             setReprocessingJobId(null);
         }
-    }, [refreshSnapshot, showToast]);
+    }, [refreshSnapshot, showToast, t]);
 
     return (
         <div className="app-page">
             <div className="page-header flex flex-wrap items-start justify-between gap-3">
                 <div>
-                    <h1 className="page-title">Admin Dashboard</h1>
-                    <p className="page-subtitle">Operational health and job analytics in real time.</p>
+                    <h1 className="page-title">{t('adminDashboard.title')}</h1>
+                    <p className="page-subtitle">{t('adminDashboard.subtitle')}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                     <AdminTabs />
@@ -182,7 +176,7 @@ export default function AdminDashboard() {
                         value={period}
                         onChange={(event) => setPeriod(event.target.value)}
                         className="input-shell px-2 py-1.5 text-sm"
-                        aria-label="Select period window"
+                        aria-label={t('adminDashboard.selectPeriod')}
                     >
                         {PERIOD_OPTIONS.map((option) => (
                             <option key={option.value} value={option.value}>{option.label}</option>
@@ -194,7 +188,7 @@ export default function AdminDashboard() {
                         className="btn-refresh"
                     >
                         {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                        Reload
+                        {t('common.reload')}
                     </button>
                 </div>
             </div>
@@ -206,31 +200,33 @@ export default function AdminDashboard() {
                     </div>
                 ) : !snapshot ? (
                     <div className="empty-state">
-                        <div className="empty-state-title">No dashboard data available</div>
-                        <p className="empty-state-text">Try reloading to fetch a fresh observability snapshot.</p>
+                        <div className="empty-state-title">{t('adminDashboard.noData')}</div>
+                        <p className="empty-state-text">{t('adminDashboard.noDataHelp')}</p>
                     </div>
                 ) : (
                     <div className="space-y-5">
                         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                             <div className="surface-card p-3">
-                                <div className="text-xs text-muted-foreground">Queue Depth</div>
+                                <div className="text-xs text-muted-foreground">{t('adminDashboard.queueDepth')}</div>
                                 <div className="text-2xl font-semibold">{snapshot.queue_depth}</div>
                             </div>
                             <div className="surface-card p-3">
-                                <div className="text-xs text-muted-foreground">Dead-letter ({windowLabel})</div>
+                                <div className="text-xs text-muted-foreground">{t('adminDashboard.deadLetterWindow', { window: windowLabel })}</div>
                                 <div className="text-2xl font-semibold">{deadLetterWindow}</div>
                             </div>
                             <div className="surface-card p-3">
-                                <div className="text-xs text-muted-foreground">Generated At</div>
+                                <div className="text-xs text-muted-foreground">{t('adminDashboard.generatedAt')}</div>
                                 <div className="text-sm font-medium">{new Date(snapshot.generated_at).toLocaleString()}</div>
                                 <div className="text-xs text-muted-foreground mt-1">
-                                    Cache: {snapshot.cache_hit ? `hit (${snapshot.cache_ttl_seconds}s left)` : 'fresh'}
+                                    {snapshot.cache_hit
+                                        ? t('adminDashboard.cacheHit', { seconds: snapshot.cache_ttl_seconds })
+                                        : t('adminDashboard.cacheFresh')}
                                 </div>
                             </div>
                         </div>
 
                         <div className="surface-card p-4">
-                            <h2 className="font-medium mb-3">Job Metrics ({windowLabel})</h2>
+                            <h2 className="font-medium mb-3">{t('adminDashboard.jobMetrics', { window: windowLabel })}</h2>
                             <MiniBars
                                 items={metricsBars}
                                 max={Math.max(...metricsBars.map((item) => item.value), 1)}
@@ -239,26 +235,26 @@ export default function AdminDashboard() {
 
                         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
                             <div className="surface-card p-4">
-                                <h2 className="font-medium mb-3">Success Rate ({windowLabel})</h2>
+                                <h2 className="font-medium mb-3">{t('adminDashboard.successRate', { window: windowLabel })}</h2>
                                 <div className="flex items-center justify-center">
                                     <PercentRing value={successRateWindow * 100} />
                                 </div>
                             </div>
                             <div className="surface-card p-4">
-                                <h2 className="font-medium mb-3">Queue Load</h2>
+                                <h2 className="font-medium mb-3">{t('adminDashboard.queueLoad')}</h2>
                                 <MiniBars
                                     items={queueBars}
                                     max={Math.max(...queueBars.map((item) => item.value), 1)}
                                 />
                             </div>
                             <div className="surface-card p-4">
-                                <h2 className="font-medium mb-3">Throughput</h2>
+                                <h2 className="font-medium mb-3">{t('adminDashboard.throughput')}</h2>
                                 <MiniBars
                                     items={throughputBars}
                                     max={Math.max(...throughputBars.map((item) => item.value), 1)}
                                 />
                                 <div className="border-t mt-4 pt-3">
-                                    <h3 className="text-sm font-medium mb-2">Latency</h3>
+                                    <h3 className="text-sm font-medium mb-2">{t('adminDashboard.latency')}</h3>
                                     <MiniBars
                                         items={durationBars}
                                         max={Math.max(...durationBars.map((item) => item.value), 1)}
@@ -269,10 +265,10 @@ export default function AdminDashboard() {
 
                         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                             <div className="surface-card p-4">
-                                <h2 className="font-medium mb-3">Provider API Usage</h2>
+                                <h2 className="font-medium mb-3">{t('adminDashboard.providerUsage')}</h2>
                                 <div className="space-y-3">
                                     {providerUsageRows.length === 0 ? (
-                                        <div className="text-sm text-muted-foreground">No provider request telemetry yet.</div>
+                                        <div className="text-sm text-muted-foreground">{t('adminDashboard.noTelemetry')}</div>
                                     ) : providerUsageRows.map((row) => {
                                         const pct = (Number(row.utilization_ratio) || 0) * 100;
                                         return (
@@ -290,9 +286,9 @@ export default function AdminDashboard() {
                                                     />
                                                 </div>
                                                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                                                    <span>Usage: {pct.toFixed(2)}%</span>
-                                                    <span>Total since start: {row.total_requests_since_start}</span>
-                                                    <span>429: {row.throttled_responses}</span>
+                                                    <span>{t('adminDashboard.usage', { value: pct.toFixed(2) })}</span>
+                                                    <span>{t('adminDashboard.totalSinceStart', { value: row.total_requests_since_start })}</span>
+                                                    <span>{t('adminDashboard.throttled429', { value: row.throttled_responses })}</span>
                                                 </div>
                                                 {row.docs_url && (
                                                     <a
@@ -301,7 +297,7 @@ export default function AdminDashboard() {
                                                         rel="noreferrer"
                                                         className="mt-1 inline-flex text-xs text-primary hover:underline"
                                                     >
-                                                        Docs
+                                                        {t('adminDashboard.docs')}
                                                     </a>
                                                 )}
                                             </div>
@@ -311,7 +307,7 @@ export default function AdminDashboard() {
                             </div>
 
                             <div className="surface-card p-4">
-                                <h2 className="font-medium mb-3">Integration Health</h2>
+                                <h2 className="font-medium mb-3">{t('adminDashboard.integrationHealth')}</h2>
                                 <div className="space-y-2">
                                     {(snapshot.integration_health || []).map((item) => (
                                         <div key={item.key} className="flex items-start justify-between gap-2 rounded-lg border border-border/70 bg-card/70 p-2.5">
@@ -336,7 +332,7 @@ export default function AdminDashboard() {
                         </div>
 
                         <div className="surface-card p-4">
-                            <h2 className="font-medium mb-3">Dead-letter Queue</h2>
+                            <h2 className="font-medium mb-3">{t('adminDashboard.deadLetterQueue')}</h2>
                             {snapshot.dead_letter_jobs?.length > 0 ? (
                                 <div className="space-y-2">
                                     {snapshot.dead_letter_jobs.map((job) => (
@@ -344,10 +340,10 @@ export default function AdminDashboard() {
                                             <div className="min-w-0">
                                                 <div className="text-sm font-medium truncate">{job.type}</div>
                                                 <div className="text-xs text-muted-foreground truncate">
-                                                    {job.dead_letter_reason || 'No reason captured'}
+                                                    {job.dead_letter_reason || t('adminDashboard.noReason')}
                                                 </div>
                                                 <div className="text-xs text-muted-foreground">
-                                                    {job.dead_lettered_at ? new Date(job.dead_lettered_at).toLocaleString() : '-'} - retry {job.retry_count}/{job.max_retries}
+                                                    {job.dead_lettered_at ? new Date(job.dead_lettered_at).toLocaleString() : '-'} - {t('adminDashboard.retry', { current: job.retry_count, max: job.max_retries })}
                                                 </div>
                                             </div>
                                             <button
@@ -359,13 +355,13 @@ export default function AdminDashboard() {
                                                 {reprocessingJobId === job.id
                                                     ? <Loader2 className="w-4 h-4 animate-spin" />
                                                     : <RotateCcw className="w-4 h-4" />}
-                                                Reprocess
+                                                {t('adminDashboard.reprocess')}
                                             </button>
                                         </div>
                                     ))}
                                 </div>
                             ) : (
-                                <div className="text-sm text-muted-foreground">No dead-letter jobs right now.</div>
+                                <div className="text-sm text-muted-foreground">{t('adminDashboard.noDeadLetters')}</div>
                             )}
                         </div>
                     </div>
@@ -374,3 +370,10 @@ export default function AdminDashboard() {
         </div>
     );
 }
+    const PERIOD_OPTIONS = [
+        { value: '24h', label: t('adminDashboard.last24h') },
+        { value: '3d', label: t('adminDashboard.last3d') },
+        { value: '7d', label: t('adminDashboard.last7d') },
+        { value: '30d', label: t('adminDashboard.last30d') },
+        { value: '90d', label: t('adminDashboard.last90d') },
+    ];

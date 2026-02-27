@@ -1,7 +1,10 @@
 import { useEffect } from 'react';
 import { X, Check, AlertCircle, Info, AlertTriangle } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 export default function Toast({ id, type, message, onClose, duration = 5000 }) {
+    const { t } = useTranslation();
+
     useEffect(() => {
         const timer = setTimeout(() => {
             onClose(id);
@@ -49,7 +52,7 @@ export default function Toast({ id, type, message, onClose, duration = 5000 }) {
             <button
                 onClick={() => onClose(id)}
                 className="ghost-icon-button p-1.5"
-                aria-label="Close toast"
+                aria-label={t('toast.close')}
             >
                 <X className="h-4 w-4" />
             </button>

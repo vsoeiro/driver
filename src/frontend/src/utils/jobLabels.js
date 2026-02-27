@@ -1,17 +1,19 @@
-const STATUS_LABELS = {
-    PENDING: 'Pending',
-    RUNNING: 'Running',
-    COMPLETED: 'Completed',
-    FAILED: 'Failed',
-    RETRY_SCHEDULED: 'Retry Scheduled',
-    CANCEL_REQUESTED: 'Cancelling',
-    CANCELLED: 'Cancelled',
-    DEAD_LETTER: 'Dead Letter',
+const STATUS_KEYS = {
+    PENDING: 'jobStatus.PENDING',
+    RUNNING: 'jobStatus.RUNNING',
+    COMPLETED: 'jobStatus.COMPLETED',
+    FAILED: 'jobStatus.FAILED',
+    RETRY_SCHEDULED: 'jobStatus.RETRY_SCHEDULED',
+    CANCEL_REQUESTED: 'jobStatus.CANCEL_REQUESTED',
+    CANCELLED: 'jobStatus.CANCELLED',
+    DEAD_LETTER: 'jobStatus.DEAD_LETTER',
 };
 
-export function formatJobStatus(status) {
-    if (!status) return 'Unknown';
-    if (STATUS_LABELS[status]) return STATUS_LABELS[status];
+export function formatJobStatus(status, t = null) {
+    if (!status) return t ? t('jobStatus.unknown') : 'Unknown';
+    if (STATUS_KEYS[status]) {
+        return t ? t(STATUS_KEYS[status]) : status;
+    }
     return status
         .toString()
         .toLowerCase()
@@ -21,8 +23,13 @@ export function formatJobStatus(status) {
         .join(' ');
 }
 
-export function formatJobType(type) {
-    if (!type) return 'Unknown';
+export function formatJobType(type, t = null) {
+    if (!type) return t ? t('jobType.unknown') : 'Unknown';
+    if (t) {
+        const key = `jobType.${String(type).toLowerCase()}`;
+        const translated = t(key);
+        if (translated !== key) return translated;
+    }
     return type
         .toString()
         .toLowerCase()

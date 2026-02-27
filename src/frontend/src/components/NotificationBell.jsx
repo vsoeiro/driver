@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Bell, CheckCheck, Loader2, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { settingsService } from '../services/settings';
 import { jobsService } from '../services/jobs';
 
@@ -38,20 +39,21 @@ function toneClass(kind) {
     return 'border-border/70 bg-card/70';
 }
 
-function relativeTime(value) {
+function relativeTime(value, t) {
     const ts = asDateMs(value);
     if (!ts) return '';
     const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-    if (diffSec < 60) return `${diffSec}s ago`;
+    if (diffSec < 60) return t('notifications.secondsAgo', { value: diffSec });
     const diffMin = Math.floor(diffSec / 60);
-    if (diffMin < 60) return `${diffMin}m ago`;
+    if (diffMin < 60) return t('notifications.minutesAgo', { value: diffMin });
     const diffHr = Math.floor(diffMin / 60);
-    if (diffHr < 24) return `${diffHr}h ago`;
+    if (diffHr < 24) return t('notifications.hoursAgo', { value: diffHr });
     const diffDay = Math.floor(diffHr / 24);
-    return `${diffDay}d ago`;
+    return t('notifications.daysAgo', { value: diffDay });
 }
 
 export default function NotificationBell() {
+    const { t } = useTranslation();
     const [open, setOpen] = useState(false);
     const [dismissedIds, setDismissedIds] = useState(() => loadDismissedIds());
     const wrapperRef = useRef(null);
@@ -104,12 +106,12 @@ export default function NotificationBell() {
             const status = String(job.status || '').toUpperCase();
             const kind = status === 'FAILED' || status === 'DEAD_LETTER' ? 'error' : status === 'CANCELLED' ? 'warning' : 'info';
             const title = status === 'COMPLETED'
-                ? `Job completed · ${job.type}`
+                ? t('notifications.jobCompleted', { type: job.type })
                 : status === 'FAILED'
-                    ? `Job failed · ${job.type}`
+                    ? t('notifications.jobFailed', { type: job.type })
                     : status === 'DEAD_LETTER'
-                        ? `Dead-letter job · ${job.type}`
-                        : `Job cancelled · ${job.type}`;
+                        ? t('notifications.jobDeadLetter', { type: job.type })
+                        : t('notifications.jobCancelled', { type: job.type });
             return {
                 id: `job:${job.id}:${status}:${job.completed_at || job.created_at}`,
                 kind,
@@ -122,7 +124,7 @@ export default function NotificationBell() {
         return [...alerts, ...jobs]
             .sort((a, b) => asDateMs(b.created_at) - asDateMs(a.created_at))
             .slice(0, 80);
-    }, [alertsQuery.data, jobsQuery.data]);
+    }, [alertsQuery.data, jobsQuery.data, t]);
 
     const visibleNotifications = useMemo(
         () => notifications.filter((item) => !dismissedIds.has(item.id)),
@@ -157,8 +159,8 @@ export default function NotificationBell() {
                 type="button"
                 className="ghost-icon-button relative"
                 onClick={() => setOpen((prev) => !prev)}
-                title="Notifications"
-                aria-label="Notifications"
+                title={t('notifications.title')}
+                aria-label={t('notifications.title')}
             >
                 <Bell size={16} />
                 {badgeCount > 0 && (
@@ -171,7 +173,7 @@ export default function NotificationBell() {
             {open && (
                 <div className="absolute right-0 top-10 z-[220] w-[380px] max-w-[90vw] rounded-lg border border-border bg-card p-2 shadow-xl">
                     <div className="mb-2 flex items-center justify-between px-2 py-1">
-                        <div className="text-sm font-semibold">Notifications</div>
+                        <div className="text-sm font-semibold">{t('notifications.title')}</div>
                         <button
                             type="button"
                             onClick={dismissAll}
@@ -179,7 +181,7 @@ export default function NotificationBell() {
                             disabled={visibleNotifications.length === 0}
                         >
                             <CheckCheck size={12} />
-                            Dismiss all
+                            {t('notifications.dismissAll')}
                         </button>
                     </div>
 
@@ -192,7 +194,7 @@ export default function NotificationBell() {
 
                         {!loading && visibleNotifications.length === 0 && (
                             <div className="rounded border border-border/70 bg-muted/20 px-3 py-6 text-center text-sm text-muted-foreground">
-                                No notifications.
+                                {t('notifications.none')}
                             </div>
                         )}
 
@@ -202,13 +204,13 @@ export default function NotificationBell() {
                                     <div className="min-w-0">
                                         <div className="truncate text-xs font-semibold">{item.title}</div>
                                         <div className="mt-0.5 text-xs text-muted-foreground">{item.message}</div>
-                                        <div className="mt-1 text-[11px] text-muted-foreground">{relativeTime(item.created_at)}</div>
+                                        <div className="mt-1 text-[11px] text-muted-foreground">{relativeTime(item.created_at, t)}</div>
                                     </div>
                                     <button
                                         type="button"
                                         onClick={() => dismissOne(item.id)}
                                         className="rounded p-1 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
-                                        title="Dismiss"
+                                        title={t('notifications.dismiss')}
                                     >
                                         <X size={12} />
                                     </button>

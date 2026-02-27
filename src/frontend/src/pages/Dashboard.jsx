@@ -3,10 +3,12 @@ import { accountsService } from '../services/accounts';
 const { getAccounts, linkAccount } = accountsService;
 import { Link } from 'react-router-dom';
 import { Plus, HardDrive, Calendar, ArrowRight } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import ProviderIcon from '../components/ProviderIcon';
 import ProviderPickerModal from '../components/ProviderPickerModal';
 
 export default function Dashboard() {
+    const { t } = useTranslation();
     const [accounts, setAccounts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [pickerOpen, setPickerOpen] = useState(false);
@@ -24,14 +26,14 @@ export default function Dashboard() {
     return (
         <div className="container mx-auto p-6 max-w-5xl">
             <header className="flex justify-between items-center mb-8">
-                <h1 className="text-3xl font-bold tracking-tight">Connected Accounts</h1>
+                <h1 className="text-3xl font-bold tracking-tight">{t('dashboard.title')}</h1>
                 <div className="flex items-center gap-2">
                     <button
                         onClick={() => setPickerOpen(true)}
                         className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md hover:bg-primary/90 transition-colors"
                     >
                         <Plus size={20} />
-                        Link Account
+                        {t('dashboard.linkAccount')}
                     </button>
                 </div>
             </header>
@@ -43,13 +45,13 @@ export default function Dashboard() {
             ) : accounts.length === 0 ? (
                 <div className="text-center p-12 border border-dashed rounded-lg bg-muted/50">
                     <HardDrive className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                    <h3 className="text-lg font-medium">No accounts linked</h3>
-                    <p className="text-muted-foreground mb-6">Connect a cloud account to get started.</p>
+                    <h3 className="text-lg font-medium">{t('dashboard.noAccounts')}</h3>
+                    <p className="text-muted-foreground mb-6">{t('dashboard.noAccountsHelp')}</p>
                     <button
                         onClick={() => setPickerOpen(true)}
                         className="bg-primary text-primary-foreground px-4 py-2 rounded-md hover:bg-primary/90"
                     >
-                        Link Account
+                        {t('dashboard.linkAccount')}
                     </button>
                 </div>
             ) : (
@@ -65,7 +67,7 @@ export default function Dashboard() {
                                     <ProviderIcon provider={acc.provider} className="w-6 h-6" />
                                 </div>
                                 <span className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 text-xs font-medium px-2.5 py-0.5 rounded-full">
-                                    Active
+                                    {t('dashboard.active')}
                                 </span>
                             </div>
 

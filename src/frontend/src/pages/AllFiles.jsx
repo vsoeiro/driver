@@ -1,5 +1,6 @@
 import { Fragment, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { itemsService } from '../services/items';
 import { metadataService } from '../services/metadata';
 import { accountsService } from '../services/accounts';
@@ -16,14 +17,16 @@ import {
 import {
     File, Folder, FolderOpen, Search, Filter, Database, CheckSquare, Square,
     Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, X, Trash2, ChevronDown, BookOpen, Pencil, Columns3, GripVertical,
-    Download, ArrowRightLeft, XCircle
+    Download, ArrowRightLeft, XCircle, UploadCloud
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import ProviderIcon from '../components/ProviderIcon';
 import MetadataModal from '../components/MetadataModal';
 import MoveModal from '../components/MoveModal';
 import SimilarFilesReportTab from '../components/SimilarFilesReportTab';
+import ImagePreviewModal from '../components/ImagePreviewModal';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { isPreviewableFileName } from '../utils/imagePreview';
 
 const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'cbw', 'pdf', 'epub', 'cbr', 'rar', 'cb7', '7z', 'cbt', 'tar']);
 const ALL_FILES_COLUMNS_STORAGE_KEY = 'driver-all-files-columns-v1';
@@ -38,6 +41,7 @@ const ALL_FILES_COLUMNS = [
 
 // Filter Component
 const FilterBar = ({ onFilter, filters, accounts, categories }) => {
+    const { t } = useTranslation();
     const [localFilters, setLocalFilters] = useState(filters);
     const [isOpen, setIsOpen] = useState(false);
     const [extensionsInput, setExtensionsInput] = useState((filters.extensions || []).join(', '));
@@ -77,19 +81,19 @@ const FilterBar = ({ onFilter, filters, accounts, categories }) => {
                 onClick={() => setIsOpen(!isOpen)}
                 className={`flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium ${isOpen ? 'bg-accent text-accent-foreground' : 'hover:bg-accent'}`}
             >
-                <Filter size={16} /> Filters
+                <Filter size={16} /> {t('allFiles.filters')}
             </button>
 
             {isOpen && (
                 <div className="absolute right-0 top-full mt-2 w-72 bg-popover border rounded-md shadow-lg p-4 z-[120] space-y-4">
                     <div>
-                        <label className="block text-sm font-medium mb-1">Account</label>
+                        <label className="block text-sm font-medium mb-1">{t('allFiles.account')}</label>
                         <select
                             className="w-full border rounded-md p-2 text-sm bg-background"
                             value={localFilters.account_id || ''}
                             onChange={(e) => handleChange('account_id', e.target.value)}
                         >
-                            <option value="">All Accounts</option>
+                            <option value="">{t('allFiles.allAccounts')}</option>
                             {accounts?.map(acc => (
                                 <option key={acc.id} value={acc.id}>{acc.email || acc.display_name}</option>
                             ))}
@@ -97,13 +101,13 @@ const FilterBar = ({ onFilter, filters, accounts, categories }) => {
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium mb-1">Category</label>
+                        <label className="block text-sm font-medium mb-1">{t('allFiles.category')}</label>
                         <select
                             className="w-full border rounded-md p-2 text-sm bg-background"
                             value={localFilters.category_id || ''}
                             onChange={(e) => handleChange('category_id', e.target.value)}
                         >
-                            <option value="">All Categories</option>
+                            <option value="">{t('allFiles.allCategories')}</option>
                             {categories?.map(cat => (
                                 <option key={cat.id} value={cat.id}>{cat.name}</option>
                             ))}
@@ -111,37 +115,37 @@ const FilterBar = ({ onFilter, filters, accounts, categories }) => {
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium mb-1">Has Metadata</label>
+                        <label className="block text-sm font-medium mb-1">{t('allFiles.hasMetadata')}</label>
                         <select
                             className="w-full border rounded-md p-2 text-sm bg-background"
                             value={localFilters.has_metadata ?? ''}
                             onChange={(e) => handleChange('has_metadata', e.target.value)}
                         >
-                            <option value="">All</option>
-                            <option value="true">With Metadata</option>
-                            <option value="false">Without Metadata</option>
+                            <option value="">{t('allFiles.all')}</option>
+                            <option value="true">{t('allFiles.withMetadata')}</option>
+                            <option value="false">{t('allFiles.withoutMetadata')}</option>
                         </select>
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium mb-1">Type</label>
+                        <label className="block text-sm font-medium mb-1">{t('allFiles.type')}</label>
                         <select
                             className="w-full border rounded-md p-2 text-sm bg-background"
                             value={localFilters.item_type || ''}
                             onChange={(e) => handleChange('item_type', e.target.value)}
                         >
-                            <option value="">All</option>
-                            <option value="file">Files</option>
-                            <option value="folder">Folders</option>
+                            <option value="">{t('allFiles.all')}</option>
+                            <option value="file">{t('allFiles.files')}</option>
+                            <option value="folder">{t('allFiles.folders')}</option>
                         </select>
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium mb-1">Extensions (comma separated)</label>
+                        <label className="block text-sm font-medium mb-1">{t('allFiles.extensions')}</label>
                         <input
                             type="text"
                             className="w-full border rounded-md p-2 text-sm bg-background"
-                            placeholder="pdf, jpg, docx"
+                            placeholder={t('allFiles.extensionsPlaceholder')}
                             value={extensionsInput}
                             onChange={(e) => {
                                 const raw = e.target.value;
@@ -153,18 +157,18 @@ const FilterBar = ({ onFilter, filters, accounts, categories }) => {
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium mb-1">Size (Bytes)</label>
+                        <label className="block text-sm font-medium mb-1">{t('allFiles.sizeBytes')}</label>
                         <div className="flex gap-2">
                             <input
                                 type="number"
-                                placeholder="Min"
+                                placeholder={t('allFiles.min')}
                                 className="w-full border rounded-md p-2 text-sm bg-background"
                                 value={localFilters.size_min || ''}
                                 onChange={(e) => handleChange('size_min', e.target.value)}
                             />
                             <input
                                 type="number"
-                                placeholder="Max"
+                                placeholder={t('allFiles.max')}
                                 className="w-full border rounded-md p-2 text-sm bg-background"
                                 value={localFilters.size_max || ''}
                                 onChange={(e) => handleChange('size_max', e.target.value)}
@@ -173,8 +177,8 @@ const FilterBar = ({ onFilter, filters, accounts, categories }) => {
                     </div>
 
                     <div className="flex justify-between pt-2">
-                        <button onClick={clearFilters} className="text-sm text-muted-foreground hover:text-foreground">Clear</button>
-                        <button onClick={applyFilters} className="bg-primary text-primary-foreground px-3 py-1.5 rounded-md text-sm font-medium">Apply</button>
+                        <button onClick={clearFilters} className="text-sm text-muted-foreground hover:text-foreground">{t('allFiles.clear')}</button>
+                        <button onClick={applyFilters} className="bg-primary text-primary-foreground px-3 py-1.5 rounded-md text-sm font-medium">{t('allFiles.apply')}</button>
                     </div>
                 </div>
             )}
@@ -184,6 +188,7 @@ const FilterBar = ({ onFilter, filters, accounts, categories }) => {
 
 // Batch Metadata Modal
 const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToast }) => {
+    const { t } = useTranslation();
     const [categories, setCategories] = useState([]);
     const [selectedCategory, setSelectedCategory] = useState('');
     const [attributeValues, setAttributeValues] = useState({});
@@ -305,15 +310,15 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
             await Promise.all(promises);
 
             if (applyRecursive && recursiveJobs > 0) {
-                showToast(`${recursiveJobs} recursive job(s) created for folder contents.`, 'success');
+                showToast(t('allFiles.recursiveJobsCreated', { count: recursiveJobs }), 'success');
             } else {
-                showToast('Metadata updated successfully.', 'success');
+                showToast(t('allFiles.metadataUpdated'), 'success');
             }
 
             onSuccess();
             onClose();
         } catch (error) {
-            showToast('Failed to update metadata: ' + error.message, 'error');
+            showToast(`${t('allFiles.failedUpdateMetadata')}: ${error.message}`, 'error');
         } finally {
             setSaving(false);
         }
@@ -323,14 +328,14 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
     const orderedAttributes = sortAttributesForCategory(currentCategory);
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={`Edit Metadata for ${selectedItems.length} item${selectedItems.length > 1 ? 's' : ''}`}>
+        <Modal isOpen={isOpen} onClose={onClose} title={t('allFiles.editMetadataTitle', { count: selectedItems.length })}>
             <div className="space-y-4">
                 {loading ? (
                     <div className="flex justify-center"><Loader2 className="animate-spin" /></div>
                 ) : (
                     <>
                         <div>
-                            <label className="block text-sm font-medium mb-1">Category</label>
+                            <label className="block text-sm font-medium mb-1">{t('allFiles.category')}</label>
                             <select
                                 className="w-full border rounded-md p-2 bg-background"
                                 value={selectedCategory}
@@ -339,7 +344,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                                     setAttributeValues({});
                                 }}
                             >
-                                <option value="">Select Category...</option>
+                                <option value="">{t('allFiles.selectCategory')}</option>
                                 {categories.map(c => (
                                     <option key={c.id} value={c.id}>{c.name}</option>
                                 ))}
@@ -363,7 +368,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                                                 disabled={isReadOnlyComputed}
                                                 onChange={e => setAttributeValues(prev => ({ ...prev, [attr.id]: e.target.value }))}
                                             >
-                                                <option value="">Select...</option>
+                                                <option value="">{t('allFiles.select')}</option>
                                                 {getSelectOptions(attr.options).map(opt => (
                                                     <option key={opt} value={opt}>{opt}</option>
                                                 ))}
@@ -375,16 +380,16 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                                                 disabled={isReadOnlyComputed}
                                                 onChange={e => setAttributeValues(prev => ({ ...prev, [attr.id]: e.target.value === 'true' }))}
                                             >
-                                                <option value="">Select...</option>
-                                                <option value="true">Yes</option>
-                                                <option value="false">No</option>
+                                                <option value="">{t('allFiles.select')}</option>
+                                                <option value="true">{t('common.yes')}</option>
+                                                <option value="false">{t('common.no')}</option>
                                             </select>
                                         ) : attr.data_type === 'tags' ? (
                                             <input
                                                 type="text"
                                                 className="w-full border rounded-md p-2 text-sm bg-background"
                                                 value={tagsToInputValue(attributeValues[attr.id] ?? [])}
-                                                placeholder="tag1, tag2, tag3"
+                                                placeholder={t('allFiles.tagsPlaceholder')}
                                                 disabled={isReadOnlyComputed}
                                                 onChange={e => setAttributeValues(prev => ({ ...prev, [attr.id]: parseTagsInput(e.target.value) }))}
                                             />
@@ -399,7 +404,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                                         )}
                                         {isReadOnlyComputed && (
                                             <div className="mt-1 text-xs text-muted-foreground">
-                                                Mapped field (read-only)
+                                                {t('allFiles.mappedReadonly')}
                                             </div>
                                         )}
                                                 </>
@@ -417,21 +422,21 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                                     checked={applyRecursive}
                                     onChange={(e) => setApplyRecursive(e.target.checked)}
                                 />
-                                Apply recursively to folder contents (background job)
+                                {t('allFiles.applyRecursive')}
                             </label>
                         )}
                     </>
                 )}
 
                 <div className="flex justify-end gap-2 pt-2">
-                    <button onClick={onClose} className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent">Cancel</button>
+                    <button onClick={onClose} className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent">{t('common.cancel')}</button>
                     <button
                         onClick={handleSave}
                         disabled={saving || !selectedCategory}
                         className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
                     >
                         {saving && <Loader2 className="animate-spin" size={14} />}
-                        Save Changes
+                        {t('allFiles.saveChanges')}
                     </button>
                 </div>
             </div>
@@ -442,6 +447,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
 
 // Remove Metadata Modal
 const RemoveMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToast }) => {
+    const { t } = useTranslation();
     const [removing, setRemoving] = useState(false);
 
     const folders = selectedItems.filter(i => i.item_type === 'folder');
@@ -475,29 +481,29 @@ const RemoveMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showTo
             await Promise.all(promises);
 
             const parts = [];
-            if (directDeleteItems.length > 0) parts.push(`${directDeleteItems.length} item(s) cleared`);
-            if (folders.length > 0) parts.push(`${folders.length} folder(s) queued for recursive removal`);
+            if (directDeleteItems.length > 0) parts.push(t('allFiles.itemsCleared', { count: directDeleteItems.length }));
+            if (folders.length > 0) parts.push(t('allFiles.foldersQueued', { count: folders.length }));
             showToast(parts.join(', ') + '.', 'success');
 
             onSuccess();
             onClose();
         } catch (error) {
-            showToast('Failed to remove metadata: ' + error.message, 'error');
+            showToast(`${t('allFiles.failedRemoveMetadata')}: ${error.message}`, 'error');
         } finally {
             setRemoving(false);
         }
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={`Remove Metadata from ${selectedItems.length} item${selectedItems.length > 1 ? 's' : ''}`}>
+        <Modal isOpen={isOpen} onClose={onClose} title={t('allFiles.removeMetadataTitle', { count: selectedItems.length })}>
             <div className="space-y-4">
                 {!hasAnything ? (
-                    <p className="text-sm text-muted-foreground">None of the selected items have metadata to remove.</p>
+                    <p className="text-sm text-muted-foreground">{t('allFiles.noMetadataToRemove')}</p>
                 ) : (
                     <>
                         {filesWithMeta.length > 0 && (
                             <div>
-                                <p className="text-sm font-medium mb-2">Files ({filesWithMeta.length})</p>
+                                <p className="text-sm font-medium mb-2">{t('allFiles.filesCount', { count: filesWithMeta.length })}</p>
                                 <div className="border rounded-md divide-y max-h-40 overflow-y-auto">
                                     {filesWithMeta.map(item => (
                                         <div key={item.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
@@ -514,18 +520,18 @@ const RemoveMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showTo
 
                         {folders.length > 0 && (
                             <div>
-                                <p className="text-sm font-medium mb-2">Folders — recursive removal ({folders.length})</p>
+                                <p className="text-sm font-medium mb-2">{t('allFiles.foldersRecursiveTitle', { count: folders.length })}</p>
                                 <div className="border rounded-md divide-y max-h-40 overflow-y-auto">
                                     {folders.map(item => (
                                         <div key={item.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
                                             <Folder size={14} className="text-blue-500 shrink-0" />
                                             <span className="truncate">{item.name}</span>
-                                            <span className="ml-auto text-xs text-muted-foreground shrink-0">+ all contents</span>
+                                            <span className="ml-auto text-xs text-muted-foreground shrink-0">{t('allFiles.plusAllContents')}</span>
                                         </div>
                                     ))}
                                 </div>
                                 <p className="text-xs text-muted-foreground mt-1">
-                                    A background job will remove metadata from the folder and all items inside it.
+                                    {t('allFiles.foldersRecursiveHelp')}
                                 </p>
                             </div>
                         )}
@@ -533,7 +539,7 @@ const RemoveMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showTo
                 )}
 
                 <div className="flex justify-end gap-2 pt-2">
-                    <button onClick={onClose} className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent">Cancel</button>
+                    <button onClick={onClose} className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent">{t('common.cancel')}</button>
                     {hasAnything && (
                         <button
                             onClick={handleRemove}
@@ -541,7 +547,7 @@ const RemoveMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showTo
                             className="px-4 py-2 text-sm font-medium bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 flex items-center gap-2"
                         >
                             {removing && <Loader2 className="animate-spin" size={14} />}
-                            Confirm Removal
+                            {t('allFiles.confirmRemoval')}
                         </button>
                     )}
                 </div>
@@ -552,6 +558,7 @@ const RemoveMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showTo
 
 
 export default function AllFiles() {
+    const { t, i18n } = useTranslation();
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(true);
     const [total, setTotal] = useState(0);
@@ -591,6 +598,12 @@ export default function AllFiles() {
     const [renameModalOpen, setRenameModalOpen] = useState(false);
     const [renameValue, setRenameValue] = useState('');
     const [renameSaving, setRenameSaving] = useState(false);
+    const [uploading, setUploading] = useState(false);
+    const [uploadProgress, setUploadProgress] = useState(0);
+    const [currentFolderTarget, setCurrentFolderTarget] = useState(null);
+    const [folderTargetsByPath, setFolderTargetsByPath] = useState({});
+    const [imagePreviewItem, setImagePreviewItem] = useState(null);
+    const fileInputRef = useRef(null);
     const metadataMenuRef = useRef(null);
     const [columnsMenuOpen, setColumnsMenuOpen] = useState(false);
     const columnsMenuRef = useRef(null);
@@ -768,7 +781,7 @@ export default function AllFiles() {
 
     const formatDate = (dateString) => {
         if (!dateString) return '-';
-        return new Date(dateString).toLocaleDateString('en-GB', {
+        return new Date(dateString).toLocaleDateString(i18n.language, {
             day: '2-digit', month: '2-digit', year: 'numeric',
             hour: '2-digit', minute: '2-digit'
         });
@@ -786,6 +799,14 @@ export default function AllFiles() {
     const moveTargetItem = singleSelectedItem
         ? { ...singleSelectedItem, id: singleSelectedItem.item_id }
         : null;
+    const selectedFolderTarget = singleSelectedItem?.item_type === 'folder'
+        ? singleSelectedItem
+        : null;
+    const contextualFolderTarget = pathPrefix && currentFolderTarget?.path === pathPrefix
+        ? currentFolderTarget
+        : null;
+    const uploadTargetFolder = selectedFolderTarget || contextualFolderTarget;
+    const canUploadToFolder = Boolean(uploadTargetFolder?.account_id && uploadTargetFolder?.item_id);
 
     const canMapComics = useMemo(() => {
         if (selectedItems.size === 0) return false;
@@ -873,7 +894,25 @@ export default function AllFiles() {
             case 'name':
                 return (
                     <div className="min-w-0 truncate font-medium" title={item.name}>
-                        {item.name}
+                        {item.item_type === 'file' && isPreviewableFileName(item.name) ? (
+                            <button
+                                type="button"
+                                className="truncate text-left hover:underline"
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    setImagePreviewItem({
+                                        accountId: item.account_id,
+                                        itemId: item.item_id,
+                                        filename: item.name,
+                                    });
+                                }}
+                                                        title={t('allFiles.previewFile')}
+                            >
+                                {item.name}
+                            </button>
+                        ) : (
+                            item.name
+                        )}
                     </div>
                 );
             case 'account':
@@ -912,6 +951,13 @@ export default function AllFiles() {
 
     const handleFolderClick = (item) => {
         const folderPath = item.path || `/${item.name}`;
+        const folderTarget = {
+            account_id: item.account_id,
+            item_id: item.item_id,
+            path: folderPath,
+        };
+        setCurrentFolderTarget(folderTarget);
+        setFolderTargetsByPath((prev) => ({ ...prev, [folderPath]: folderTarget }));
         setSearchTerm('');
         setPathPrefix(folderPath);
         setPage(1);
@@ -919,6 +965,7 @@ export default function AllFiles() {
 
     const clearPathPrefix = () => {
         setSearchTerm('');
+        setCurrentFolderTarget(null);
         setPathPrefix('');
         setPage(1);
     };
@@ -927,7 +974,7 @@ export default function AllFiles() {
         if (!isComicsLibraryActive) return;
         if (selectedItems.size === 0) return;
         if (!canMapComics) {
-            showToast('Map Comics is only available for folders or files with supported extensions (CBZ, ZIP, CBW, PDF, EPUB, CBR, RAR, CB7, 7Z, CBT, TAR).', 'error');
+            showToast(t('allFiles.mapComicsAvailability'), 'error');
             return;
         }
         setActionLoading(true);
@@ -946,10 +993,10 @@ export default function AllFiles() {
                 )
             );
 
-            showToast(`Comic mapping job(s) created for ${entries.length} account(s).`, 'success');
+            showToast(t('allFiles.comicJobsCreated', { count: entries.length }), 'success');
             setMetadataMenuOpen(false);
         } catch (error) {
-            showToast(`Failed to create comic mapping job: ${error.message}`, 'error');
+            showToast(`${t('allFiles.failedCreateComicJob')}: ${error.message}`, 'error');
         } finally {
             setActionLoading(false);
         }
@@ -962,8 +1009,56 @@ export default function AllFiles() {
                 const url = await driveService.getDownloadUrl(file.account_id, file.item_id);
                 window.open(url, '_blank');
             } catch (error) {
-                showToast(`Failed to download ${file.name}`, 'error');
+                showToast(`${t('allFiles.failedDownload')} ${file.name}`, 'error');
             }
+        }
+    };
+
+    const handleUploadToSelectedFolder = async (input) => {
+        if (!uploadTargetFolder) return;
+        const NativeFile = typeof globalThis !== 'undefined' ? globalThis.File : undefined;
+        const files = NativeFile && input instanceof NativeFile
+            ? [input]
+            : Array.isArray(input)
+                ? input.filter(Boolean)
+                : Array.from(input || []).filter(Boolean);
+        if (files.length === 0) return;
+
+        setUploading(true);
+        setUploadProgress(0);
+        showToast(t('allFiles.uploadingFiles', { count: files.length }), 'info');
+
+        let failed = 0;
+        try {
+            for (let index = 0; index < files.length; index += 1) {
+                const file = files[index];
+                try {
+                    await jobsService.uploadFileBackground(
+                        uploadTargetFolder.account_id,
+                        uploadTargetFolder.item_id,
+                        file,
+                        (pct) => {
+                            const overall = ((index + (pct / 100)) / files.length) * 100;
+                            setUploadProgress(Math.max(0, Math.min(100, Math.round(overall))));
+                        }
+                    );
+                    setUploadProgress(Math.round(((index + 1) / files.length) * 100));
+                } catch (error) {
+                    failed += 1;
+                    console.error(error);
+                }
+            }
+
+            if (failed > 0) {
+                showToast(t('allFiles.uploadFailedCount', { count: failed }), 'error');
+            } else {
+                showToast(t('allFiles.uploadQueued', { count: files.length }), 'success');
+            }
+
+            await fetchItems();
+        } finally {
+            setUploading(false);
+            setUploadProgress(0);
         }
     };
 
@@ -986,12 +1081,12 @@ export default function AllFiles() {
                 )
             );
 
-            showToast('Selected items deleted successfully.', 'success');
+            showToast(t('allFiles.selectedDeleted'), 'success');
             setDeleteModalOpen(false);
             setSelectedItems(new Set());
             fetchItems();
         } catch (error) {
-            showToast(error?.response?.data?.detail || 'Failed to delete selected items', 'error');
+            showToast(error?.response?.data?.detail || t('allFiles.failedDeleteSelected'), 'error');
         } finally {
             setActionLoading(false);
         }
@@ -1007,7 +1102,7 @@ export default function AllFiles() {
         if (!singleSelectedItem) return;
         const nextName = renameValue.trim();
         if (!nextName) {
-            showToast('Name cannot be empty.', 'error');
+            showToast(t('allFiles.nameCannotBeEmpty'), 'error');
             return;
         }
         if (nextName === singleSelectedItem.name) {
@@ -1018,12 +1113,12 @@ export default function AllFiles() {
         setRenameSaving(true);
         try {
             await driveService.updateItem(singleSelectedItem.account_id, singleSelectedItem.item_id, { name: nextName });
-            showToast('Item renamed successfully.', 'success');
+            showToast(t('allFiles.renamedSuccessfully'), 'success');
             setRenameModalOpen(false);
             setMetadataMenuOpen(false);
             await fetchItems();
         } catch (error) {
-            showToast(`Failed to rename item: ${error.message}`, 'error');
+            showToast(`${t('allFiles.failedRename')}: ${error.message}`, 'error');
         } finally {
             setRenameSaving(false);
         }
@@ -1046,17 +1141,17 @@ export default function AllFiles() {
         try {
             const summary = await jobsService.createExtractLibraryComicAssetsJob(accountScope, safeChunkSize);
             if (!summary?.total_jobs) {
-                showToast('No unmapped .cbr/.cbz files found in current scope.', 'success');
+                showToast(t('allFiles.noUnmappedComics'), 'success');
                 return;
             }
             showToast(
                 selectedAccountId
-                    ? `Created ${summary.total_jobs} comic mapping jobs (${summary.total_items} files, chunk=${summary.chunk_size}) for selected account.`
-                    : `Created ${summary.total_jobs} comic mapping jobs (${summary.total_items} files, chunk=${summary.chunk_size}) for all accounts.`,
+                    ? t('allFiles.createdComicsJobForAccount', { jobs: summary.total_jobs, items: summary.total_items, chunk: summary.chunk_size })
+                    : t('allFiles.createdComicsJobsAllAccounts', { jobs: summary.total_jobs, items: summary.total_items, chunk: summary.chunk_size }),
                 'success',
             );
         } catch (error) {
-            showToast(`Failed to create library comic mapping job: ${error.message}`, 'error');
+            showToast(`${t('allFiles.failedLibraryComicJob')}: ${error.message}`, 'error');
         } finally {
             setMapLibraryLoading(false);
             setMapLibraryConfirmOpen(false);
@@ -1076,9 +1171,9 @@ export default function AllFiles() {
     }, [pathPrefix]);
 
     const searchPlaceholders = {
-        name: 'Search by title...',
-        path: 'Search by path...',
-        both: 'Search by title or path...'
+        name: t('allFiles.searchByTitle'),
+        path: t('allFiles.searchByPath'),
+        both: t('allFiles.searchByTitlePath'),
     };
 
     return (
@@ -1093,7 +1188,7 @@ export default function AllFiles() {
                             : 'text-muted-foreground hover:bg-accent hover:text-foreground'
                     }`}
                 >
-                    File Library
+                    {t('allFiles.fileLibrary')}
                 </button>
                 <button
                     type="button"
@@ -1104,7 +1199,7 @@ export default function AllFiles() {
                             : 'text-muted-foreground hover:bg-accent hover:text-foreground'
                     }`}
                 >
-                    Similar Files
+                    {t('allFiles.similarFiles')}
                 </button>
             </div>
 
@@ -1117,20 +1212,25 @@ export default function AllFiles() {
                         onClick={clearPathPrefix}
                         className={`text-lg font-semibold hover:text-primary transition-colors ${!pathPrefix ? 'text-foreground' : 'text-muted-foreground'}`}
                     >
-                        File Library
+                        {t('allFiles.fileLibrary')}
                     </button>
                     {breadcrumbSegments.map((seg) => (
                         <Fragment key={seg.path}>
                             <ChevronRight size={16} className="text-muted-foreground" />
                             <button
-                                onClick={() => { setSearchTerm(''); setPathPrefix(seg.path); setPage(1); }}
+                                onClick={() => {
+                                    setSearchTerm('');
+                                    setCurrentFolderTarget(folderTargetsByPath[seg.path] || null);
+                                    setPathPrefix(seg.path);
+                                    setPage(1);
+                                }}
                                 className={`text-lg font-semibold hover:text-primary transition-colors ${pathPrefix === seg.path ? 'text-foreground' : 'text-muted-foreground'}`}
                             >
                                 {seg.label}
                             </button>
                         </Fragment>
                     ))}
-                    <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-0.5 rounded-full ml-2">{total} items</span>
+                    <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-0.5 rounded-full ml-2">{t('allFiles.itemsCount', { count: total })}</span>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -1139,9 +1239,9 @@ export default function AllFiles() {
                         value={searchScope}
                         onChange={(e) => setSearchScope(e.target.value)}
                     >
-                        <option value="both">Title + Path</option>
-                        <option value="name">Title</option>
-                        <option value="path">Path</option>
+                        <option value="both">{t('allFiles.titlePath')}</option>
+                        <option value="name">{t('allFiles.title')}</option>
+                        <option value="path">{t('allFiles.path')}</option>
                     </select>
                     <div className="relative">
                         <Search className="absolute left-2 top-1.5 text-muted-foreground" size={16} />
@@ -1159,10 +1259,10 @@ export default function AllFiles() {
                         <button
                             onClick={() => setColumnsMenuOpen((prev) => !prev)}
                             className="flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium hover:bg-accent"
-                            title="Choose columns"
+                            title={t('allFiles.chooseColumns')}
                         >
                             <Columns3 size={16} />
-                            Columns
+                            {t('allFiles.columnsTitle')}
                         </button>
                         {columnsMenuOpen && (
                             <div className="absolute right-0 top-full mt-2 w-56 bg-popover border rounded-md shadow-lg p-2 z-[120] space-y-1">
@@ -1183,7 +1283,7 @@ export default function AllFiles() {
                                                 });
                                             }}
                                         />
-                                        <span>{column.label}</span>
+                                        <span>{t(`allFiles.columns.${column.id}`)}</span>
                                     </label>
                                 ))}
                             </div>
@@ -1194,10 +1294,10 @@ export default function AllFiles() {
                             onClick={executeMapLibraryComics}
                             disabled={mapLibraryLoading}
                             className="flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium hover:bg-accent disabled:opacity-50"
-                            title="Map all synced .cbr/.cbz items as comics"
+                            title={t('allFiles.mapAllComicsHelp')}
                         >
                             {mapLibraryLoading ? <Loader2 size={16} className="animate-spin" /> : <BookOpen size={16} />}
-                            Map All Comics
+                            {t('allFiles.mapAllComics')}
                         </button>
                     )}
                 </div>
@@ -1206,24 +1306,45 @@ export default function AllFiles() {
             {/* Toolbar */}
             <div className="toolbar-surface relative z-40 mb-4 px-4 py-2 flex items-center justify-between gap-2 text-sm">
                 <div className="flex items-center gap-2">
-                    <span className="font-medium mr-2 whitespace-nowrap w-24 text-right tabular-nums">{selectedItems.size} selected</span>
+                    <span className="font-medium mr-2 whitespace-nowrap w-24 text-right tabular-nums">{t('allFiles.selectedCount', { count: selectedItems.size })}</span>
                     <div className="h-4 w-px bg-border mx-2" />
                     <button
                         onClick={handleDownload}
                         disabled={selectedItems.size === 0}
                         className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Download"
+                        title={t('allFiles.download')}
                     >
-                        <Download size={16} /> <span className="hidden sm:inline">Download</span>
+                        <Download size={16} /> <span className="hidden sm:inline">{t('allFiles.download')}</span>
                     </button>
                     <button
                         onClick={() => setMoveModalOpen(true)}
                         disabled={selectedItems.size !== 1}
                         className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Move"
+                        title={t('allFiles.move')}
                     >
-                        <ArrowRightLeft size={16} /> <span className="hidden sm:inline">Move</span>
+                        <ArrowRightLeft size={16} /> <span className="hidden sm:inline">{t('allFiles.move')}</span>
                     </button>
+                    <button
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={!canUploadToFolder || uploading}
+                        className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={canUploadToFolder ? t('allFiles.upload') : t('allFiles.selectFolderOrOpenFolderToUpload')}
+                    >
+                        {uploading ? <Loader2 className="animate-spin" size={16} /> : <UploadCloud size={16} />}
+                        <span className="hidden sm:inline">
+                            {uploading ? t('allFiles.uploadingProgress', { progress: uploadProgress }) : t('allFiles.upload')}
+                        </span>
+                    </button>
+                    <input
+                        type="file"
+                        ref={fileInputRef}
+                        className="hidden"
+                        multiple
+                        onChange={(event) => {
+                            handleUploadToSelectedFolder(event.target.files);
+                            event.target.value = '';
+                        }}
+                    />
                     <div
                         className={`relative ${selectedItems.size === 0 ? 'pointer-events-none opacity-50' : ''}`}
                         ref={metadataMenuRef}
@@ -1232,10 +1353,10 @@ export default function AllFiles() {
                             onClick={() => setMetadataMenuOpen(!metadataMenuOpen)}
                             disabled={selectedItems.size === 0}
                             className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:cursor-not-allowed"
-                            title="Metadata Actions"
+                            title={t('allFiles.metadataActions')}
                         >
                             <Database size={16} />
-                            <span className="hidden sm:inline">Metadata</span>
+                            <span className="hidden sm:inline">{t('allFiles.metadata')}</span>
                             <ChevronDown size={14} className={`transition-transform ${metadataMenuOpen ? 'rotate-180' : ''}`} />
                         </button>
 
@@ -1254,14 +1375,14 @@ export default function AllFiles() {
                                         disabled={selectedItems.size === 0}
                                         className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
                                     >
-                                        <Database size={14} /> Edit Metadata
+                                        <Database size={14} /> {t('allFiles.editMetadata')}
                                     </button>
                                     <button
                                         onClick={openRenameModal}
                                         disabled={selectedItems.size !== 1 || actionLoading}
                                         className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
                                     >
-                                        <Pencil size={14} /> Rename
+                                        <Pencil size={14} /> {t('allFiles.rename')}
                                     </button>
                                     <button
                                         onClick={() => {
@@ -1271,7 +1392,7 @@ export default function AllFiles() {
                                         disabled={selectedItems.size === 0}
                                         className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 text-destructive hover:text-destructive disabled:opacity-50"
                                     >
-                                        <XCircle size={14} /> Remove Metadata
+                                        <XCircle size={14} /> {t('allFiles.removeMetadata')}
                                     </button>
                                     {isComicsLibraryActive && (
                                         <button
@@ -1280,7 +1401,7 @@ export default function AllFiles() {
                                             className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
                                         >
                                             {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
-                                            Map Comics
+                                            {t('allFiles.mapComics')}
                                         </button>
                                     )}
                                 </div>
@@ -1292,16 +1413,16 @@ export default function AllFiles() {
                         onClick={() => setDeleteModalOpen(true)}
                         disabled={selectedItems.size === 0}
                         className="p-2 hover:bg-destructive/10 text-destructive rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Delete"
+                        title={t('allFiles.delete')}
                     >
-                        <Trash2 size={16} /> <span className="hidden sm:inline">Delete</span>
+                        <Trash2 size={16} /> <span className="hidden sm:inline">{t('allFiles.delete')}</span>
                     </button>
 
                 </div>
 
                 {/* Pagination */}
                 <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground">Page {page} of {totalPages}</span>
+                    <span className="text-muted-foreground">{t('allFiles.pageOf', { page, total: totalPages })}</span>
                     <div className="flex gap-1">
                         <button
                             disabled={page <= 1}
@@ -1325,10 +1446,10 @@ export default function AllFiles() {
             {pathPrefix && (
                 <div className="mb-4 rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-2 flex items-center gap-2 text-sm">
                     <FolderOpen size={16} className="text-blue-500" />
-                    <span className="text-muted-foreground">Showing files in:</span>
+                    <span className="text-muted-foreground">{t('allFiles.showingFilesIn')}</span>
                     <span className="font-medium text-blue-700">{pathPrefix}</span>
                     <button onClick={clearPathPrefix} className="ml-auto flex items-center gap-1 text-muted-foreground hover:text-foreground text-xs">
-                        <X size={14} /> Clear
+                        <X size={14} /> {t('allFiles.clear')}
                     </button>
                 </div>
             )}
@@ -1344,8 +1465,8 @@ export default function AllFiles() {
                         <div className="empty-state-icon">
                             <Folder size={26} />
                         </div>
-                        <div className="empty-state-title">No items found</div>
-                        <p className="empty-state-text">Adjust your filters or clear the path scope to broaden results.</p>
+                        <div className="empty-state-title">{t('allFiles.noItemsFound')}</div>
+                        <p className="empty-state-text">{t('allFiles.noItemsHelp')}</p>
                     </div>
                 ) : (
                     <div className="surface-card overflow-hidden select-none">
@@ -1376,7 +1497,7 @@ export default function AllFiles() {
                                             onClick={() => column.sortKey && handleSort(column.sortKey)}
                                         >
                                             <GripVertical size={12} className="opacity-45" />
-                                            {column.label}
+                                            {t(`allFiles.columns.${column.id}`)}
                                             {column.sortKey ? renderSortIcon(column.sortKey) : null}
                                         </button>
                                         <div
@@ -1409,7 +1530,7 @@ export default function AllFiles() {
                                                     <button
                                                         onClick={(e) => { e.stopPropagation(); handleFolderClick(item); }}
                                                         className="hover:scale-110 transition-transform"
-                                                        title="Show files inside this folder"
+                                                        title={t('allFiles.showFolderContents')}
                                                     >
                                                         <Folder className="text-blue-500 fill-blue-500/20" size={20} />
                                                     </button>
@@ -1466,12 +1587,12 @@ export default function AllFiles() {
             <Modal
                 isOpen={deleteModalOpen}
                 onClose={() => !actionLoading && setDeleteModalOpen(false)}
-                title={`Delete ${selectedItems.size} item(s)?`}
+                title={t('allFiles.deleteTitle', { count: selectedItems.size })}
                 maxWidthClass="max-w-md"
             >
                 <div className="space-y-4">
                     <p className="text-sm text-muted-foreground">
-                        Are you sure you want to delete the selected items? This action cannot be undone.
+                        {t('allFiles.deleteConfirm')}
                     </p>
                     <div className="flex justify-end gap-2">
                         <button
@@ -1480,7 +1601,7 @@ export default function AllFiles() {
                             disabled={actionLoading}
                             className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
                         >
-                            Cancel
+                            {t('common.cancel')}
                         </button>
                         <button
                             type="button"
@@ -1489,7 +1610,7 @@ export default function AllFiles() {
                             className="px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 disabled:opacity-50 flex items-center gap-2"
                         >
                             {actionLoading && <Loader2 className="animate-spin" size={14} />}
-                            Delete
+                            {t('allFiles.delete')}
                         </button>
                     </div>
                 </div>
@@ -1510,12 +1631,12 @@ export default function AllFiles() {
             <Modal
                 isOpen={renameModalOpen}
                 onClose={() => !renameSaving && setRenameModalOpen(false)}
-                title="Rename Item"
+                title={t('allFiles.renameItem')}
                 maxWidthClass="max-w-md"
             >
                 <div className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium mb-1">New name</label>
+                        <label className="block text-sm font-medium mb-1">{t('allFiles.newName')}</label>
                         <input
                             type="text"
                             value={renameValue}
@@ -1532,7 +1653,7 @@ export default function AllFiles() {
                             disabled={renameSaving}
                             className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
                         >
-                            Cancel
+                            {t('common.cancel')}
                         </button>
                         <button
                             type="button"
@@ -1541,7 +1662,7 @@ export default function AllFiles() {
                             className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
                         >
                             {renameSaving && <Loader2 className="animate-spin" size={14} />}
-                            Rename
+                            {t('allFiles.rename')}
                         </button>
                     </div>
                 </div>
@@ -1550,16 +1671,16 @@ export default function AllFiles() {
             <Modal
                 isOpen={mapLibraryConfirmOpen}
                 onClose={() => !mapLibraryLoading && setMapLibraryConfirmOpen(false)}
-                title="Map All Comics"
+                title={t('allFiles.mapAllComics')}
                 maxWidthClass="max-w-lg"
             >
                 <p className="text-sm text-muted-foreground mb-4">
                     {filters.account_id
-                        ? 'Create a job to map all synced .cbr/.cbz files for the selected account filter?'
-                        : 'Create a job to map all synced .cbr/.cbz files across all accounts?'}
+                        ? t('allFiles.mapAllComicsSelectedAccount')
+                        : t('allFiles.mapAllComicsAllAccounts')}
                 </p>
                 <div className="mb-4">
-                    <label className="block text-sm font-medium mb-1">Chunk size per job</label>
+                    <label className="block text-sm font-medium mb-1">{t('allFiles.chunkSizePerJob')}</label>
                     <input
                         type="number"
                         min={1}
@@ -1571,7 +1692,7 @@ export default function AllFiles() {
                         className="w-full border rounded-md p-2 text-sm bg-background"
                     />
                     <p className="mt-1 text-xs text-muted-foreground">
-                        Lower values create more jobs with fewer files each.
+                        {t('allFiles.chunkSizeHelp')}
                     </p>
                 </div>
                 <div className="flex justify-end gap-2">
@@ -1581,7 +1702,7 @@ export default function AllFiles() {
                         disabled={mapLibraryLoading}
                         className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
                     >
-                        Cancel
+                        {t('common.cancel')}
                     </button>
                     <button
                         type="button"
@@ -1590,10 +1711,18 @@ export default function AllFiles() {
                         className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
                     >
                         {mapLibraryLoading && <Loader2 className="animate-spin" size={14} />}
-                        Confirm
+                        {t('common.confirm')}
                     </button>
                 </div>
             </Modal>
+
+            <ImagePreviewModal
+                isOpen={Boolean(imagePreviewItem)}
+                onClose={() => setImagePreviewItem(null)}
+                accountId={imagePreviewItem?.accountId}
+                itemId={imagePreviewItem?.itemId}
+                filename={imagePreviewItem?.filename}
+            />
                 </>
             ) : (
                 <SimilarFilesReportTab accounts={accounts} />
@@ -1601,3 +1730,4 @@ export default function AllFiles() {
         </div>
     );
 }
+

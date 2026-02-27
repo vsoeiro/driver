@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { metadataService } from '../services/metadata';
 import { itemsService } from '../services/items';
 import { accountsService } from '../services/accounts';
@@ -31,18 +32,24 @@ import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 const ITEMS_PER_PAGE = 50;
 const BASE_SORT_OPTIONS = [
-    { value: 'modified_at', label: 'Order: Modified' },
-    { value: 'name', label: 'Order: Name' },
-    { value: 'size', label: 'Order: Size' },
-    { value: 'created_at', label: 'Order: Created' },
+    { value: 'modified_at', key: 'modified' },
+    { value: 'name', key: 'name' },
+    { value: 'size', key: 'size' },
+    { value: 'created_at', key: 'created' },
 ];
 const METADATA_TABLE_COLUMNS_STORAGE_PREFIX = 'driver-metadata-table-columns-v1';
 
 const getLibraryDisplayName = (library) => (library?.key === 'comics_core' ? 'Comics' : library?.name);
+const getLibraryDescription = (library, t) => {
+    if (!library) return '';
+    if (library.key === 'comics_core') return t('metadataManager.comicsLibraryDescription');
+    return library.description || '';
+};
 
 
 // -- Category Items Table --
 const CategoryItemsTable = ({ category, onBack }) => {
+    const { t, i18n } = useTranslation();
     const { showToast } = useToast();
     const [items, setItems] = useState([]);
     const [seriesRows, setSeriesRows] = useState([]);
@@ -92,15 +99,21 @@ const CategoryItemsTable = ({ category, onBack }) => {
         () =>
             (category.attributes || []).map((attr) => ({
                 value: `metadata:${attr.id}`,
-                label: `Order: ${attr.name}`,
+                label: t('metadataManager.orderByAttr', { name: attr.name }),
                 attributeId: attr.id,
                 dataType: attr.data_type,
             })),
-        [category.attributes]
+        [category.attributes, t]
     );
     const sortOptions = useMemo(
-        () => [...BASE_SORT_OPTIONS, ...metadataSortOptions],
-        [metadataSortOptions]
+        () => [
+            ...BASE_SORT_OPTIONS.map((option) => ({
+                ...option,
+                label: t(`metadataManager.order.${option.key}`),
+            })),
+            ...metadataSortOptions,
+        ],
+        [metadataSortOptions, t]
     );
     const selectedMetadataSort = useMemo(() => {
         if (!sort.by?.startsWith('metadata:')) return null;
@@ -187,19 +200,19 @@ const CategoryItemsTable = ({ category, onBack }) => {
                     onClick={() => setIsOpen(!isOpen)}
                     className={`flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium ${isOpen ? 'bg-accent text-accent-foreground' : 'hover:bg-accent'}`}
                 >
-                    <Filter size={16} /> Filters
+                    <Filter size={16} /> {t('allFiles.filters')}
                 </button>
 
                 {isOpen && (
                     <div className="absolute right-0 top-full mt-2 w-80 bg-popover border rounded-md shadow-lg p-4 z-50 space-y-4 max-h-[70vh] overflow-y-auto">
                         <div>
-                            <label className="block text-sm font-medium mb-1">Account</label>
+                            <label className="block text-sm font-medium mb-1">{t('allFiles.account')}</label>
                             <select
                                 className="w-full border rounded-md p-2 text-sm bg-background"
                                 value={localFilters.account_id || ''}
                                 onChange={(e) => handleChange('account_id', e.target.value)}
                             >
-                                <option value="">All Accounts</option>
+                                <option value="">{t('allFiles.allAccounts')}</option>
                                 {accounts.map(acc => (
                                     <option key={acc.id} value={acc.id}>{acc.email || acc.display_name}</option>
                                 ))}
@@ -207,21 +220,21 @@ const CategoryItemsTable = ({ category, onBack }) => {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium mb-1">Type</label>
+                            <label className="block text-sm font-medium mb-1">{t('allFiles.type')}</label>
                             <select
                                 className="w-full border rounded-md p-2 text-sm bg-background"
                                 value={localFilters.item_type || ''}
                                 onChange={(e) => handleChange('item_type', e.target.value)}
                             >
-                                <option value="">All</option>
-                                <option value="file">Files</option>
-                                <option value="folder">Folders</option>
+                                <option value="">{t('allFiles.all')}</option>
+                                <option value="file">{t('allFiles.files')}</option>
+                                <option value="folder">{t('allFiles.folders')}</option>
                             </select>
                         </div>
 
                         <div className="border-t pt-3">
                             <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-                                Category Attributes
+                                {t('metadataManager.categoryAttributes')}
                             </h4>
                             <div className="space-y-3">
                                 {filterableAttributes.map(attr => (
@@ -242,7 +255,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                     value={(localFilters.attributes[attr.id]?.value) ?? ''}
                                                     onChange={(e) => handleAttributeConfigChange(attr.id, 'value', e.target.value)}
                                                 >
-                                                    <option value="">Any</option>
+                                                    <option value="">{t('metadataManager.any')}</option>
                                                     {getSelectOptions(attr.options).map(opt => (
                                                         <option key={opt} value={opt}>{opt}</option>
                                                     ))}
@@ -263,9 +276,9 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                     value={(localFilters.attributes[attr.id]?.value) ?? ''}
                                                     onChange={(e) => handleAttributeConfigChange(attr.id, 'value', e.target.value)}
                                                 >
-                                                    <option value="">Any</option>
-                                                    <option value="true">Yes</option>
-                                                    <option value="false">No</option>
+                                                    <option value="">{t('metadataManager.any')}</option>
+                                                    <option value="true">{t('common.yes')}</option>
+                                                    <option value="false">{t('common.no')}</option>
                                                 </select>
                                             </div>
                                         ) : attr.data_type === 'number' ? (
@@ -275,14 +288,14 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                     className="w-full border rounded-md p-2 text-sm bg-background"
                                                     value={(localFilters.attributes[attr.id]?.min) ?? ''}
                                                     onChange={(e) => handleAttributeConfigChange(attr.id, 'min', e.target.value)}
-                                                    placeholder="Min"
+                                                    placeholder={t('allFiles.min')}
                                                 />
                                                 <input
                                                     type="number"
                                                     className="w-full border rounded-md p-2 text-sm bg-background"
                                                     value={(localFilters.attributes[attr.id]?.max) ?? ''}
                                                     onChange={(e) => handleAttributeConfigChange(attr.id, 'max', e.target.value)}
-                                                    placeholder="Max"
+                                                    placeholder={t('allFiles.max')}
                                                 />
                                             </div>
                                         ) : attr.data_type === 'text' || attr.data_type === 'tags' ? (
@@ -292,8 +305,8 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                     value={(localFilters.attributes[attr.id]?.op) || 'contains'}
                                                     onChange={(e) => handleAttributeConfigChange(attr.id, 'op', e.target.value)}
                                                 >
-                                                    <option value="contains">contains</option>
-                                                    <option value="not_contains">not contains</option>
+                                                    <option value="contains">{t('metadataManager.contains')}</option>
+                                                    <option value="not_contains">{t('metadataManager.notContains')}</option>
                                                     <option value="eq">=</option>
                                                     <option value="ne">!=</option>
                                                 </select>
@@ -302,7 +315,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                     className="w-full border rounded-md p-2 text-sm bg-background"
                                                     value={(localFilters.attributes[attr.id]?.value) ?? ''}
                                                     onChange={(e) => handleAttributeConfigChange(attr.id, 'value', e.target.value)}
-                                                    placeholder={attr.data_type === 'tags' ? 'tag1, tag2' : `Filter by ${attr.name}`}
+                                                    placeholder={attr.data_type === 'tags' ? t('metadataManager.tagsPlaceholderShort') : t('metadataManager.filterByAttr', { name: attr.name })}
                                                 />
                                             </div>
                                         ) : attr.data_type === 'date' ? (
@@ -330,9 +343,9 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                 value={localFilters.attributes[attr.id] ?? ''}
                                                 onChange={(e) => handleAttributeChange(attr.id, e.target.value)}
                                             >
-                                                <option value="">Any</option>
-                                                <option value="true">Yes</option>
-                                                <option value="false">No</option>
+                                                    <option value="">{t('metadataManager.any')}</option>
+                                                    <option value="true">{t('common.yes')}</option>
+                                                    <option value="false">{t('common.no')}</option>
                                             </select>
                                         )}
                                     </div>
@@ -346,8 +359,8 @@ const CategoryItemsTable = ({ category, onBack }) => {
                         </div>
 
                         <div className="flex justify-between pt-2">
-                            <button onClick={clearFilters} className="text-sm text-muted-foreground hover:text-foreground">Clear</button>
-                            <button onClick={applyFilters} className="bg-primary text-primary-foreground px-3 py-1.5 rounded-md text-sm font-medium">Apply</button>
+                            <button onClick={clearFilters} className="text-sm text-muted-foreground hover:text-foreground">{t('allFiles.clear')}</button>
+                            <button onClick={applyFilters} className="bg-primary text-primary-foreground px-3 py-1.5 rounded-md text-sm font-medium">{t('allFiles.apply')}</button>
                         </div>
                     </div>
                 )}
@@ -538,7 +551,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
     };
 
     const formatSize = (bytes) => {
-        if (!bytes || bytes === 0) return '0 B';
+        if (!bytes || bytes === 0) return t('metadataManager.zeroBytes');
         const k = 1024;
         const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -546,25 +559,25 @@ const CategoryItemsTable = ({ category, onBack }) => {
     };
 
     const formatDate = (dateString) => {
-        if (!dateString) return '-';
-        return new Date(dateString).toLocaleDateString('en-GB', {
+        if (!dateString) return t('metadataManager.dash');
+        return new Date(dateString).toLocaleDateString(i18n.language, {
             day: '2-digit', month: '2-digit', year: 'numeric',
             hour: '2-digit', minute: '2-digit'
         });
     };
 
     const getAttributeValue = (item, attr) => {
-        if (!item.metadata?.values) return '-';
+        if (!item.metadata?.values) return t('metadataManager.dash');
         const val = item.metadata.values[attr.id];
-        if (val === undefined || val === null || val === '') return '-';
+        if (val === undefined || val === null || val === '') return t('metadataManager.dash');
 
-        if (attr.data_type === 'boolean') return val ? 'Yes' : 'No';
+        if (attr.data_type === 'boolean') return val ? t('common.yes') : t('common.no');
         if (attr.data_type === 'tags') {
             const tags = Array.isArray(val) ? val : parseTagsInput(String(val));
-            return tags.length > 0 ? tags.join(', ') : '-';
+            return tags.length > 0 ? tags.join(', ') : t('metadataManager.dash');
         }
         if (attr.data_type === 'date' && val) {
-            return new Date(val).toLocaleDateString('en-GB');
+            return new Date(val).toLocaleDateString(i18n.language);
         }
         return String(val);
     };
@@ -645,9 +658,9 @@ const CategoryItemsTable = ({ category, onBack }) => {
             );
             setEditingCell(null);
             setEditingValue('');
-            showToast(`'${attr.name}' updated.`, 'success');
+            showToast(t('metadataManager.attributeUpdatedInline', { name: attr.name }), 'success');
         } catch (error) {
-            showToast(error?.response?.data?.detail || `Failed to update '${attr.name}'`, 'error');
+            showToast(error?.response?.data?.detail || t('metadataManager.failedUpdateInline', { name: attr.name }), 'error');
         } finally {
             setSavingCellKey(null);
         }
@@ -668,17 +681,17 @@ const CategoryItemsTable = ({ category, onBack }) => {
         return attributes.find((attr) => String(attr.name || '').trim().toLowerCase() === normalizedFallback) || null;
     };
 
-    const titleAttr = findAttr(libraryView?.gallery?.titleField, 'Title');
-    const subtitleAttr = findAttr(libraryView?.gallery?.subtitleField, 'Series');
-    const pageCountAttr = findAttr(libraryView?.gallery?.pageCountField, 'Page Count');
-    const volumeAttr = findAttr(libraryView?.gallery?.volumeField, 'Volume');
-    const issueNumberAttr = findAttr(libraryView?.gallery?.issueNumberField, 'Issue Number');
+    const titleAttr = findAttr(libraryView?.gallery?.titleField, t('metadataManager.fallbackTitle'));
+    const subtitleAttr = findAttr(libraryView?.gallery?.subtitleField, t('metadataManager.fallbackSeries'));
+    const pageCountAttr = findAttr(libraryView?.gallery?.pageCountField, t('metadataManager.fallbackPageCount'));
+    const volumeAttr = findAttr(libraryView?.gallery?.volumeField, t('metadataManager.fallbackVolume'));
+    const issueNumberAttr = findAttr(libraryView?.gallery?.issueNumberField, t('metadataManager.fallbackIssueNumber'));
     const statusLabel = {
-        ongoing: 'Ongoing',
-        completed: 'Completed',
-        hiatus: 'Hiatus',
-        cancelled: 'Cancelled',
-        unknown: 'Unknown',
+        ongoing: t('metadataManager.status.ongoing'),
+        completed: t('metadataManager.status.completed'),
+        hiatus: t('metadataManager.status.hiatus'),
+        cancelled: t('metadataManager.status.cancelled'),
+        unknown: t('metadataManager.status.unknown'),
     };
     const statusClass = {
         ongoing: 'bg-blue-100 text-blue-700',
@@ -691,9 +704,9 @@ const CategoryItemsTable = ({ category, onBack }) => {
     const tableColumnsStorageKey = `${METADATA_TABLE_COLUMNS_STORAGE_PREFIX}:${category.id}`;
     const tableColumnDefs = useMemo(() => {
         const fixed = [
-            { id: 'name', label: 'Name', width: 280, minWidth: 170, sortKey: 'name' },
-            { id: 'account', label: 'Account', width: 160, minWidth: 130, sortKey: null },
-            { id: 'size', label: 'Size', width: 110, minWidth: 90, sortKey: 'size', align: 'right' },
+            { id: 'name', label: t('allFiles.columns.name'), width: 280, minWidth: 170, sortKey: 'name' },
+            { id: 'account', label: t('allFiles.columns.account'), width: 160, minWidth: 130, sortKey: null },
+            { id: 'size', label: t('allFiles.columns.size'), width: 110, minWidth: 90, sortKey: 'size', align: 'right' },
         ];
         const dynamicAttributes = attributes.map((attr) => ({
             id: `attr:${attr.id}`,
@@ -704,11 +717,11 @@ const CategoryItemsTable = ({ category, onBack }) => {
             attrId: attr.id,
         }));
         const tail = [
-            { id: 'modified', label: 'Modified', width: 150, minWidth: 130, sortKey: 'modified_at', align: 'right' },
-            { id: 'path', label: 'Path', width: 260, minWidth: 150, sortKey: null, align: 'right' },
+            { id: 'modified', label: t('allFiles.columns.modified'), width: 150, minWidth: 130, sortKey: 'modified_at', align: 'right' },
+            { id: 'path', label: t('allFiles.columns.path'), width: 260, minWidth: 150, sortKey: null, align: 'right' },
         ];
         return [...fixed, ...dynamicAttributes, ...tail];
-    }, [attributes]);
+    }, [attributes, t]);
 
     useEffect(() => {
         const defaults = tableColumnDefs;
@@ -955,8 +968,8 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                     onChange={(e) => setEditingValue(e.target.value)}
                                 >
                                     <option value="">-</option>
-                                    <option value="true">Yes</option>
-                                    <option value="false">No</option>
+                                    <option value="true">{t('common.yes')}</option>
+                                    <option value="false">{t('common.no')}</option>
                                 </select>
                             ) : attr.data_type === 'tags' ? (
                                 <input
@@ -973,7 +986,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                             cancelInlineEdit();
                                         }
                                     }}
-                                    placeholder="tag1, tag2, tag3"
+                                    placeholder={t('allFiles.tagsPlaceholder')}
                                     className="w-full border rounded px-2 py-1 text-xs bg-background"
                                     autoFocus
                                 />
@@ -1004,7 +1017,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                     saveInlineEdit(item, attr);
                                 }}
                                 disabled={isSaving}
-                                title="Confirm"
+                                title={t('common.confirm')}
                             >
                                 {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
                             </button>
@@ -1016,7 +1029,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                     cancelInlineEdit();
                                 }}
                                 disabled={isSaving}
-                                title="Cancel"
+                                title={t('common.cancel')}
                             >
                                 <X size={12} />
                             </button>
@@ -1038,7 +1051,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                 window.open(url, '_blank');
             } catch (error) {
                 console.error(`Failed to download ${file.name}`, error);
-                showToast(`Failed to download ${file.name}`, 'error');
+                showToast(`${t('allFiles.failedDownload')} ${file.name}`, 'error');
             }
         }
     };
@@ -1062,12 +1075,12 @@ const CategoryItemsTable = ({ category, onBack }) => {
                 )
             );
 
-            showToast('Selected items deleted successfully.', 'success');
+            showToast(t('allFiles.selectedDeleted'), 'success');
             setDeleteModalOpen(false);
             setSelectedItems(new Set());
             fetchItems();
         } catch (error) {
-            showToast(error?.response?.data?.detail || 'Failed to delete selected items', 'error');
+            showToast(error?.response?.data?.detail || t('allFiles.failedDeleteSelected'), 'error');
         } finally {
             setActionLoading(false);
         }
@@ -1083,7 +1096,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
         if (!singleSelectedItem) return;
         const nextName = renameValue.trim();
         if (!nextName) {
-            showToast('Name cannot be empty.', 'error');
+            showToast(t('allFiles.nameCannotBeEmpty'), 'error');
             return;
         }
         if (nextName === singleSelectedItem.name) {
@@ -1094,11 +1107,11 @@ const CategoryItemsTable = ({ category, onBack }) => {
         setRenameSaving(true);
         try {
             await driveService.updateItem(singleSelectedItem.account_id, singleSelectedItem.item_id, { name: nextName });
-            showToast('Item renamed successfully.', 'success');
+            showToast(t('allFiles.renamedSuccessfully'), 'success');
             setRenameModalOpen(false);
             await fetchItems();
         } catch (error) {
-            showToast(error?.response?.data?.detail || 'Failed to rename item', 'error');
+            showToast(error?.response?.data?.detail || t('allFiles.failedRename'), 'error');
         } finally {
             setRenameSaving(false);
         }
@@ -1110,9 +1123,9 @@ const CategoryItemsTable = ({ category, onBack }) => {
     };
 
     const searchPlaceholders = {
-        name: 'Search by title...',
-        path: 'Search by path...',
-        both: 'Search by title or path...'
+        name: t('allFiles.searchByTitle'),
+        path: t('allFiles.searchByPath'),
+        both: t('allFiles.searchByTitlePath'),
     };
 
     return (
@@ -1123,13 +1136,13 @@ const CategoryItemsTable = ({ category, onBack }) => {
                     <button
                         onClick={onBack}
                         className="ghost-icon-button"
-                        title="Back to categories"
+                        title={t('metadataManager.backToCategories')}
                     >
                         <ArrowLeft size={18} />
                     </button>
                     <div>
                         <h1 className="text-lg font-semibold text-foreground">{category.name}</h1>
-                        <p className="text-xs text-muted-foreground">{total} items</p>
+                        <p className="text-xs text-muted-foreground">{t('allFiles.itemsCount', { count: total })}</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1139,20 +1152,20 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                 onClick={() => setViewMode('table')}
                                 className={`px-3 py-1.5 text-sm ${viewMode === 'table' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}
                             >
-                                Table
+                                {t('metadataManager.table')}
                             </button>
                             <button
                                 onClick={() => setViewMode('gallery')}
                                 className={`px-3 py-1.5 text-sm ${viewMode === 'gallery' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}
                             >
-                                Gallery
+                                {t('metadataManager.gallery')}
                             </button>
                             {supportsSeriesTracker && (
                                 <button
                                     onClick={() => setViewMode('series_tracker')}
                                     className={`px-3 py-1.5 text-sm ${viewMode === 'series_tracker' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}
                                 >
-                                    Series
+                                    {t('metadataManager.series')}
                                 </button>
                             )}
                         </div>
@@ -1162,9 +1175,9 @@ const CategoryItemsTable = ({ category, onBack }) => {
                         value={searchScope}
                         onChange={(e) => setSearchScope(e.target.value)}
                     >
-                        <option value="both">Title + Path</option>
-                        <option value="name">Title</option>
-                        <option value="path">Path</option>
+                        <option value="both">{t('allFiles.titlePath')}</option>
+                        <option value="name">{t('allFiles.title')}</option>
+                        <option value="path">{t('allFiles.path')}</option>
                     </select>
                     <select
                         className="input-shell px-2 py-1.5 text-sm"
@@ -1188,8 +1201,8 @@ const CategoryItemsTable = ({ category, onBack }) => {
                             setPage(1);
                         }}
                     >
-                        <option value="desc">Desc</option>
-                        <option value="asc">Asc</option>
+                        <option value="desc">{t('similarFiles.desc')}</option>
+                        <option value="asc">{t('similarFiles.asc')}</option>
                     </select>
                     <div className="relative">
                         <Search className="absolute left-2 top-1.5 text-muted-foreground" size={16} />
@@ -1218,7 +1231,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                 className="flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium hover:bg-accent"
                             >
                                 <Columns3 size={16} />
-                                Columns
+                                {t('allFiles.columnsTitle')}
                             </button>
                             {columnsMenuOpen && (
                                 <div className="absolute right-0 top-full mt-2 w-60 bg-popover border rounded-md shadow-lg p-2 z-[220] space-y-1 max-h-72 overflow-auto">
@@ -1252,23 +1265,23 @@ const CategoryItemsTable = ({ category, onBack }) => {
             {/* Toolbar */}
             <div className="toolbar-surface relative z-40 mb-4 px-4 py-2 flex items-center justify-between gap-2 text-sm">
                 <div className="flex items-center gap-2">
-                    <span className="font-medium mr-2 whitespace-nowrap w-24 text-right tabular-nums">{selectedItems.size} selected</span>
+                    <span className="font-medium mr-2 whitespace-nowrap w-24 text-right tabular-nums">{t('allFiles.selectedCount', { count: selectedItems.size })}</span>
                     <div className="h-4 w-px bg-border mx-2" />
                     <button
                         onClick={handleDownload}
                         disabled={selectedItems.size === 0}
                         className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Download"
+                        title={t('allFiles.download')}
                     >
-                        <Download size={16} /> <span className="hidden sm:inline">Download</span>
+                        <Download size={16} /> <span className="hidden sm:inline">{t('allFiles.download')}</span>
                     </button>
                     <button
                         onClick={() => setMoveModalOpen(true)}
                         disabled={selectedItems.size !== 1}
                         className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Move"
+                        title={t('allFiles.move')}
                     >
-                        <ArrowRightLeft size={16} /> <span className="hidden sm:inline">Move</span>
+                        <ArrowRightLeft size={16} /> <span className="hidden sm:inline">{t('allFiles.move')}</span>
                     </button>
                     <div
                         className={`relative ${selectedItems.size === 0 ? 'pointer-events-none opacity-50' : ''}`}
@@ -1280,10 +1293,10 @@ const CategoryItemsTable = ({ category, onBack }) => {
                             onClick={() => setMetadataMenuOpen(!metadataMenuOpen)}
                             disabled={selectedItems.size === 0}
                             className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:cursor-not-allowed"
-                            title="Metadata Actions"
+                            title={t('allFiles.metadataActions')}
                         >
                             <Database size={16} />
-                            <span className="hidden sm:inline">Metadata</span>
+                            <span className="hidden sm:inline">{t('allFiles.metadata')}</span>
                             <ChevronDown size={14} className={`transition-transform ${metadataMenuOpen ? 'rotate-180' : ''}`} />
                         </button>
                         {metadataMenuOpen && (
@@ -1300,7 +1313,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                         }}
                                         className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2"
                                     >
-                                        <Database size={14} /> Edit Metadata
+                                        <Database size={14} /> {t('allFiles.editMetadata')}
                                     </button>
                                     <button
                                         onClick={() => {
@@ -1310,7 +1323,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                         disabled={selectedItems.size !== 1}
                                         className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
                                     >
-                                        <Pencil size={14} /> Rename
+                                        <Pencil size={14} /> {t('allFiles.rename')}
                                     </button>
                                     <button
                                         onClick={() => {
@@ -1319,7 +1332,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                         }}
                                         className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 text-destructive hover:text-destructive"
                                     >
-                                        <XCircle size={14} /> Remove Metadata
+                                        <XCircle size={14} /> {t('allFiles.removeMetadata')}
                                     </button>
                                 </div>
                             </div>
@@ -1330,14 +1343,14 @@ const CategoryItemsTable = ({ category, onBack }) => {
                         onClick={() => setDeleteModalOpen(true)}
                         disabled={selectedItems.size === 0}
                         className="p-2 hover:bg-destructive/10 text-destructive rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Delete"
+                        title={t('allFiles.delete')}
                     >
-                        <Trash2 size={16} /> <span className="hidden sm:inline">Delete</span>
+                        <Trash2 size={16} /> <span className="hidden sm:inline">{t('allFiles.delete')}</span>
                     </button>
                 </div>
 
                 <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground">Page {page} of {totalPages}</span>
+                    <span className="text-muted-foreground">{t('allFiles.pageOf', { page, total: totalPages })}</span>
                     <div className="flex gap-1">
                         <button
                             disabled={page <= 1}
@@ -1365,15 +1378,15 @@ const CategoryItemsTable = ({ category, onBack }) => {
                     </div>
                 ) : (viewMode === 'series_tracker' && supportsSeriesTracker ? seriesRows.length === 0 : items.length === 0) ? (
                     <div className="empty-state">
-                        <div className="empty-state-title">No items found in this category</div>
-                        <p className="empty-state-text">Try changing filters or add metadata to new files first.</p>
+                        <div className="empty-state-title">{t('metadataManager.noItemsInCategory')}</div>
+                        <p className="empty-state-text">{t('metadataManager.noItemsInCategoryHelp')}</p>
                     </div>
                 ) : (
                     viewMode === 'series_tracker' && supportsSeriesTracker ? (
                         <div className="space-y-4">
                             {seriesRows.length === 0 ? (
                                 <div className="surface-card p-6 text-sm text-muted-foreground">
-                                    Series tracker needs at least one item with the &quot;Series&quot; field filled.
+                                    {t('metadataManager.seriesTrackerNeedsSeries')}
                                 </div>
                             ) : (
                                 seriesRows.map((seriesRow) => {
@@ -1392,7 +1405,10 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                 <div className="min-w-0">
                                                     <h3 className="font-semibold truncate">{seriesRow.series_name}</h3>
                                                     <p className="text-xs text-muted-foreground">
-                                                        {seriesRow.total_items} item(s) | owned volumes: {ownedVolumes.length}
+                                                        {t('metadataManager.seriesTrackerSummary', {
+                                                            items: seriesRow.total_items,
+                                                            volumes: ownedVolumes.length,
+                                                        })}
                                                     </p>
                                                 </div>
                                                 <div className={`px-2 py-1 rounded text-xs font-medium ${statusClass[statusKey]}`}>
@@ -1403,9 +1419,11 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                             <div className="space-y-3">
                                                 <div>
                                                     <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
-                                                        <span>Volumes</span>
+                                                        <span>{t('metadataManager.volumes')}</span>
                                                         <span>
-                                                            {maxVolumes > 0 ? `max ${maxVolumes}` : 'max not set'}
+                                                            {maxVolumes > 0
+                                                                ? t('metadataManager.maxWithCount', { count: maxVolumes })
+                                                                : t('metadataManager.maxNotSet')}
                                                         </span>
                                                     </div>
                                                     {shownVolumes > 0 ? (
@@ -1416,21 +1434,24 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                                 return (
                                                                     <div
                                                                         key={`${seriesRow.series_name}-vol-${volumeNo}`}
-                                                                        title={`Volume ${volumeNo} ${owned ? '(owned)' : '(missing)'}`}
+                                                                        title={t('metadataManager.volumeTitle', {
+                                                                            volume: volumeNo,
+                                                                            status: owned ? t('metadataManager.owned') : t('metadataManager.missing'),
+                                                                        })}
                                                                         className={`h-4 w-3 rounded-sm border ${owned ? 'bg-blue-500 border-blue-500' : 'bg-white border-zinc-300'}`}
                                                                     />
                                                                 );
                                                             })}
                                                         </div>
                                                     ) : (
-                                                        <div className="text-xs text-muted-foreground">Set &quot;Max Volumes&quot; to show the tracker.</div>
+                                                        <div className="text-xs text-muted-foreground">{t('metadataManager.setMaxVolumesHint')}</div>
                                                     )}
                                                 </div>
 
                                                 {shownIssues > 0 && (
                                                     <div className="space-y-2">
                                                         <div className="text-xs text-muted-foreground">
-                                                            Issues per volume (max {maxIssues})
+                                                            {t('metadataManager.issuesPerVolumeMax', { max: maxIssues })}
                                                         </div>
                                                         {ownedVolumes
                                                             .sort((a, b) => a - b)
@@ -1439,7 +1460,9 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                                 const issues = new Set(issuesByVolume[String(volumeNo)] || []);
                                                                 return (
                                                                     <div key={`${seriesRow.series_name}-issues-${volumeNo}`} className="flex items-center gap-2">
-                                                                        <div className="w-10 text-xs text-muted-foreground">V{volumeNo}</div>
+                                                                        <div className="w-10 text-xs text-muted-foreground">
+                                                                            {t('metadataManager.volumeShort', { volume: volumeNo })}
+                                                                        </div>
                                                                         <div className="flex flex-wrap gap-1">
                                                                             {Array.from({ length: shownIssues }, (_, idx) => {
                                                                                 const issueNo = idx + 1;
@@ -1447,7 +1470,11 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                                                 return (
                                                                                     <div
                                                                                         key={`${seriesRow.series_name}-vol-${volumeNo}-issue-${issueNo}`}
-                                                                                        title={`V${volumeNo} #${issueNo} ${owned ? '(owned)' : '(missing)'}`}
+                                                                                        title={t('metadataManager.volumeIssueTitle', {
+                                                                                            volume: volumeNo,
+                                                                                            issue: issueNo,
+                                                                                            status: owned ? t('metadataManager.owned') : t('metadataManager.missing'),
+                                                                                        })}
                                                                                         className={`h-3 w-2 rounded-sm border ${owned ? 'bg-blue-500 border-blue-500' : 'bg-white border-zinc-300'}`}
                                                                                     />
                                                                                 );
@@ -1668,17 +1695,17 @@ const CategoryItemsTable = ({ category, onBack }) => {
             <Modal
                 isOpen={deleteModalOpen}
                 onClose={() => !actionLoading && setDeleteModalOpen(false)}
-                title={`Delete ${selectedItems.size} item(s)?`}
+                title={t('allFiles.deleteTitle', { count: selectedItems.size })}
             >
                 <div className="space-y-4">
-                    <p>Are you sure you want to delete the selected items? This action cannot be undone.</p>
+                    <p>{t('allFiles.deleteConfirm')}</p>
                     <div className="flex justify-end gap-2">
                         <button
                             onClick={() => setDeleteModalOpen(false)}
                             disabled={actionLoading}
                             className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
                         >
-                            Cancel
+                            {t('common.cancel')}
                         </button>
                         <button
                             onClick={executeDelete}
@@ -1686,7 +1713,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                             className="px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 disabled:opacity-50 flex items-center gap-2"
                         >
                             {actionLoading && <Loader2 className="animate-spin" size={14} />}
-                            Delete
+                            {t('allFiles.delete')}
                         </button>
                     </div>
                 </div>
@@ -1695,12 +1722,12 @@ const CategoryItemsTable = ({ category, onBack }) => {
             <Modal
                 isOpen={renameModalOpen}
                 onClose={() => !renameSaving && setRenameModalOpen(false)}
-                title="Rename Item"
+                title={t('allFiles.renameItem')}
                 maxWidthClass="max-w-md"
             >
                 <div className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium mb-1">New name</label>
+                        <label className="block text-sm font-medium mb-1">{t('allFiles.newName')}</label>
                         <input
                             type="text"
                             value={renameValue}
@@ -1717,7 +1744,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                             disabled={renameSaving}
                             className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
                         >
-                            Cancel
+                            {t('common.cancel')}
                         </button>
                         <button
                             type="button"
@@ -1726,7 +1753,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                             className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
                         >
                             {renameSaving && <Loader2 className="animate-spin" size={14} />}
-                            Rename
+                            {t('allFiles.rename')}
                         </button>
                     </div>
                 </div>
@@ -1742,6 +1769,7 @@ export default function MetadataManager() {
     const [expandedCategory, setExpandedCategory] = useState(null);
     const [viewingCategory, setViewingCategory] = useState(null);
     const [togglingLibraryKey, setTogglingLibraryKey] = useState(null);
+    const { t } = useTranslation();
     const { showToast } = useToast();
 
     // Create Category State
@@ -1788,13 +1816,13 @@ export default function MetadataManager() {
 
     useEffect(() => {
         if (categoriesError) {
-            showToast('Failed to load categories', 'error');
+            showToast(t('metadataManager.failedLoadCategories'), 'error');
         }
     }, [categoriesError, showToast]);
 
     useEffect(() => {
         if (librariesError) {
-            showToast('Failed to load metadata libraries', 'error');
+            showToast(t('metadataManager.failedLoadLibraries'), 'error');
         }
     }, [librariesError, showToast]);
 
@@ -1813,14 +1841,14 @@ export default function MetadataManager() {
             const libraryName = getLibraryDisplayName(library);
             if (library.is_active) {
                 await metadataService.deactivateMetadataLibrary(library.key);
-                showToast(`${libraryName} disabled`, 'success');
+                showToast(t('metadataManager.libraryDisabled', { name: libraryName }), 'success');
             } else {
                 await metadataService.activateMetadataLibrary(library.key);
-                showToast(`${libraryName} enabled`, 'success');
+                showToast(t('metadataManager.libraryEnabled', { name: libraryName }), 'success');
             }
             await Promise.all([refetchLibraries(), refetchCategories()]);
         } catch (error) {
-            const message = error?.response?.data?.detail || 'Failed to update metadata library';
+            const message = error?.response?.data?.detail || t('metadataManager.failedUpdateLibrary');
             showToast(message, 'error');
         } finally {
             setTogglingLibraryKey(null);
@@ -1831,20 +1859,20 @@ export default function MetadataManager() {
         e.preventDefault();
         try {
             await metadataService.createCategory(newCategoryName, newCategoryDesc);
-            showToast('Category created successfully', 'success');
+            showToast(t('metadataManager.categoryCreated'), 'success');
             setCreateModalOpen(false);
             setNewCategoryName('');
             setNewCategoryDesc('');
             refetchCategories();
         } catch (error) {
-            showToast(error.message || 'Failed to create category', 'error');
+            showToast(error.message || t('metadataManager.failedCreateCategory'), 'error');
         }
     };
 
     const openDeleteCategoryModal = (category, e) => {
         e.stopPropagation();
         if (category.is_locked || category.managed_by_plugin) {
-            showToast('Library-managed categories cannot be deleted. Deactivate the metadata library instead.', 'error');
+            showToast(t('metadataManager.libraryManagedCategoryDeleteError'), 'error');
             return;
         }
         setDeleteCategoryTarget(category);
@@ -1855,11 +1883,11 @@ export default function MetadataManager() {
         setDeletingCategory(true);
         try {
             await metadataService.deleteCategory(deleteCategoryTarget.id);
-            showToast('Category deleted', 'success');
+            showToast(t('metadataManager.categoryDeleted'), 'success');
             setDeleteCategoryTarget(null);
             await refetchCategories();
         } catch (error) {
-            showToast('Failed to delete category', 'error');
+            showToast(t('metadataManager.failedDeleteCategory'), 'error');
         } finally {
             setDeletingCategory(false);
         }
@@ -1880,7 +1908,7 @@ export default function MetadataManager() {
                 options: options
             });
 
-            showToast('Attribute added', 'success');
+            showToast(t('metadataManager.attributeAdded'), 'success');
             setAddAttributeCategory(null);
             setNewAttrName('');
             setNewAttrType('text');
@@ -1888,28 +1916,28 @@ export default function MetadataManager() {
             setNewAttrRequired(false);
             refetchCategories();
         } catch (error) {
-            showToast('Failed to add attribute', 'error');
+            showToast(t('metadataManager.failedAddAttribute'), 'error');
         }
     };
 
     const handleDeleteAttribute = async (attr) => {
         if (attr.is_locked || attr.managed_by_plugin) {
-            showToast('Library-managed attributes cannot be deleted', 'error');
+            showToast(t('metadataManager.libraryManagedAttributeDeleteError'), 'error');
             return;
         }
-        if (!window.confirm('Delete this attribute?')) return;
+        if (!window.confirm(t('metadataManager.deleteAttributeConfirm'))) return;
         try {
             await metadataService.deleteAttribute(attr.id);
-            showToast('Attribute deleted', 'success');
+            showToast(t('metadataManager.attributeDeleted'), 'success');
             refetchCategories();
         } catch (error) {
-            showToast('Failed to delete attribute', 'error');
+            showToast(t('metadataManager.failedDeleteAttribute'), 'error');
         }
     };
 
     const openEditAttributeModal = (attr) => {
         if (attr.is_locked || attr.managed_by_plugin) {
-            showToast('Library-managed attributes cannot be edited', 'error');
+            showToast(t('metadataManager.libraryManagedAttributeEditError'), 'error');
             return;
         }
         setEditAttributeTarget(attr);
@@ -1941,11 +1969,11 @@ export default function MetadataManager() {
                 options,
             });
 
-            showToast('Attribute updated', 'success');
+            showToast(t('metadataManager.attributeUpdated'), 'success');
             setEditAttributeTarget(null);
             await refetchCategories();
         } catch (error) {
-            showToast(error?.response?.data?.detail || 'Failed to update attribute', 'error');
+            showToast(error?.response?.data?.detail || t('metadataManager.failedUpdateAttribute'), 'error');
         } finally {
             setEditingAttribute(false);
         }
@@ -1972,11 +2000,11 @@ export default function MetadataManager() {
             {/* Header */}
             <div className="page-header flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                    <h1 className="page-title">Metadata Manager</h1>
+                    <h1 className="page-title">{t('metadataManager.title')}</h1>
                     <span className="status-chip">
                         {activeView === 'metadata'
-                            ? `${categories.length} categories`
-                            : `${knownLibraries.length} libraries`}
+                            ? t('metadataManager.categoriesCount', { count: categories.length })
+                            : t('metadataManager.librariesCount', { count: knownLibraries.length })}
                     </span>
                     <div className="inline-flex items-center gap-1 rounded-lg border border-border/70 p-1 bg-muted/35">
                         <button
@@ -1988,7 +2016,7 @@ export default function MetadataManager() {
                                     : 'text-muted-foreground hover:bg-accent hover:text-foreground'
                             }`}
                         >
-                            Metadata
+                            {t('metadataManager.metadataTab')}
                         </button>
                         <button
                             type="button"
@@ -1999,7 +2027,7 @@ export default function MetadataManager() {
                                     : 'text-muted-foreground hover:bg-accent hover:text-foreground'
                             }`}
                         >
-                            Libraries
+                            {t('metadataManager.librariesTab')}
                         </button>
                     </div>
                 </div>
@@ -2011,13 +2039,13 @@ export default function MetadataManager() {
                                 disabled={categories.length === 0}
                                 className="btn-refresh disabled:opacity-40"
                             >
-                                Form Layout
+                                {t('metadataManager.formLayout')}
                             </button>
                             <button
                                 onClick={() => setCreateModalOpen(true)}
                                 className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-lg shadow-primary/20 transition-transform hover:-translate-y-[1px] hover:bg-primary/92"
                             >
-                                <Plus size={16} /> New Category
+                                <Plus size={16} /> {t('metadataManager.newCategory')}
                             </button>
                         </>
                     )}
@@ -2030,9 +2058,9 @@ export default function MetadataManager() {
                     <section className="surface-card p-4">
                         <div className="flex items-center justify-between mb-3">
                             <div className="flex items-center gap-2">
-                                <h2 className="text-base font-semibold text-foreground">Metadata Libraries</h2>
+                                <h2 className="text-base font-semibold text-foreground">{t('metadataManager.metadataLibraries')}</h2>
                                 <span className="status-chip">
-                                    {knownLibraries.length} available
+                                    {t('metadataManager.availableCount', { count: knownLibraries.length })}
                                 </span>
                             </div>
                         </div>
@@ -2054,8 +2082,8 @@ export default function MetadataManager() {
                                                 {library.key !== 'comics_core' && (
                                                     <div className="text-xs text-muted-foreground">{library.key}</div>
                                                 )}
-                                                {library.description && (
-                                                    <p className="text-sm text-muted-foreground mt-1">{library.description}</p>
+                                                {getLibraryDescription(library, t) && (
+                                                    <p className="text-sm text-muted-foreground mt-1">{getLibraryDescription(library, t)}</p>
                                                 )}
                                             </div>
                                         </div>
@@ -2071,7 +2099,7 @@ export default function MetadataManager() {
                                             {togglingLibraryKey === library.key
                                                 ? <Loader2 size={14} className="animate-spin" />
                                                 : <Power size={14} />}
-                                            {library.is_active ? 'Disable' : 'Enable'}
+                                            {library.is_active ? t('metadataManager.disable') : t('metadataManager.enable')}
                                         </button>
                                     </div>
                                 ))}
@@ -2088,8 +2116,8 @@ export default function MetadataManager() {
                             <div className="empty-state-icon">
                                 <Database className="h-6 w-6" />
                             </div>
-                            <h3 className="empty-state-title">No categories defined</h3>
-                            <p className="empty-state-text">Create a category to start organizing your file metadata.</p>
+                            <h3 className="empty-state-title">{t('metadataManager.noCategories')}</h3>
+                            <p className="empty-state-text">{t('metadataManager.noCategoriesHelp')}</p>
                         </div>
                     ) : (
                         <div className="space-y-3">
@@ -2115,17 +2143,17 @@ export default function MetadataManager() {
                                             <div className="flex items-center gap-2 text-sm">
                                                 <span className="bg-primary/10 text-primary px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-1.5">
                                                     <Hash size={12} />
-                                                    {cat.item_count} items
+                                                    {t('metadataManager.itemsCount', { count: cat.item_count })}
                                                 </span>
                                                 <span className="bg-secondary text-secondary-foreground px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-1.5">
                                                     <Tag size={12} />
-                                                    {cat.attributes.length} attrs
+                                                    {t('metadataManager.attrsCount', { count: cat.attributes.length })}
                                                 </span>
                                             </div>
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); setViewingCategory(cat); }}
                                                 className="p-2 hover:bg-primary/10 text-muted-foreground hover:text-primary rounded-md transition-colors"
-                                                title="View items in this category"
+                                                title={t('metadataManager.viewItemsInCategory')}
                                             >
                                                 <Eye size={18} />
                                             </button>
@@ -2133,7 +2161,7 @@ export default function MetadataManager() {
                                                 onClick={(e) => openDeleteCategoryModal(cat, e)}
                                                 disabled={cat.is_locked || cat.managed_by_plugin}
                                                 className="p-2 hover:bg-destructive/10 text-muted-foreground hover:text-destructive rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                                                title="Delete category"
+                                                title={t('metadataManager.deleteCategory')}
                                             >
                                                 <Trash2 size={18} />
                                             </button>
@@ -2144,17 +2172,17 @@ export default function MetadataManager() {
                                     {expandedCategory === cat.id && (
                                         <div className="p-4 border-t bg-muted/20">
                                             <div className="flex justify-between items-center mb-4">
-                                                <h4 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Attributes</h4>
+                                                <h4 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{t('metadataManager.attributes')}</h4>
                                                 <button
                                                     onClick={() => setAddAttributeCategory(cat)}
                                                     className="text-sm text-primary hover:underline flex items-center gap-1"
                                                 >
-                                                    <Plus size={14} /> Add Attribute
+                                                    <Plus size={14} /> {t('metadataManager.addAttribute')}
                                                 </button>
                                             </div>
 
                                             {cat.attributes.length === 0 ? (
-                                                <p className="text-sm text-muted-foreground italic">No attributes defined yet.</p>
+                                                <p className="text-sm text-muted-foreground italic">{t('metadataManager.noAttributes')}</p>
                                             ) : (
                                                 <div className="grid gap-2">
                                                     {cat.attributes.map(attr => (
@@ -2165,11 +2193,11 @@ export default function MetadataManager() {
                                                                     {attr.data_type}
                                                                 </div>
                                                                 {attr.is_required && (
-                                                                    <div className="text-xs text-amber-600 font-medium">Required</div>
+                                                                    <div className="text-xs text-amber-600 font-medium">{t('metadataManager.required')}</div>
                                                                 )}
                                                                 {attr.data_type === 'select' && attr.options?.options && (
                                                                     <div className="text-xs text-muted-foreground">
-                                                                        Options: {getSelectOptions(attr.options).join(', ')}
+                                                                        {t('metadataManager.optionsLabel')}: {getSelectOptions(attr.options).join(', ')}
                                                                     </div>
                                                                 )}
                                                             </div>
@@ -2178,7 +2206,7 @@ export default function MetadataManager() {
                                                                     onClick={() => openEditAttributeModal(attr)}
                                                                     disabled={attr.is_locked || attr.managed_by_plugin}
                                                                     className="text-muted-foreground hover:text-primary p-1 rounded disabled:opacity-40 disabled:cursor-not-allowed"
-                                                                    title="Edit attribute"
+                                                                    title={t('metadataManager.editAttribute')}
                                                                 >
                                                                     <Pencil size={16} />
                                                                 </button>
@@ -2186,7 +2214,7 @@ export default function MetadataManager() {
                                                                     onClick={() => handleDeleteAttribute(attr)}
                                                                     disabled={attr.is_locked || attr.managed_by_plugin}
                                                                     className="text-muted-foreground hover:text-destructive p-1 rounded disabled:opacity-40 disabled:cursor-not-allowed"
-                                                                    title="Delete attribute"
+                                                                    title={t('metadataManager.deleteAttribute')}
                                                                 >
                                                                     <Trash2 size={16} />
                                                                 </button>
@@ -2208,27 +2236,27 @@ export default function MetadataManager() {
             <Modal
                 isOpen={createModalOpen}
                 onClose={() => setCreateModalOpen(false)}
-                title="Create Metadata Category"
+                title={t('metadataManager.createCategoryTitle')}
             >
                 <form onSubmit={handleCreateCategory} className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium mb-1">Name</label>
+                        <label className="block text-sm font-medium mb-1">{t('metadataManager.name')}</label>
                         <input
                             type="text"
                             required
                             className="w-full border rounded-md p-2 bg-background"
                             value={newCategoryName}
                             onChange={e => setNewCategoryName(e.target.value)}
-                            placeholder="e.g. Contracts"
+                            placeholder={t('metadataManager.categoryExample')}
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium mb-1">Description</label>
+                        <label className="block text-sm font-medium mb-1">{t('metadataManager.description')}</label>
                         <textarea
                             className="w-full border rounded-md p-2 bg-background"
                             value={newCategoryDesc}
                             onChange={e => setNewCategoryDesc(e.target.value)}
-                            placeholder="Optional description"
+                            placeholder={t('metadataManager.optionalDescription')}
                             rows={3}
                         />
                     </div>
@@ -2238,13 +2266,13 @@ export default function MetadataManager() {
                             onClick={() => setCreateModalOpen(false)}
                             className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent"
                         >
-                            Cancel
+                            {t('common.cancel')}
                         </button>
                         <button
                             type="submit"
                             className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
                         >
-                            Create
+                            {t('metadataManager.create')}
                         </button>
                     </div>
                 </form>
@@ -2254,14 +2282,14 @@ export default function MetadataManager() {
             <Modal
                 isOpen={!!deleteCategoryTarget}
                 onClose={() => !deletingCategory && setDeleteCategoryTarget(null)}
-                title="Delete Category"
+                title={t('metadataManager.deleteCategory')}
             >
                 <div className="space-y-4">
                     <p className="text-sm text-muted-foreground">
-                        Are you sure you want to delete
+                        {t('metadataManager.deleteCategoryConfirmPrefix')}
                         {' '}
                         <span className="font-medium text-foreground">{deleteCategoryTarget?.name}</span>
-                        ? This will delete all attributes and metadata associated with this category.
+                        {t('metadataManager.deleteCategoryConfirmSuffix')}
                     </p>
                     <div className="flex justify-end gap-2 pt-2">
                         <button
@@ -2270,7 +2298,7 @@ export default function MetadataManager() {
                             disabled={deletingCategory}
                             className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
                         >
-                            Cancel
+                            {t('common.cancel')}
                         </button>
                         <button
                             type="button"
@@ -2278,7 +2306,7 @@ export default function MetadataManager() {
                             disabled={deletingCategory}
                             className="px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 disabled:opacity-50"
                         >
-                            {deletingCategory ? 'Deleting...' : 'Delete'}
+                            {deletingCategory ? t('metadataManager.deleting') : t('allFiles.delete')}
                         </button>
                     </div>
                 </div>
@@ -2288,34 +2316,34 @@ export default function MetadataManager() {
             <Modal
                 isOpen={!!addAttributeCategory}
                 onClose={() => setAddAttributeCategory(null)}
-                title={`Add Attribute to ${addAttributeCategory?.name}`}
+                title={t('metadataManager.addAttributeTo', { name: addAttributeCategory?.name || '' })}
             >
                 <form onSubmit={handleCreateAttribute} className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium mb-1">Attribute Name</label>
+                        <label className="block text-sm font-medium mb-1">{t('metadataManager.attributeName')}</label>
                         <input
                             type="text"
                             required
                             className="w-full border rounded-md p-2 bg-background"
                             value={newAttrName}
                             onChange={e => setNewAttrName(e.target.value)}
-                            placeholder="e.g. Contract Number"
+                            placeholder={t('metadataManager.attributeExample')}
                         />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm font-medium mb-1">Type</label>
+                            <label className="block text-sm font-medium mb-1">{t('metadataManager.type')}</label>
                             <select
                                 className="w-full border rounded-md p-2 bg-background"
                                 value={newAttrType}
                                 onChange={e => setNewAttrType(e.target.value)}
                             >
-                                <option value="text">Text</option>
-                                <option value="number">Number</option>
-                                <option value="date">Date</option>
-                                <option value="boolean">Boolean (Checkbox)</option>
-                                <option value="select">Select (Dropdown)</option>
-                                <option value="tags">Tags (Array)</option>
+                                <option value="text">{t('metadataManager.typeText')}</option>
+                                <option value="number">{t('metadataManager.typeNumber')}</option>
+                                <option value="date">{t('metadataManager.typeDate')}</option>
+                                <option value="boolean">{t('metadataManager.typeBoolean')}</option>
+                                <option value="select">{t('metadataManager.typeSelect')}</option>
+                                <option value="tags">{t('metadataManager.typeTags')}</option>
                             </select>
                         </div>
                         <div className="flex items-center pt-6">
@@ -2326,21 +2354,21 @@ export default function MetadataManager() {
                                     onChange={e => setNewAttrRequired(e.target.checked)}
                                     className="rounded border-gray-300"
                                 />
-                                <span className="text-sm font-medium">Required Field</span>
+                                <span className="text-sm font-medium">{t('metadataManager.requiredField')}</span>
                             </label>
                         </div>
                     </div>
 
                     {newAttrType === 'select' && (
                         <div>
-                            <label className="block text-sm font-medium mb-1">Options (comma separated)</label>
+                            <label className="block text-sm font-medium mb-1">{t('metadataManager.optionsCommaSeparated')}</label>
                             <input
                                 type="text"
                                 required
                                 className="w-full border rounded-md p-2 bg-background"
                                 value={newAttrOptions}
                                 onChange={e => setNewAttrOptions(e.target.value)}
-                                placeholder="Option A, Option B, Option C"
+                                placeholder={t('metadataManager.optionsExample')}
                             />
                         </div>
                     )}
@@ -2351,13 +2379,13 @@ export default function MetadataManager() {
                             onClick={() => setAddAttributeCategory(null)}
                             className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent"
                         >
-                            Cancel
+                            {t('common.cancel')}
                         </button>
                         <button
                             type="submit"
                             className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
                         >
-                            Add Attribute
+                            {t('metadataManager.addAttribute')}
                         </button>
                     </div>
                 </form>
@@ -2367,34 +2395,34 @@ export default function MetadataManager() {
             <Modal
                 isOpen={!!editAttributeTarget}
                 onClose={() => !editingAttribute && setEditAttributeTarget(null)}
-                title={`Edit Attribute: ${editAttributeTarget?.name || ''}`}
+                title={t('metadataManager.editAttributeTitle', { name: editAttributeTarget?.name || '' })}
             >
                 <form onSubmit={handleUpdateAttribute} className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium mb-1">Attribute Name</label>
+                        <label className="block text-sm font-medium mb-1">{t('metadataManager.attributeName')}</label>
                         <input
                             type="text"
                             required
                             className="w-full border rounded-md p-2 bg-background"
                             value={editAttrName}
                             onChange={(e) => setEditAttrName(e.target.value)}
-                            placeholder="e.g. Contract Number"
+                            placeholder={t('metadataManager.attributeExample')}
                         />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm font-medium mb-1">Type</label>
+                            <label className="block text-sm font-medium mb-1">{t('metadataManager.type')}</label>
                             <select
                                 className="w-full border rounded-md p-2 bg-background"
                                 value={editAttrType}
                                 onChange={(e) => setEditAttrType(e.target.value)}
                             >
-                                <option value="text">Text</option>
-                                <option value="number">Number</option>
-                                <option value="date">Date</option>
-                                <option value="boolean">Boolean (Checkbox)</option>
-                                <option value="select">Select (Dropdown)</option>
-                                <option value="tags">Tags (Array)</option>
+                                <option value="text">{t('metadataManager.typeText')}</option>
+                                <option value="number">{t('metadataManager.typeNumber')}</option>
+                                <option value="date">{t('metadataManager.typeDate')}</option>
+                                <option value="boolean">{t('metadataManager.typeBoolean')}</option>
+                                <option value="select">{t('metadataManager.typeSelect')}</option>
+                                <option value="tags">{t('metadataManager.typeTags')}</option>
                             </select>
                         </div>
                         <div className="flex items-center pt-6">
@@ -2405,21 +2433,21 @@ export default function MetadataManager() {
                                     onChange={(e) => setEditAttrRequired(e.target.checked)}
                                     className="rounded border-gray-300"
                                 />
-                                <span className="text-sm font-medium">Required Field</span>
+                                <span className="text-sm font-medium">{t('metadataManager.requiredField')}</span>
                             </label>
                         </div>
                     </div>
 
                     {editAttrType === 'select' && (
                         <div>
-                            <label className="block text-sm font-medium mb-1">Options (comma separated)</label>
+                            <label className="block text-sm font-medium mb-1">{t('metadataManager.optionsCommaSeparated')}</label>
                             <input
                                 type="text"
                                 required
                                 className="w-full border rounded-md p-2 bg-background"
                                 value={editAttrOptions}
                                 onChange={(e) => setEditAttrOptions(e.target.value)}
-                                placeholder="Option A, Option B, Option C"
+                                placeholder={t('metadataManager.optionsExample')}
                             />
                         </div>
                     )}
@@ -2431,7 +2459,7 @@ export default function MetadataManager() {
                             disabled={editingAttribute}
                             className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
                         >
-                            Cancel
+                            {t('common.cancel')}
                         </button>
                         <button
                             type="submit"
@@ -2439,7 +2467,7 @@ export default function MetadataManager() {
                             className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
                         >
                             {editingAttribute && <Loader2 className="animate-spin" size={14} />}
-                            Save Changes
+                            {t('allFiles.saveChanges')}
                         </button>
                     </div>
                 </form>
@@ -2456,3 +2484,5 @@ export default function MetadataManager() {
         </div>
     );
 }
+
+

@@ -1,5 +1,6 @@
 import { useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useToast } from '../contexts/ToastContext';
 import { getJobs } from '../services/jobs';
 import { usePolling } from '../hooks/usePolling';
@@ -7,6 +8,7 @@ import { formatJobType } from '../utils/jobLabels';
 
 export default function JobStatusNotifier() {
     const { showToast } = useToast();
+    const { t } = useTranslation();
     const location = useLocation();
     const runningJobsRef = useRef(new Set());
     const firstLoadRef = useRef(true);
@@ -36,7 +38,7 @@ export default function JobStatusNotifier() {
                     if (job.status === 'COMPLETED') {
                         showToast(
                             <div className="flex items-center gap-2">
-                                <span>Job <strong>{formatJobType(job.type)}</strong> completed successfully!</span>
+                                <span>{t('jobNotifier.completed', { type: formatJobType(job.type, t) })}</span>
                             </div>,
                             'success'
                         );
@@ -44,7 +46,7 @@ export default function JobStatusNotifier() {
                     } else if (job.status === 'FAILED') {
                         showToast(
                             <div className="flex items-center gap-2">
-                                <span>Job <strong>{formatJobType(job.type)}</strong> failed.</span>
+                                <span>{t('jobNotifier.failed', { type: formatJobType(job.type, t) })}</span>
                             </div>,
                             'error'
                         );
@@ -56,7 +58,7 @@ export default function JobStatusNotifier() {
         } catch (error) {
             console.error('Error checking jobs:', error);
         }
-    }, [showToast]);
+    }, [showToast, t]);
 
     usePolling({
         callback: checkJobs,
