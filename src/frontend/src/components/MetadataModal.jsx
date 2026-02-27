@@ -17,6 +17,7 @@ import {
     sortAttributesForCategory,
     tagsToInputValue,
 } from '../utils/metadata';
+import { formatDateTime } from '../utils/dateTime';
 const DEFAULT_COMIC_FORM_FIELD_GROUPS = [
     ['series', 'title'],
     ['volume', 'issue_number', 'year', 'month'],
@@ -650,7 +651,7 @@ export default function MetadataModal({
                                             <div key={entry.id} className="px-3 py-2 text-xs">
                                                 <div className="font-medium">{entry.action}</div>
                                                 <div className="text-muted-foreground">
-                                                    {new Date(entry.created_at).toLocaleString(i18n.language)}
+                                                    {formatDateTime(entry.created_at, i18n.language)}
                                                 </div>
                                                 {entry.batch_id && (
                                                     <div className="text-muted-foreground">{t('metadataModal.batch', { id: entry.batch_id })}</div>

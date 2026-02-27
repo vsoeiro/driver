@@ -7,6 +7,7 @@ import { jobsService } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
 import AdminTabs from '../components/AdminTabs';
 import { usePolling } from '../hooks/usePolling';
+import { formatDateTime } from '../utils/dateTime';
 
 function PercentRing({ value }) {
     const safe = Math.max(0, Math.min(100, Number(value) || 0));
@@ -44,16 +45,26 @@ function MiniBars({ items, max }) {
 }
 
 export default function AdminDashboard() {
-    const { t } = useTranslation();
+    const { t, i18n } = useTranslation();
     const { showToast } = useToast();
     const [refreshing, setRefreshing] = useState(false);
     const [period, setPeriod] = useState('24h');
     const [reprocessingJobId, setReprocessingJobId] = useState(null);
     const queryClient = useQueryClient();
+    const PERIOD_OPTIONS = useMemo(
+        () => [
+            { value: '24h', label: t('adminDashboard.last24h') },
+            { value: '3d', label: t('adminDashboard.last3d') },
+            { value: '7d', label: t('adminDashboard.last7d') },
+            { value: '30d', label: t('adminDashboard.last30d') },
+            { value: '90d', label: t('adminDashboard.last90d') },
+        ],
+        [t]
+    );
 
     const selectedPeriodLabel = useMemo(
         () => PERIOD_OPTIONS.find((option) => option.value === period)?.label || period,
-        [period],
+        [period, PERIOD_OPTIONS],
     );
 
     const { data: snapshot, isLoading: loading, error, refetch } = useQuery({
@@ -216,7 +227,7 @@ export default function AdminDashboard() {
                             </div>
                             <div className="surface-card p-3">
                                 <div className="text-xs text-muted-foreground">{t('adminDashboard.generatedAt')}</div>
-                                <div className="text-sm font-medium">{new Date(snapshot.generated_at).toLocaleString()}</div>
+                                <div className="text-sm font-medium">{formatDateTime(snapshot.generated_at, i18n.language)}</div>
                                 <div className="text-xs text-muted-foreground mt-1">
                                     {snapshot.cache_hit
                                         ? t('adminDashboard.cacheHit', { seconds: snapshot.cache_ttl_seconds })
@@ -343,7 +354,7 @@ export default function AdminDashboard() {
                                                     {job.dead_letter_reason || t('adminDashboard.noReason')}
                                                 </div>
                                                 <div className="text-xs text-muted-foreground">
-                                                    {job.dead_lettered_at ? new Date(job.dead_lettered_at).toLocaleString() : '-'} - {t('adminDashboard.retry', { current: job.retry_count, max: job.max_retries })}
+                                                    {job.dead_lettered_at ? formatDateTime(job.dead_lettered_at, i18n.language) : '-'} - {t('adminDashboard.retry', { current: job.retry_count, max: job.max_retries })}
                                                 </div>
                                             </div>
                                             <button
@@ -370,10 +381,3 @@ export default function AdminDashboard() {
         </div>
     );
 }
-    const PERIOD_OPTIONS = [
-        { value: '24h', label: t('adminDashboard.last24h') },
-        { value: '3d', label: t('adminDashboard.last3d') },
-        { value: '7d', label: t('adminDashboard.last7d') },
-        { value: '30d', label: t('adminDashboard.last30d') },
-        { value: '90d', label: t('adminDashboard.last90d') },
-    ];

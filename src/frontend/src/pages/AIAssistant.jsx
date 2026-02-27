@@ -4,13 +4,14 @@ import { Bot, ChevronRight, Loader2, Plus, Send, ShieldAlert, Square, Trash2, Wr
 import { useTranslation } from 'react-i18next';
 import { aiService } from '../services/ai';
 import { useToast } from '../contexts/ToastContext';
+import { formatDateTime } from '../utils/dateTime';
 
 const DRAFT_SESSION_ID = '__draft__';
 
 function formatDate(value) {
     if (!value) return '';
     try {
-        return new Date(value).toLocaleString();
+        return formatDateTime(value);
     } catch {
         return value;
     }

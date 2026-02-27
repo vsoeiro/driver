@@ -7,6 +7,7 @@ import { useToast } from '../contexts/ToastContext';
 import Modal from '../components/Modal';
 import { formatJobStatus, formatJobType } from '../utils/jobLabels';
 import { usePolling } from '../hooks/usePolling';
+import { formatDateTime } from '../utils/dateTime';
 
 const DATE_RANGE_MS = {
     '24h': 24 * 60 * 60 * 1000,
@@ -194,14 +195,7 @@ export default function Jobs() {
     };
 
     const formatDate = (dateString) => {
-        if (!dateString) return '-';
-        return new Date(dateString).toLocaleDateString(i18n.language, {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
+        return formatDateTime(dateString, i18n.language);
     };
 
     const formatDuration = (seconds) => {

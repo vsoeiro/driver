@@ -6,9 +6,10 @@ import { Plus, HardDrive, Calendar, ArrowRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import ProviderIcon from '../components/ProviderIcon';
 import ProviderPickerModal from '../components/ProviderPickerModal';
+import { formatDateOnly } from '../utils/dateTime';
 
 export default function Dashboard() {
-    const { t } = useTranslation();
+    const { t, i18n } = useTranslation();
     const [accounts, setAccounts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [pickerOpen, setPickerOpen] = useState(false);
@@ -77,7 +78,7 @@ export default function Dashboard() {
                             <div className="flex items-center justify-between text-xs text-muted-foreground mt-4 pt-4 border-t">
                                 <div className="flex items-center gap-1">
                                     <Calendar size={12} />
-                                    {new Date(acc.created_at).toLocaleDateString()}
+                                    {formatDateOnly(acc.created_at, i18n.language)}
                                 </div>
                                 <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
                             </div>
