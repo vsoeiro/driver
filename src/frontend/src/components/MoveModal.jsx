@@ -31,7 +31,7 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
             console.error('Failed to load accounts:', error);
             showToast(t('moveModal.failedLoadAccounts'), 'error');
         }
-    }, [sourceAccountId, showToast]);
+    }, [sourceAccountId, showToast, t]);
 
     const loadFolders = useCallback(async (accountId, folderId) => {
         setLoading(true);
@@ -51,7 +51,7 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
         } finally {
             setLoading(false);
         }
-    }, [showToast]);
+    }, [showToast, t]);
 
     useEffect(() => {
         if (isOpen) {
