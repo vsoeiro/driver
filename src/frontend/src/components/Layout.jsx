@@ -64,14 +64,14 @@ export default function Layout() {
                 <div className="app-panel flex h-screen overflow-hidden rounded-none shadow-none">
                     <Sidebar />
                     <div className="flex flex-1 min-w-0 min-h-0 flex-col">
-                        <header className="relative z-[90] flex h-16 items-center border-b border-border/70 px-4 md:px-5">
-                            <div className="flex w-full items-center justify-between gap-3">
+                        <header className="relative z-[90] flex h-14 items-center border-b border-border px-3 md:px-4">
+                            <div className="flex w-full items-center justify-between gap-2">
                                 {showAccountSelector ? (
-                                    <div className="relative flex min-w-0 items-center gap-3" ref={accountMenuRef}>
-                                        <span className="text-sm font-medium text-muted-foreground">{t('layout.account')}</span>
+                                    <div className="relative flex min-w-0 items-center gap-2" ref={accountMenuRef}>
+                                        <span className="text-xs font-medium text-muted-foreground">{t('layout.account')}</span>
                                         <button
                                             type="button"
-                                            className="input-shell inline-flex h-10 min-w-[240px] max-w-[360px] items-center justify-between gap-2 px-3 text-sm"
+                                            className="input-shell inline-flex h-9 min-w-[220px] max-w-[340px] items-center justify-between gap-2 px-2.5 text-sm"
                                             onClick={() => setAccountMenuOpen((prev) => !prev)}
                                             disabled={accounts.length === 0}
                                         >
@@ -88,7 +88,7 @@ export default function Layout() {
                                             <ChevronDown size={16} className="shrink-0 text-muted-foreground" />
                                         </button>
                                         {accountMenuOpen && accounts.length > 0 && (
-                                            <div className="absolute left-[72px] top-11 z-[140] max-h-72 w-[360px] overflow-auto rounded-lg border border-border bg-card p-1 shadow-lg">
+                                            <div className="absolute left-[56px] top-10 z-[140] max-h-72 w-[340px] overflow-auto rounded-lg border border-border bg-card p-1 shadow-lg">
                                                 {accounts.map((account) => (
                                                     <button
                                                         key={account.id}
@@ -112,7 +112,7 @@ export default function Layout() {
                                 ) : (
                                     <div />
                                 )}
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-1.5">
                                     <NotificationBell />
                                     <button
                                         type="button"

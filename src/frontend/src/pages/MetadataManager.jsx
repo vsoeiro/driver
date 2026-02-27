@@ -196,7 +196,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
         };
 
         return (
-            <div className="relative">
+            <div className="relative z-[220]">
                 <button
                     onClick={() => setIsOpen(!isOpen)}
                     className={`flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium ${isOpen ? 'bg-accent text-accent-foreground' : 'hover:bg-accent'}`}
@@ -205,7 +205,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                 </button>
 
                 {isOpen && (
-                    <div className="absolute right-0 top-full mt-2 w-80 bg-popover border rounded-md shadow-lg p-4 z-50 space-y-4 max-h-[70vh] overflow-y-auto">
+                    <div className="absolute right-0 top-full mt-2 w-80 bg-popover border rounded-md shadow-lg p-4 z-[260] space-y-4 max-h-[70vh] overflow-y-auto">
                         <div>
                             <label className="block text-sm font-medium mb-1">{t('allFiles.account')}</label>
                             <select
@@ -1128,7 +1128,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
     return (
         <>
             {/* Unified command bar */}
-            <div className="surface-card relative z-[80] mb-4 overflow-hidden">
+            <div className="surface-card relative z-[180] mb-4 overflow-visible">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-4 py-3">
                 <div className="flex items-center gap-3">
                     <button
@@ -1223,7 +1223,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                         currentFilters={filters}
                     />
                     {viewMode === 'table' && (
-                        <div className="relative z-[140]" ref={columnsMenuRef}>
+                        <div className="relative z-[230]" ref={columnsMenuRef}>
                             <button
                                 onClick={() => setColumnsMenuOpen((prev) => !prev)}
                                 className="flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium hover:bg-accent"
@@ -1232,7 +1232,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                 {t('allFiles.columnsTitle')}
                             </button>
                             {columnsMenuOpen && (
-                                <div className="absolute right-0 top-full mt-2 w-60 bg-popover border rounded-md shadow-lg p-2 z-[220] space-y-1 max-h-72 overflow-auto">
+                                <div className="absolute right-0 top-full mt-2 w-60 bg-popover border rounded-md shadow-lg p-2 z-[280] space-y-1 max-h-72 overflow-auto">
                                     {orderedTableColumns.map((column) => (
                                         <label key={column.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent cursor-pointer text-sm">
                                             <input

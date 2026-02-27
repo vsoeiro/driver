@@ -416,8 +416,8 @@ export default function Jobs() {
                     </div>
                 ) : (
                     <div className="surface-card overflow-x-auto">
-                        <div className="min-w-[1380px]">
-                            <div className="grid grid-cols-[112px_110px_1fr_132px_132px_132px_95px_130px_110px_68px_68px_68px_68px_78px] gap-3 p-3 border-b border-border/70 bg-muted/45 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
+                        <div className="min-w-[1480px]">
+                            <div className="grid grid-cols-[112px_110px_1fr_132px_132px_132px_95px_130px_110px_72px_72px_72px_78px_118px] gap-3 p-3 border-b border-border/70 bg-muted/45 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
                                 <div>{t('jobs.status')}</div>
                                 <div>{t('jobs.jobId')}</div>
                                 <div>{t('jobs.type')}</div>
@@ -455,7 +455,7 @@ export default function Jobs() {
                                     return (
                                         <div
                                             key={job.id}
-                                            className="grid grid-cols-[112px_110px_1fr_132px_132px_132px_95px_130px_110px_68px_68px_68px_68px_78px] gap-3 p-3 items-center hover:bg-accent/35 transition-colors pointer-events-none"
+                                            className="grid grid-cols-[112px_110px_1fr_132px_132px_132px_95px_130px_110px_72px_72px_72px_78px_118px] gap-3 p-3 items-center hover:bg-accent/35 transition-colors pointer-events-none"
                                         >
                                         <div className="pointer-events-auto">
                                             <div className={`inline-flex items-center gap-2 font-medium ${job.status === 'COMPLETED' ? 'text-green-600' :

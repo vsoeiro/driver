@@ -16,7 +16,7 @@
   "language": {
     "label": "Language",
     "english": "English",
-    "portuguese": "PortuguÃªs (Brasil)"
+    "portuguese": "Português (Brasil)"
   },
   "layout": {
     "account": "Account",
@@ -34,6 +34,7 @@
     "rules": "Rules",
     "jobs": "Jobs",
     "aiExperimental": "AI (Experimental)",
+    "admin": "Admin",
     "quota": "Quota",
     "quotaUsed": "{{percent}}% used"
   },
@@ -541,7 +542,7 @@
     "fallbackIssueNumber": "Issue Number",
     "zeroBytes": "0 B",
     "dash": "-",
-    "comicsLibraryDescription": "Comic metadata managed by plugin comicrack_core."
+    "comicsLibraryDescription": "Comic by Metadata Library."
   },
   "fileBrowser": {
     "root": "Root",
@@ -634,6 +635,41 @@
     "contains": "contains",
     "applyRule": "Apply rule",
     "deleteRule": "Delete rule"
+  },
+  "aiAssistant": {
+    "title": "AI Assistant",
+    "subtitle": "Ask, analyze and execute guided actions.",
+    "sessions": "Sessions",
+    "newSession": "New session",
+    "deleteSession": "Delete session",
+    "createSessionHelp": "Start a new session and send your first message.",
+    "placeholder": "Type your message...",
+    "send": "Send",
+    "stop": "Stop",
+    "tool": "Tool",
+    "unknown": "Unknown",
+    "input": "Input",
+    "output": "Output",
+    "sources": "Sources",
+    "confirmationRequired": "Confirmation required",
+    "toolLabel": "Tool",
+    "approve": "Approve",
+    "reject": "Reject",
+    "failedCreateSession": "Failed to create session",
+    "failedSend": "Failed to send message",
+    "failedConfirm": "Failed to resolve confirmation",
+    "failedDeleteSession": "Failed to delete session",
+    "toolFailed": "One or more tool calls failed",
+    "responseInterrupted": "Response interrupted"
+  },
+  "imagePreview": {
+    "title": "Image preview",
+    "pdfTitle": "PDF preview",
+    "useEsc": "Press Esc to close",
+    "useZoomKeys": "Use + / - keys or Ctrl + wheel to zoom",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "failed": "Failed to load preview"
   },
   "notifications": {
     "title": "Notifications",

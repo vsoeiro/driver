@@ -77,7 +77,7 @@ const FilterBar = ({ onFilter, filters, accounts, categories }) => {
     };
 
     return (
-        <div className="relative z-[90]">
+        <div className="relative z-[220]">
             <button
                 onClick={() => setIsOpen(!isOpen)}
                 className={`flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium ${isOpen ? 'bg-accent text-accent-foreground' : 'hover:bg-accent'}`}
@@ -86,7 +86,7 @@ const FilterBar = ({ onFilter, filters, accounts, categories }) => {
             </button>
 
             {isOpen && (
-                <div className="absolute right-0 top-full mt-2 w-72 bg-popover border rounded-md shadow-lg p-4 z-[120] space-y-4">
+                <div className="absolute right-0 top-full mt-2 w-72 bg-popover border rounded-md shadow-lg p-4 z-[260] space-y-4">
                     <div>
                         <label className="block text-sm font-medium mb-1">{t('allFiles.account')}</label>
                         <select
@@ -1203,7 +1203,7 @@ export default function AllFiles() {
             {activeTab === 'library' ? (
                 <>
             {/* Unified command bar */}
-            <div className="surface-card relative z-[80] mb-4 overflow-hidden">
+            <div className="surface-card relative z-[180] mb-4 overflow-visible">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-4 py-3">
                 <div className="flex items-center gap-2">
                     <button
@@ -1263,7 +1263,7 @@ export default function AllFiles() {
                             {t('allFiles.columnsTitle')}
                         </button>
                         {columnsMenuOpen && (
-                            <div className="absolute right-0 top-full mt-2 w-56 bg-popover border rounded-md shadow-lg p-2 z-[120] space-y-1">
+                            <div className="absolute right-0 top-full mt-2 w-56 bg-popover border rounded-md shadow-lg p-2 z-[260] space-y-1">
                                 {orderedColumns.map((column) => (
                                     <label key={column.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent cursor-pointer text-sm">
                                         <input

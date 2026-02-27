@@ -99,6 +99,14 @@ export default function AIAssistant() {
         }
     }, [selectedSessionId, sessionsQuery.data]);
 
+    useEffect(() => {
+        if (sessionsQuery.isLoading) return;
+        if (selectedSessionId) return;
+        if ((sessionsQuery.data || []).length > 0) return;
+        setHasDraftSession(true);
+        setSelectedSessionId(DRAFT_SESSION_ID);
+    }, [sessionsQuery.isLoading, sessionsQuery.data, selectedSessionId]);
+
     const sessions = useMemo(() => {
         const persisted = sessionsQuery.data || [];
         if (!hasDraftSession) return persisted;

@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from 'react-router-dom';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
@@ -11,11 +11,10 @@ import {
     HardDrive,
     Gauge,
     Bot,
-    ChevronDown,
+    Settings,
 } from 'lucide-react';
 import { accountsService } from '../services/accounts';
 import { driveService } from '../services/drive';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 
 const { getAccounts } = accountsService;
 const { getQuota } = driveService;
@@ -31,7 +30,6 @@ function formatSize(bytes) {
 export default function Sidebar() {
     const { t } = useTranslation();
     const location = useLocation();
-    const [navigationOpen, setNavigationOpen] = useState(false);
     const showQuotaCard = location.pathname === '/accounts' || location.pathname.startsWith('/drive/');
 
     const { data: accounts = [] } = useQuery({
@@ -64,6 +62,7 @@ export default function Sidebar() {
         { to: '/rules', label: t('sidebar.rules'), icon: Wand2 },
         { to: '/jobs', label: t('sidebar.jobs'), icon: Activity },
         { to: '/ai', label: t('sidebar.aiExperimental'), icon: Bot },
+        { to: '/admin/dashboard', label: t('sidebar.admin'), icon: Settings },
     ];
 
     return (
@@ -80,38 +79,33 @@ export default function Sidebar() {
             </div>
 
             <div className="flex-1 min-h-0 flex flex-col px-2 py-3">
-                <Collapsible open={navigationOpen} onOpenChange={setNavigationOpen} className="mb-2">
-                    <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs font-semibold tracking-wide text-muted-foreground hover:bg-accent/70 hover:text-foreground">
-                        <span>{t('sidebar.navigation')}</span>
-                        <ChevronDown size={14} className={`transition-transform ${navigationOpen ? 'rotate-180' : ''}`} />
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="pt-1">
-                        <nav className="space-y-1">
-                            {quickLinks.map(({ to, label, icon: Icon }) => (
-                                <NavLink
-                                    key={to}
-                                    to={to}
-                                    title={label}
-                                    className={({ isActive }) => {
-                                        const activeByDrive = to === '/accounts' && location.pathname.startsWith('/drive/');
-                                        const isLinkActive = isActive || activeByDrive;
-                                        return `
-                                            group flex items-center rounded-md border px-2.5 py-1.5 text-sm font-medium transition-all
-                                            gap-2
-                                            ${isLinkActive
-                                                ? 'border-primary/35 bg-primary/12 text-primary'
-                                                : 'border-transparent text-muted-foreground hover:bg-accent/70 hover:text-foreground'
-                                            }
-                                        `;
-                                    }}
-                                >
-                                    <Icon size={15} className="shrink-0" />
-                                    <span>{label}</span>
-                                </NavLink>
-                            ))}
-                        </nav>
-                    </CollapsibleContent>
-                </Collapsible>
+                <div className="mb-2 px-2 py-1.5 text-xs font-semibold tracking-wide text-muted-foreground">
+                    {t('sidebar.navigation')}
+                </div>
+                <nav className="space-y-1">
+                    {quickLinks.map(({ to, label, icon: Icon }) => (
+                        <NavLink
+                            key={to}
+                            to={to}
+                            title={label}
+                            className={({ isActive }) => {
+                                const activeByDrive = to === '/accounts' && location.pathname.startsWith('/drive/');
+                                const isLinkActive = isActive || activeByDrive;
+                                return `
+                                    group flex items-center rounded-md border px-2.5 py-1.5 text-sm font-medium transition-all
+                                    gap-2
+                                    ${isLinkActive
+                                        ? 'border-primary/35 bg-primary/12 text-primary'
+                                        : 'border-transparent text-muted-foreground hover:bg-accent/70 hover:text-foreground'
+                                    }
+                                `;
+                            }}
+                        >
+                            <Icon size={15} className="shrink-0" />
+                            <span>{label}</span>
+                        </NavLink>
+                    ))}
+                </nav>
                 {showQuotaCard && (
                     <div className="mt-auto border-t border-border px-2 pt-3">
                         <div className="rounded-md border border-border bg-background px-3 py-2.5">

@@ -34,6 +34,7 @@
     "rules": "Regras",
     "jobs": "Empregos",
     "aiExperimental": "IA (Experimental)",
+    "admin": "Admin",
     "quota": "Quota",
     "quotaUsed": "{{percent}}% usado"
   },
@@ -541,7 +542,7 @@
     "fallbackIssueNumber": "Número de emissão",
     "zeroBytes": "0B",
     "dash": "-",
-    "comicsLibraryDescription": "Metadados de quadrinhos gerenciados pelo plugin comicrack_core."
+    "comicsLibraryDescription": "Comic by Metadata Library."
   },
   "fileBrowser": {
     "root": "Raiz",
@@ -634,6 +635,41 @@
     "contains": "contém",
     "applyRule": "Aplicar regra",
     "deleteRule": "Excluir regra"
+  },
+  "aiAssistant": {
+    "title": "Assistente de IA",
+    "subtitle": "Pergunte, analise e execute acoes guiadas.",
+    "sessions": "Sessoes",
+    "newSession": "Nova sessao",
+    "deleteSession": "Excluir sessao",
+    "createSessionHelp": "Inicie uma nova sessao e envie sua primeira mensagem.",
+    "placeholder": "Digite sua mensagem...",
+    "send": "Enviar",
+    "stop": "Parar",
+    "tool": "Ferramenta",
+    "unknown": "Desconhecido",
+    "input": "Entrada",
+    "output": "Saida",
+    "sources": "Fontes",
+    "confirmationRequired": "Confirmacao necessaria",
+    "toolLabel": "Ferramenta",
+    "approve": "Aprovar",
+    "reject": "Recusar",
+    "failedCreateSession": "Falha ao criar sessao",
+    "failedSend": "Falha ao enviar mensagem",
+    "failedConfirm": "Falha ao confirmar acao",
+    "failedDeleteSession": "Falha ao excluir sessao",
+    "toolFailed": "Uma ou mais chamadas de ferramenta falharam",
+    "responseInterrupted": "Resposta interrompida"
+  },
+  "imagePreview": {
+    "title": "Visualizacao de imagem",
+    "pdfTitle": "Visualizacao de PDF",
+    "useEsc": "Pressione Esc para fechar",
+    "useZoomKeys": "Use as teclas + / - ou Ctrl + rolagem para zoom",
+    "zoomIn": "Aumentar zoom",
+    "zoomOut": "Diminuir zoom",
+    "failed": "Falha ao carregar a visualizacao"
   },
   "notifications": {
     "title": "Notificações",
