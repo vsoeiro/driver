@@ -27,6 +27,7 @@ import SimilarFilesReportTab from '../components/SimilarFilesReportTab';
 import ImagePreviewModal from '../components/ImagePreviewModal';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { isPreviewableFileName } from '../utils/imagePreview';
+import { formatDateTime } from '../utils/dateTime';
 
 const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'cbw', 'pdf', 'epub', 'cbr', 'rar', 'cb7', '7z', 'cbt', 'tar']);
 const ALL_FILES_COLUMNS_STORAGE_KEY = 'driver-all-files-columns-v1';
@@ -780,11 +781,7 @@ export default function AllFiles() {
     };
 
     const formatDate = (dateString) => {
-        if (!dateString) return '-';
-        return new Date(dateString).toLocaleDateString(i18n.language, {
-            day: '2-digit', month: '2-digit', year: 'numeric',
-            hour: '2-digit', minute: '2-digit'
-        });
+        return formatDateTime(dateString, i18n.language);
     };
 
     const getSelectedObjects = () => {
@@ -1205,8 +1202,9 @@ export default function AllFiles() {
 
             {activeTab === 'library' ? (
                 <>
-            {/* Header */}
-            <div className="page-header z-[80] flex flex-wrap items-center justify-between gap-3">
+            {/* Unified command bar */}
+            <div className="surface-card relative z-[80] mb-4 overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-4 py-3">
                 <div className="flex items-center gap-2">
                     <button
                         onClick={clearPathPrefix}
@@ -1302,9 +1300,7 @@ export default function AllFiles() {
                     )}
                 </div>
             </div>
-
-            {/* Toolbar */}
-            <div className="toolbar-surface relative z-40 mb-4 px-4 py-2 flex items-center justify-between gap-2 text-sm">
+            <div className="px-4 py-2 flex items-center justify-between gap-2 text-sm">
                 <div className="flex items-center gap-2">
                     <span className="font-medium mr-2 whitespace-nowrap w-24 text-right tabular-nums">{t('allFiles.selectedCount', { count: selectedItems.size })}</span>
                     <div className="h-4 w-px bg-border mx-2" />
@@ -1440,6 +1436,7 @@ export default function AllFiles() {
                         </button>
                     </div>
                 </div>
+            </div>
             </div>
 
             {/* Path Prefix Breadcrumb */}

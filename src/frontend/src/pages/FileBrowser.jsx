@@ -19,6 +19,7 @@ import BatchMetadataModal from '../components/BatchMetadataModal';
 import ImagePreviewModal from '../components/ImagePreviewModal';
 import { useToast } from '../contexts/ToastContext';
 import { isPreviewableFileName } from '../utils/imagePreview';
+import { formatDateTime } from '../utils/dateTime';
 
 const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'cbw', 'pdf', 'epub', 'cbr', 'rar', 'cb7', '7z', 'cbt', 'tar']);
 
@@ -101,11 +102,7 @@ export default function FileBrowser() {
 
     // Helper to format date
     const formatDate = (dateString) => {
-        if (!dateString) return '-';
-        return new Date(dateString).toLocaleDateString(i18n.language, {
-            day: '2-digit', month: '2-digit', year: 'numeric',
-            hour: '2-digit', minute: '2-digit'
-        });
+        return formatDateTime(dateString, i18n.language);
     };
 
     // Click outside handler for metadata menu
@@ -338,8 +335,9 @@ export default function FileBrowser() {
 
     return (
         <div className="app-page">
-            {/* Header */}
-            <header className="page-header flex flex-wrap items-center justify-between gap-3">
+            {/* Unified command bar */}
+            <div className="surface-card mb-4 overflow-hidden">
+            <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-4 py-3">
                 <div
                     className={`flex items-center gap-4 overflow-hidden rounded-lg border px-2 py-1.5 transition-colors ${
                         isNavDropActive
@@ -426,8 +424,7 @@ export default function FileBrowser() {
                 </div>
             </header>
 
-            {/* Toolbar (Always visible) */}
-            <div className="toolbar-surface relative z-40 mb-4 px-4 py-2 flex items-center justify-between gap-2 text-sm">
+            <div className="px-4 py-2 flex items-center justify-between gap-2 text-sm">
                 <div className="flex items-center w-full max-w-sm relative">
                     <Search className="absolute left-2 text-muted-foreground" size={16} />
                     <input
@@ -534,6 +531,7 @@ export default function FileBrowser() {
                         <Trash2 size={16} /> <span className="hidden sm:inline">{t('fileBrowser.delete')}</span>
                     </button>
                 </div>
+            </div>
             </div>
 
             {/* Content */}

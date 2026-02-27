@@ -57,7 +57,7 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
         staleTime: 15000,
     });
 
-    const groups = data?.groups || [];
+    const groups = useMemo(() => data?.groups || [], [data?.groups]);
     const totalGroups = data?.total_groups || 0;
     const totalItems = data?.total_items || 0;
     const totalPages = data?.total_pages || 0;

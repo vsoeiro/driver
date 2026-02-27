@@ -29,6 +29,7 @@ import MetadataModal from '../components/MetadataModal';
 import MoveModal from '../components/MoveModal';
 import MetadataLayoutBuilderModal from '../components/MetadataLayoutBuilderModal';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { formatDateOnly, formatDateTime } from '../utils/dateTime';
 
 const ITEMS_PER_PAGE = 50;
 const BASE_SORT_OPTIONS = [
@@ -559,11 +560,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
     };
 
     const formatDate = (dateString) => {
-        if (!dateString) return t('metadataManager.dash');
-        return new Date(dateString).toLocaleDateString(i18n.language, {
-            day: '2-digit', month: '2-digit', year: 'numeric',
-            hour: '2-digit', minute: '2-digit'
-        });
+        return formatDateTime(dateString, i18n.language);
     };
 
     const getAttributeValue = (item, attr) => {
@@ -577,7 +574,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
             return tags.length > 0 ? tags.join(', ') : t('metadataManager.dash');
         }
         if (attr.data_type === 'date' && val) {
-            return new Date(val).toLocaleDateString(i18n.language);
+            return formatDateOnly(val, i18n.language);
         }
         return String(val);
     };
@@ -1130,8 +1127,9 @@ const CategoryItemsTable = ({ category, onBack }) => {
 
     return (
         <>
-            {/* Header */}
-            <div className="page-header relative z-[80] flex flex-wrap items-center justify-between gap-3">
+            {/* Unified command bar */}
+            <div className="surface-card relative z-[80] mb-4 overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-4 py-3">
                 <div className="flex items-center gap-3">
                     <button
                         onClick={onBack}
@@ -1261,9 +1259,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                     )}
                 </div>
             </div>
-
-            {/* Toolbar */}
-            <div className="toolbar-surface relative z-40 mb-4 px-4 py-2 flex items-center justify-between gap-2 text-sm">
+            <div className="px-4 py-2 flex items-center justify-between gap-2 text-sm">
                 <div className="flex items-center gap-2">
                     <span className="font-medium mr-2 whitespace-nowrap w-24 text-right tabular-nums">{t('allFiles.selectedCount', { count: selectedItems.size })}</span>
                     <div className="h-4 w-px bg-border mx-2" />
@@ -1368,6 +1364,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                         </button>
                     </div>
                 </div>
+            </div>
             </div>
 
             {/* Content */}
@@ -1818,13 +1815,13 @@ export default function MetadataManager() {
         if (categoriesError) {
             showToast(t('metadataManager.failedLoadCategories'), 'error');
         }
-    }, [categoriesError, showToast]);
+    }, [categoriesError, showToast, t]);
 
     useEffect(() => {
         if (librariesError) {
             showToast(t('metadataManager.failedLoadLibraries'), 'error');
         }
-    }, [librariesError, showToast]);
+    }, [librariesError, showToast, t]);
 
     const knownLibraries = useMemo(
         () => (
