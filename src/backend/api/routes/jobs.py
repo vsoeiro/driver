@@ -35,6 +35,7 @@ from backend.schemas.jobs import (
     JobMoveRequest,
     JobReindexComicCoversRequest,
     JobRemoveMetadataRecursiveRequest,
+    JobRemoveDuplicateFilesRequest,
     JobSyncRequest,
     JobUndoMetadataBatchRequest,
 )
@@ -295,6 +296,23 @@ async def create_remove_metadata_recursive_job(
         job_service.session,
         job_type="remove_metadata_recursive",
         payload=payload,
+    )
+
+
+@router.post(
+    "/remove-duplicates",
+    response_model=Job,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_remove_duplicates_job(
+    request: JobRemoveDuplicateFilesRequest,
+    job_service: JobServiceDep,
+) -> Job:
+    """Create a job that removes duplicate files based on Similar Files filters."""
+    return await enqueue_job_command(
+        job_service.session,
+        job_type="remove_duplicate_files",
+        payload=request.model_dump(mode="json"),
     )
 
 

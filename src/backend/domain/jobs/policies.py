@@ -20,6 +20,7 @@ DEFAULT_JOB_QUEUE_ALIAS_BY_TYPE: dict[str, str] = {
     JobType.EXTRACT_COMIC_ASSETS.value: "comics",
     JobType.EXTRACT_LIBRARY_COMIC_ASSETS.value: "comics",
     JobType.REINDEX_COMIC_COVERS.value: "comics",
+    JobType.REMOVE_DUPLICATE_FILES.value: "io",
 }
 
 DEFAULT_JOB_MAX_RETRIES_BY_TYPE: dict[str, int] = {
@@ -34,6 +35,7 @@ DEFAULT_JOB_MAX_RETRIES_BY_TYPE: dict[str, int] = {
     JobType.EXTRACT_COMIC_ASSETS.value: 1,
     JobType.EXTRACT_LIBRARY_COMIC_ASSETS.value: 1,
     JobType.REINDEX_COMIC_COVERS.value: 1,
+    JobType.REMOVE_DUPLICATE_FILES.value: 1,
 }
 
 DEFAULT_JOB_DEDUPE_KEYS_BY_TYPE: dict[str, tuple[str, ...]] = {
@@ -46,6 +48,13 @@ DEFAULT_JOB_DEDUPE_KEYS_BY_TYPE: dict[str, tuple[str, ...]] = {
     JobType.EXTRACT_COMIC_ASSETS.value: ("account_id", "item_ids", "use_indexed_items"),
     JobType.EXTRACT_LIBRARY_COMIC_ASSETS.value: ("account_ids", "chunk_size"),
     JobType.REINDEX_COMIC_COVERS.value: ("plugin_key", "library_key"),
+    JobType.REMOVE_DUPLICATE_FILES.value: (
+        "preferred_account_id",
+        "account_id",
+        "scope",
+        "extensions",
+        "hide_low_priority",
+    ),
 }
 
 
@@ -106,4 +115,3 @@ def resolve_job_dedupe_key(
     if explicit_key is not None:
         return explicit_key
     return build_default_dedupe_key(job_type, payload)
-

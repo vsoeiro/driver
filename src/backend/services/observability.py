@@ -400,16 +400,6 @@ class ObservabilityService:
                     )
                 )
 
-        if not alerts:
-            alerts.append(
-                ObservabilityAlert(
-                    severity="info",
-                    code="healthy",
-                    message="No operational alerts detected.",
-                    created_at=now,
-                )
-            )
-
         for alert in alerts:
             if alert.severity in {"warning", "critical"}:
                 level = logging.ERROR if alert.severity == "critical" else logging.WARNING

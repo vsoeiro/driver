@@ -23,6 +23,10 @@ dependencies = [
     "pillow>=11.1.0",
     "rarfile>=4.2",
     "py7zr>=0.22.0",
+    "langchain>=0.3.27",
+    "langchain-ollama>=0.3.4",
+    "langchain-openai>=0.3.28",
+    "langgraph>=0.6.6",
 ]
 
 [project.optional-dependencies]

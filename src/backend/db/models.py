@@ -43,6 +43,135 @@ class AppSetting(Base):
     )
 
 
+class AIChatSession(Base):
+    """Persisted AI chat session."""
+
+    __tablename__ = "ai_chat_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    user_id: Mapped[str] = mapped_column(String(80), nullable=False, default="single_user")
+    title: Mapped[str] = mapped_column(String(255), nullable=False, default="New chat")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    __table_args__ = (
+        Index("ix_ai_chat_sessions_user_updated_at", "user_id", "updated_at"),
+    )
+
+
+class AIChatMessage(Base):
+    """Persisted AI chat message."""
+
+    __tablename__ = "ai_chat_messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ai_chat_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    content_redacted: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+    __table_args__ = (
+        Index("ix_ai_chat_messages_session_created_at", "session_id", "created_at"),
+    )
+
+
+class AIToolCall(Base):
+    """Audit trail for AI tool invocations."""
+
+    __tablename__ = "ai_tool_calls"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ai_chat_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    message_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ai_chat_messages.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    tool_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    permission: Mapped[str] = mapped_column(String(20), nullable=False, default="read")
+    input_redacted: Mapped[dict] = mapped_column(JSON, nullable=False, default={})
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="success")
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    result_summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+    __table_args__ = (
+        Index("ix_ai_tool_calls_session_created_at", "session_id", "created_at"),
+    )
+
+
+class AIPendingConfirmation(Base):
+    """Pending confirmation for write-capable AI actions."""
+
+    __tablename__ = "ai_pending_confirmations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ai_chat_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    tool_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    permission: Mapped[str] = mapped_column(String(20), nullable=False, default="write")
+    input_redacted: Mapped[dict] = mapped_column(JSON, nullable=False, default={})
+    action_payload: Mapped[dict] = mapped_column(JSON, nullable=False, default={})
+    impact_summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    __table_args__ = (
+        Index("ix_ai_pending_confirmations_session_status", "session_id", "status"),
+    )
+
+
 class LinkedAccount(Base):
     """Linked Microsoft account model.
 

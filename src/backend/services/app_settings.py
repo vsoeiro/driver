@@ -21,6 +21,10 @@ class RuntimeSettings:
     enable_daily_sync_scheduler: bool
     daily_sync_cron: str
     worker_job_timeout_seconds: int
+    ai_model_default: str
+    ai_provider_mode: str
+    ai_base_url_remote: str | None
+    ai_api_key_remote: str | None
 
 
 class AppSettingsService:
@@ -29,6 +33,10 @@ class AppSettingsService:
     ENABLE_DAILY_SYNC_KEY = "enable_daily_sync_scheduler"
     DAILY_SYNC_CRON_KEY = "daily_sync_cron"
     WORKER_JOB_TIMEOUT_SECONDS_KEY = "worker_job_timeout_seconds"
+    AI_MODEL_DEFAULT_KEY = "ai_model_default"
+    AI_PROVIDER_MODE_KEY = "ai_provider_mode"
+    AI_BASE_URL_REMOTE_KEY = "ai_base_url_remote"
+    AI_API_KEY_REMOTE_KEY = "ai_api_key_remote"
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -51,6 +59,7 @@ class AppSettingsService:
 
     async def get_runtime_settings(self) -> RuntimeSettings:
         await self.ensure_defaults()
+        settings = get_settings()
         rows = await self._get_settings_map()
         cron_expr = rows[self.DAILY_SYNC_CRON_KEY].value
         validate_cron_expression(cron_expr)
@@ -61,6 +70,13 @@ class AppSettingsService:
                 1,
                 self._parse_int(rows[self.WORKER_JOB_TIMEOUT_SECONDS_KEY].value, default=1800),
             ),
+            ai_model_default=str(rows[self.AI_MODEL_DEFAULT_KEY].value or settings.ai_model_default).strip() or settings.ai_model_default,
+            ai_provider_mode=self._normalize_ai_provider_mode(
+                rows[self.AI_PROVIDER_MODE_KEY].value,
+                fallback=settings.ai_provider_mode,
+            ),
+            ai_base_url_remote=self._normalize_optional_string(rows[self.AI_BASE_URL_REMOTE_KEY].value),
+            ai_api_key_remote=self._normalize_optional_string(rows[self.AI_API_KEY_REMOTE_KEY].value),
         )
 
     async def update_runtime_settings(
@@ -69,6 +85,10 @@ class AppSettingsService:
         enable_daily_sync_scheduler: bool | None = None,
         daily_sync_cron: str | None = None,
         worker_job_timeout_seconds: int | None = None,
+        ai_model_default: str | None = None,
+        ai_provider_mode: str | None = None,
+        ai_base_url_remote: str | None = None,
+        ai_api_key_remote: str | None = None,
     ) -> RuntimeSettings:
         await self.ensure_defaults()
         rows = await self._get_settings_map()
@@ -86,6 +106,24 @@ class AppSettingsService:
                 raise ValueError("worker_job_timeout_seconds must be greater than 0")
             rows[self.WORKER_JOB_TIMEOUT_SECONDS_KEY].value = str(worker_job_timeout_seconds)
 
+        if ai_model_default is not None:
+            model_name = ai_model_default.strip()
+            if not model_name:
+                raise ValueError("ai_model_default cannot be empty")
+            rows[self.AI_MODEL_DEFAULT_KEY].value = model_name
+
+        if ai_provider_mode is not None:
+            rows[self.AI_PROVIDER_MODE_KEY].value = self._normalize_ai_provider_mode(
+                ai_provider_mode,
+                fallback=get_settings().ai_provider_mode,
+            )
+
+        if ai_base_url_remote is not None:
+            rows[self.AI_BASE_URL_REMOTE_KEY].value = ai_base_url_remote.strip()
+
+        if ai_api_key_remote is not None:
+            rows[self.AI_API_KEY_REMOTE_KEY].value = ai_api_key_remote.strip()
+
         runtime = RuntimeSettings(
             enable_daily_sync_scheduler=_to_bool(rows[self.ENABLE_DAILY_SYNC_KEY].value),
             daily_sync_cron=rows[self.DAILY_SYNC_CRON_KEY].value,
@@ -93,6 +131,13 @@ class AppSettingsService:
                 rows[self.WORKER_JOB_TIMEOUT_SECONDS_KEY].value,
                 default=1800,
             ),
+            ai_model_default=str(rows[self.AI_MODEL_DEFAULT_KEY].value or "").strip() or get_settings().ai_model_default,
+            ai_provider_mode=self._normalize_ai_provider_mode(
+                rows[self.AI_PROVIDER_MODE_KEY].value,
+                fallback=get_settings().ai_provider_mode,
+            ),
+            ai_base_url_remote=self._normalize_optional_string(rows[self.AI_BASE_URL_REMOTE_KEY].value),
+            ai_api_key_remote=self._normalize_optional_string(rows[self.AI_API_KEY_REMOTE_KEY].value),
         )
         await self.session.commit()
         return runtime
@@ -105,6 +150,10 @@ class AppSettingsService:
                         self.ENABLE_DAILY_SYNC_KEY,
                         self.DAILY_SYNC_CRON_KEY,
                         self.WORKER_JOB_TIMEOUT_SECONDS_KEY,
+                        self.AI_MODEL_DEFAULT_KEY,
+                        self.AI_PROVIDER_MODE_KEY,
+                        self.AI_BASE_URL_REMOTE_KEY,
+                        self.AI_API_KEY_REMOTE_KEY,
                     )
                 )
             )
@@ -133,6 +182,22 @@ class AppSettingsService:
                 str(settings.worker_job_timeout_seconds),
                 "ARQ worker timeout in seconds for one job execution.",
             ),
+            AppSettingsService.AI_MODEL_DEFAULT_KEY: (
+                settings.ai_model_default,
+                "Default LLM model name used by AI assistant (local/openai-compatible providers).",
+            ),
+            AppSettingsService.AI_PROVIDER_MODE_KEY: (
+                settings.ai_provider_mode,
+                "AI provider mode: local, openai_compatible or gemini.",
+            ),
+            AppSettingsService.AI_BASE_URL_REMOTE_KEY: (
+                settings.ai_base_url_remote or "",
+                "OpenAI-compatible base URL used by openai_compatible provider mode.",
+            ),
+            AppSettingsService.AI_API_KEY_REMOTE_KEY: (
+                settings.ai_api_key_remote or "",
+                "API key used for openai_compatible provider.",
+            ),
         }
 
     @staticmethod
@@ -141,3 +206,25 @@ class AppSettingsService:
             return int(value)
         except (TypeError, ValueError):
             return default
+
+    @staticmethod
+    def _normalize_optional_string(value: str | None) -> str | None:
+        normalized = str(value or "").strip()
+        return normalized or None
+
+    @staticmethod
+    def _normalize_ai_provider_mode(value: str | None, *, fallback: str) -> str:
+        normalized = str(value or fallback).strip().lower()
+        if normalized == "remote":
+            normalized = "openai_compatible"
+        elif normalized == "hybrid":
+            normalized = "local"
+        if normalized not in {"local", "openai_compatible", "gemini"}:
+            normalized = str(fallback or "local").strip().lower()
+        if normalized == "remote":
+            normalized = "openai_compatible"
+        elif normalized == "hybrid":
+            normalized = "local"
+        if normalized not in {"local", "openai_compatible", "gemini"}:
+            normalized = "local"
+        return normalized

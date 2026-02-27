@@ -146,6 +146,10 @@ class DailySyncScheduler:
                 enable_daily_sync_scheduler=settings.enable_daily_sync_scheduler,
                 daily_sync_cron=settings.daily_sync_cron,
                 worker_job_timeout_seconds=settings.worker_job_timeout_seconds,
+                ai_model_default=settings.ai_model_default,
+                ai_provider_mode=settings.ai_provider_mode,
+                ai_base_url_remote=settings.ai_base_url_remote,
+                ai_api_key_remote=settings.ai_api_key_remote,
             )
 
     async def _wait_or_stop(self, timeout_seconds: float) -> bool:

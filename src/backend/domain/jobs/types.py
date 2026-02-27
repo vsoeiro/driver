@@ -17,6 +17,8 @@ class JobType(StrEnum):
     EXTRACT_COMIC_ASSETS = "extract_comic_assets"
     EXTRACT_LIBRARY_COMIC_ASSETS = "extract_library_comic_assets"
     REINDEX_COMIC_COVERS = "reindex_comic_covers"
+    REMOVE_DUPLICATE_FILES = "remove_duplicate_files"
+    AI_GENERATE_CHAT_TITLE = "ai_generate_chat_title"
 
 
 class JobStatus(StrEnum):
@@ -34,4 +36,3 @@ def normalize_job_type(value: str | JobType) -> str:
     if isinstance(value, JobType):
         return value.value
     return str(value or "").strip().lower()
-

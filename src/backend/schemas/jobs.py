@@ -1,6 +1,6 @@
 """Job Pydantic schemas."""
 
-from typing import Any
+from typing import Any, Literal
 from datetime import datetime
 from uuid import UUID
 
@@ -177,4 +177,14 @@ class JobExtractLibraryComicAssetsResponse(BaseModel):
     total_jobs: int
     chunk_size: int
     job_ids: list[UUID]
+
+
+class JobRemoveDuplicateFilesRequest(BaseModel):
+    """Schema for duplicate-removal job based on Similar Files filters."""
+
+    preferred_account_id: UUID
+    account_id: UUID | None = None
+    scope: Literal["all", "same_account", "cross_account"] = "all"
+    extensions: list[str] = []
+    hide_low_priority: bool = False
 

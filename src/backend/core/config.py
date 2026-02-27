@@ -125,6 +125,17 @@ class Settings(BaseSettings):
         default=2,
         alias="SYNC_SNAPSHOT_WORKER_COUNT_MICROSOFT",
     )
+    ai_module_enabled: bool = Field(default=False, alias="AI_MODULE_ENABLED")
+    ai_provider_mode: str = Field(default="local", alias="AI_PROVIDER_MODE")
+    ai_base_url_local: str | None = Field(default=None, alias="AI_BASE_URL_LOCAL")
+    ai_base_url_remote: str | None = Field(default=None, alias="AI_BASE_URL_REMOTE")
+    ai_api_key_remote: str | None = Field(default=None, alias="AI_API_KEY_REMOTE")
+    ai_model_default: str = Field(default="gpt-4o-mini", alias="AI_MODEL_DEFAULT")
+    ai_timeout_seconds: int = Field(default=45, alias="AI_TIMEOUT_SECONDS")
+    ai_max_tool_calls_per_message: int = Field(default=4, alias="AI_MAX_TOOL_CALLS_PER_MESSAGE")
+    ai_max_rows_scanned: int = Field(default=5000, alias="AI_MAX_ROWS_SCANNED")
+    ai_redaction_enabled: bool = Field(default=True, alias="AI_REDACTION_ENABLED")
+    ai_persist_raw: bool = Field(default=False, alias="AI_PERSIST_RAW")
 
     @model_validator(mode="after")
     def assemble_db_connection(self) -> "Settings":
@@ -207,6 +218,23 @@ class Settings(BaseSettings):
         self.scheduler_lock_key = self.scheduler_lock_key.strip() or "driver:scheduler:daily-sync"
         if self.scheduler_lock_ttl_seconds <= 5:
             raise ValueError("SCHEDULER_LOCK_TTL_SECONDS must be greater than 5")
+        self.ai_provider_mode = self.ai_provider_mode.strip().lower() or "local"
+        if self.ai_provider_mode == "remote":
+            self.ai_provider_mode = "openai_compatible"
+        elif self.ai_provider_mode == "hybrid":
+            self.ai_provider_mode = "local"
+        if self.ai_provider_mode not in {"local", "openai_compatible", "gemini"}:
+            raise ValueError("AI_PROVIDER_MODE must be one of: local, openai_compatible, gemini")
+        if self.ai_base_url_local:
+            self.ai_base_url_local = self.ai_base_url_local.strip()
+        if self.ai_base_url_remote:
+            self.ai_base_url_remote = self.ai_base_url_remote.strip()
+        if self.ai_timeout_seconds <= 0:
+            raise ValueError("AI_TIMEOUT_SECONDS must be greater than 0")
+        if self.ai_max_tool_calls_per_message <= 0:
+            raise ValueError("AI_MAX_TOOL_CALLS_PER_MESSAGE must be greater than 0")
+        if self.ai_max_rows_scanned <= 0:
+            raise ValueError("AI_MAX_ROWS_SCANNED must be greater than 0")
         return self
 
     @property

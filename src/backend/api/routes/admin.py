@@ -37,6 +37,10 @@ async def get_runtime_settings(db: DBSession) -> RuntimeSettingsResponse:
         enable_daily_sync_scheduler=settings.enable_daily_sync_scheduler,
         daily_sync_cron=settings.daily_sync_cron,
         worker_job_timeout_seconds=settings.worker_job_timeout_seconds,
+        ai_model_default=settings.ai_model_default,
+        ai_provider_mode=settings.ai_provider_mode,
+        ai_base_url_remote=settings.ai_base_url_remote,
+        ai_api_key_remote=settings.ai_api_key_remote,
         plugin_settings=[
             PluginSettingsGroupResponse(
                 plugin_key=group["plugin_key"],
@@ -61,6 +65,10 @@ async def update_runtime_settings(
         enable_daily_sync_scheduler=payload.enable_daily_sync_scheduler,
         daily_sync_cron=payload.daily_sync_cron,
         worker_job_timeout_seconds=payload.worker_job_timeout_seconds,
+        ai_model_default=payload.ai_model_default,
+        ai_provider_mode=payload.ai_provider_mode,
+        ai_base_url_remote=payload.ai_base_url_remote,
+        ai_api_key_remote=payload.ai_api_key_remote,
     )
     try:
         await library_service.update_metadata_library_configs(payload.plugin_settings)
@@ -72,6 +80,10 @@ async def update_runtime_settings(
         enable_daily_sync_scheduler=settings.enable_daily_sync_scheduler,
         daily_sync_cron=settings.daily_sync_cron,
         worker_job_timeout_seconds=settings.worker_job_timeout_seconds,
+        ai_model_default=settings.ai_model_default,
+        ai_provider_mode=settings.ai_provider_mode,
+        ai_base_url_remote=settings.ai_base_url_remote,
+        ai_api_key_remote=settings.ai_api_key_remote,
         plugin_settings=[
             PluginSettingsGroupResponse(
                 plugin_key=group["plugin_key"],

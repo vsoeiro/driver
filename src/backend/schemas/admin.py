@@ -34,6 +34,10 @@ class RuntimeSettingsResponse(BaseModel):
     enable_daily_sync_scheduler: bool
     daily_sync_cron: str
     worker_job_timeout_seconds: int
+    ai_model_default: str
+    ai_provider_mode: str
+    ai_base_url_remote: str | None = None
+    ai_api_key_remote: str | None = None
     plugin_settings: list[PluginSettingsGroupResponse] = []
 
 
@@ -41,6 +45,10 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     enable_daily_sync_scheduler: bool | None = None
     daily_sync_cron: str | None = None
     worker_job_timeout_seconds: int | None = None
+    ai_model_default: str | None = None
+    ai_provider_mode: str | None = None
+    ai_base_url_remote: str | None = None
+    ai_api_key_remote: str | None = None
     plugin_settings: dict[str, dict[str, Any]] | None = None
 
     @field_validator("daily_sync_cron")
@@ -59,6 +67,37 @@ class RuntimeSettingsUpdateRequest(BaseModel):
         if value <= 0:
             raise ValueError("worker_job_timeout_seconds must be greater than 0")
         return value
+
+    @field_validator("ai_model_default")
+    @classmethod
+    def validate_ai_model_default(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("ai_model_default cannot be empty")
+        return normalized
+
+    @field_validator("ai_provider_mode")
+    @classmethod
+    def validate_ai_provider_mode(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        normalized = value.strip().lower()
+        if normalized == "remote":
+            normalized = "openai_compatible"
+        elif normalized == "hybrid":
+            normalized = "local"
+        if normalized not in {"local", "openai_compatible", "gemini"}:
+            raise ValueError("ai_provider_mode must be one of: local, openai_compatible, gemini")
+        return normalized
+
+    @field_validator("ai_base_url_remote", "ai_api_key_remote")
+    @classmethod
+    def normalize_optional_ai_fields(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        return value.strip()
 
 
 class IntegrationHealthStatus(BaseModel):
