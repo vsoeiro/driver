@@ -12,6 +12,7 @@ const RulesManager = lazy(() => import('./pages/RulesManager'));
 const AdminSettings = lazy(() => import('./pages/AdminSettings'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const AccountsRedirect = lazy(() => import('./pages/AccountsRedirect'));
+const AIAssistant = lazy(() => import('./pages/AIAssistant'));
 
 function App() {
     return (
@@ -27,6 +28,7 @@ function App() {
                             <Route path="/drive/:accountId/:folderId" element={<FileBrowser />} />
                             <Route path="/all-files" element={<AllFiles />} />
                             <Route path="/jobs" element={<Jobs />} />
+                            <Route path="/ai" element={<AIAssistant />} />
                             <Route path="/metadata" element={<MetadataManager />} />
                             <Route path="/rules" element={<RulesManager />} />
                             <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />

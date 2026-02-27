@@ -4,7 +4,7 @@ import { metadataService } from '../services/metadata';
 import { jobsService } from '../services/jobs';
 import { driveService } from '../services/drive';
 import { useToast } from '../contexts/ToastContext';
-import { Loader2, AlertTriangle, ZoomIn, ZoomOut, X } from 'lucide-react';
+import { Loader2, AlertTriangle, ZoomIn, ZoomOut, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { getCategoryLibraryView } from '../metadataLibraries/categoryViews';
 import { buildCoverCacheKey, getCachedCoverUrl, setCachedCoverUrl } from '../utils/coverCache';
 import {
@@ -40,7 +40,17 @@ function getLayoutItemType(item) {
     return 'attribute';
 }
 
-export default function MetadataModal({ isOpen, onClose, item, accountId, onSuccess }) {
+export default function MetadataModal({
+    isOpen,
+    onClose,
+    item,
+    accountId,
+    onSuccess,
+    hasPrevious = false,
+    hasNext = false,
+    onPrevious = null,
+    onNext = null,
+}) {
     const { showToast } = useToast();
     const [categories, setCategories] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -440,6 +450,28 @@ export default function MetadataModal({ isOpen, onClose, item, accountId, onSucc
                 </div>
             ) : (
                 <form onSubmit={handleSave}>
+                    {(onPrevious || onNext) && (
+                        <div className="mb-3 flex items-center justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={onPrevious}
+                                disabled={!hasPrevious || saving}
+                                className="inline-flex items-center gap-1 rounded-md border border-border/70 px-2.5 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-50"
+                            >
+                                <ChevronLeft size={14} />
+                                Previous
+                            </button>
+                            <button
+                                type="button"
+                                onClick={onNext}
+                                disabled={!hasNext || saving}
+                                className="inline-flex items-center gap-1 rounded-md border border-border/70 px-2.5 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-50"
+                            >
+                                Next
+                                <ChevronRight size={14} />
+                            </button>
+                        </div>
+                    )}
                     <div className={`grid gap-4 ${showCoverPanel ? 'grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)]' : 'grid-cols-1'}`}>
                         {showCoverPanel && (
                             <aside className="border rounded-md bg-muted/20 p-3 h-fit lg:sticky lg:top-0">

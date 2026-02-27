@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Loader2, RefreshCw, RotateCcw } from 'lucide-react';
+import { Loader2, RefreshCw, RotateCcw } from 'lucide-react';
 import { settingsService } from '../services/settings';
 import { jobsService } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
@@ -333,20 +333,6 @@ export default function AdminDashboard() {
                                 </div>
                             </div>
 
-                            <div className="surface-card p-4">
-                                <h2 className="font-medium mb-3">Alerts</h2>
-                                <div className="space-y-2">
-                                    {(snapshot.recent_alerts || []).map((alert) => (
-                                        <div key={`${alert.code}:${alert.created_at}`} className="rounded-lg border border-border/70 bg-muted/25 p-2.5">
-                                            <div className="text-sm font-medium inline-flex items-center gap-1">
-                                                {alert.severity !== 'info' && <AlertTriangle className="w-4 h-4" />}
-                                                {alert.severity.toUpperCase()} - {alert.code}
-                                            </div>
-                                            <p className="text-xs text-muted-foreground">{alert.message}</p>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
                         </div>
 
                         <div className="surface-card p-4">

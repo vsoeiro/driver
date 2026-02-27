@@ -9,6 +9,7 @@ import {
     Wand2,
     HardDrive,
     Gauge,
+    Bot,
 } from 'lucide-react';
 import { accountsService } from '../services/accounts';
 import { driveService } from '../services/drive';
@@ -57,12 +58,13 @@ export default function Sidebar() {
         { to: '/metadata', label: 'Metadata', icon: Database },
         { to: '/rules', label: 'Rules', icon: Wand2 },
         { to: '/jobs', label: 'Jobs', icon: Activity },
+        { to: '/ai', label: 'AI (Experimental)', icon: Bot },
     ];
 
     return (
         <aside className="sticky top-0 flex h-full w-60 shrink-0 flex-col border-r border-border/70 bg-card/72 backdrop-blur-xl xl:w-64">
-            <div className="border-b border-border/70 px-4 py-4">
-                <div className="inline-flex items-center gap-3 min-w-0">
+            <div className="flex h-16 items-center border-b border-border/70 px-4">
+                <div className="inline-flex min-w-0 items-center gap-3">
                     <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-cyan-500 text-primary-foreground shadow-lg shadow-primary/20">
                         <Cloud size={18} />
                     </div>
@@ -91,7 +93,7 @@ export default function Sidebar() {
                                     gap-3
                                     ${isLinkActive
                                         ? 'border-primary/35 bg-primary/12 text-primary'
-                                        : 'border-transparent text-muted-foreground hover:border-border/80 hover:bg-accent/70 hover:text-foreground'
+                                        : 'border-transparent text-muted-foreground hover:bg-accent/70 hover:text-foreground'
                                     }
                                 `;
                             }}

@@ -3,6 +3,7 @@ import { Check, ChevronDown, Link2, Settings } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
+import NotificationBell from './NotificationBell';
 import ProviderPickerModal from './ProviderPickerModal';
 import ProviderIcon from './ProviderIcon';
 import { accountsService } from '../services/accounts';
@@ -57,12 +58,12 @@ export default function Layout() {
 
     return (
         <div className="app-shell">
-            <div className="min-h-screen p-3 sm:p-4">
-                <div className="app-panel flex h-[calc(100vh-1.5rem)] overflow-hidden">
+            <div className="min-h-screen">
+                <div className="app-panel flex h-screen overflow-hidden rounded-none shadow-none">
                     <Sidebar />
                     <div className="flex flex-1 min-w-0 min-h-0 flex-col">
-                        <header className="relative z-[90] border-b border-border/70 px-4 py-3 md:px-5">
-                            <div className="flex items-center justify-between gap-3">
+                        <header className="relative z-[90] flex h-16 items-center border-b border-border/70 px-4 md:px-5">
+                            <div className="flex w-full items-center justify-between gap-3">
                                 {showAccountSelector ? (
                                     <div className="relative flex min-w-0 items-center gap-3" ref={accountMenuRef}>
                                         <span className="text-sm font-medium text-muted-foreground">Account</span>
@@ -110,6 +111,7 @@ export default function Layout() {
                                     <div />
                                 )}
                                 <div className="flex items-center gap-2">
+                                    <NotificationBell />
                                     <button
                                         type="button"
                                         onClick={() => setPickerOpen(true)}

@@ -3,7 +3,9 @@ import { useQuery } from '@tanstack/react-query';
 import { AlertCircle, CheckSquare, ChevronLeft, ChevronRight, Copy, Loader2, RefreshCcw, Square, Trash2 } from 'lucide-react';
 import { itemsService } from '../services/items';
 import { driveService } from '../services/drive';
+import { jobsService } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
+import Modal from './Modal';
 
 function formatSize(bytes) {
     const value = Number(bytes) || 0;
@@ -24,6 +26,9 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
     const [extensionsInput, setExtensionsInput] = useState('');
     const [hideLowPriority, setHideLowPriority] = useState(true);
     const [selectedKeys, setSelectedKeys] = useState(new Set());
+    const [removeDuplicatesModalOpen, setRemoveDuplicatesModalOpen] = useState(false);
+    const [preferredKeepAccountId, setPreferredKeepAccountId] = useState('');
+    const [creatingRemoveDuplicatesJob, setCreatingRemoveDuplicatesJob] = useState(false);
     const extensions = useMemo(
         () => extensionsInput.split(',').map((part) => part.trim()).filter(Boolean),
         [extensionsInput]
@@ -154,6 +159,37 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
         }
     };
 
+    const handleOpenRemoveDuplicatesModal = () => {
+        const fallbackAccountId = accountId || accounts[0]?.id || '';
+        setPreferredKeepAccountId(fallbackAccountId);
+        setRemoveDuplicatesModalOpen(true);
+    };
+
+    const handleCreateRemoveDuplicatesJob = async () => {
+        if (!preferredKeepAccountId) {
+            showToast('Select a preferred account to keep files.', 'error');
+            return;
+        }
+
+        try {
+            setCreatingRemoveDuplicatesJob(true);
+            const job = await jobsService.createRemoveDuplicatesJob({
+                preferred_account_id: preferredKeepAccountId,
+                account_id: accountId || null,
+                scope,
+                extensions,
+                hide_low_priority: hideLowPriority,
+            });
+            showToast(`Duplicate removal job created (${String(job.id).slice(0, 8)}...)`, 'success');
+            setRemoveDuplicatesModalOpen(false);
+        } catch (error) {
+            const message = error?.response?.data?.detail || error?.message || 'Failed to create duplicate-removal job.';
+            showToast(message, 'error');
+        } finally {
+            setCreatingRemoveDuplicatesJob(false);
+        }
+    };
+
     return (
         <div className="flex flex-col gap-4">
             <div className="page-header z-[80] flex flex-wrap items-center justify-between gap-3">
@@ -261,6 +297,14 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                 <span className="text-muted-foreground">{selectedVisibleCount} selected</span>
                 <button
                     type="button"
+                    onClick={handleOpenRemoveDuplicatesModal}
+                    className="inline-flex items-center gap-2 rounded-md border border-destructive/30 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10"
+                >
+                    <Trash2 size={13} />
+                    Remove Duplicates (Job)
+                </button>
+                <button
+                    type="button"
                     onClick={handleDeleteSelected}
                     disabled={selectedVisibleCount === 0}
                     className="inline-flex items-center gap-2 rounded-md border border-destructive/30 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-50"
@@ -284,6 +328,60 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                     <ChevronRight size={16} />
                 </button>
             </div>
+
+            <Modal
+                isOpen={removeDuplicatesModalOpen}
+                onClose={() => !creatingRemoveDuplicatesJob && setRemoveDuplicatesModalOpen(false)}
+                title="Remove Duplicates (Job)"
+                maxWidthClass="max-w-lg"
+            >
+                <div className="space-y-4">
+                    <p className="text-sm text-muted-foreground">
+                        This will create a background job to remove duplicate files using the current Similar Files filters.
+                    </p>
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Preferred account to keep files</label>
+                        <select
+                            className="w-full border rounded-md p-2 bg-background"
+                            value={preferredKeepAccountId}
+                            onChange={(event) => setPreferredKeepAccountId(event.target.value)}
+                            disabled={creatingRemoveDuplicatesJob}
+                        >
+                            <option value="">Select an account...</option>
+                            {accounts.map((account) => (
+                                <option key={account.id} value={account.id}>
+                                    {account.email || account.display_name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="rounded-md border border-border/70 bg-muted/30 p-3 text-xs text-muted-foreground space-y-1">
+                        <div>Scope: {scope}</div>
+                        <div>Account filter: {accountId ? (accounts.find((acc) => acc.id === accountId)?.email || accountId) : 'All accounts'}</div>
+                        <div>Extensions: {extensions.length > 0 ? extensions.join(', ') : 'All'}</div>
+                        <div>Hide low priority: {hideLowPriority ? 'Yes' : 'No'}</div>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setRemoveDuplicatesModalOpen(false)}
+                            disabled={creatingRemoveDuplicatesJob}
+                            className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleCreateRemoveDuplicatesJob}
+                            disabled={creatingRemoveDuplicatesJob || !preferredKeepAccountId}
+                            className="px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {creatingRemoveDuplicatesJob && <Loader2 className="animate-spin" size={14} />}
+                            Create Job
+                        </button>
+                    </div>
+                </div>
+            </Modal>
 
             {isLoading ? (
                 <div className="flex justify-center p-12">

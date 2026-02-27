@@ -55,6 +55,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
     const [lastSelectedIndex, setLastSelectedIndex] = useState(null);
     const [batchModalOpen, setBatchModalOpen] = useState(false);
     const [metadataModalOpen, setMetadataModalOpen] = useState(false);
+    const [metadataModalItemId, setMetadataModalItemId] = useState(null);
     const [removeModalOpen, setRemoveModalOpen] = useState(false);
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
     const [moveModalOpen, setMoveModalOpen] = useState(false);
@@ -854,6 +855,14 @@ const CategoryItemsTable = ({ category, onBack }) => {
     const singleSelectedItem = selectedItems.size === 1
         ? items.find((i) => i.id === Array.from(selectedItems)[0]) || null
         : null;
+    const metadataNavigationItems = useMemo(() => items, [items]);
+    const currentMetadataItemIndex = useMemo(
+        () => metadataNavigationItems.findIndex((candidate) => candidate.id === metadataModalItemId),
+        [metadataNavigationItems, metadataModalItemId]
+    );
+    const metadataModalItem = currentMetadataItemIndex >= 0
+        ? metadataNavigationItems[currentMetadataItemIndex]
+        : singleSelectedItem;
     const moveTargetItem = singleSelectedItem
         ? { ...singleSelectedItem, id: singleSelectedItem.item_id }
         : null;
@@ -861,6 +870,28 @@ const CategoryItemsTable = ({ category, onBack }) => {
         ...item,
         item_id: item.item_id || item.id,
     }));
+
+    const openSingleMetadataModal = () => {
+        if (!singleSelectedItem) return;
+        setMetadataModalItemId(singleSelectedItem.id);
+        setMetadataModalOpen(true);
+    };
+
+    const handleMetadataPrevious = () => {
+        if (currentMetadataItemIndex <= 0) return;
+        const previousItem = metadataNavigationItems[currentMetadataItemIndex - 1];
+        if (!previousItem) return;
+        setMetadataModalItemId(previousItem.id);
+        setSelectedItems(new Set([previousItem.id]));
+    };
+
+    const handleMetadataNext = () => {
+        if (currentMetadataItemIndex < 0 || currentMetadataItemIndex >= metadataNavigationItems.length - 1) return;
+        const nextItem = metadataNavigationItems[currentMetadataItemIndex + 1];
+        if (!nextItem) return;
+        setMetadataModalItemId(nextItem.id);
+        setSelectedItems(new Set([nextItem.id]));
+    };
 
     const renderTableCell = (item, column) => {
         if (column.id === 'name') {
@@ -1261,7 +1292,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                     <button
                                         onClick={() => {
                                             if (selectedItems.size === 1) {
-                                                setMetadataModalOpen(true);
+                                                openSingleMetadataModal();
                                             } else {
                                                 setBatchModalOpen(true);
                                             }
@@ -1596,9 +1627,16 @@ const CategoryItemsTable = ({ category, onBack }) => {
 
             <MetadataModal
                 isOpen={metadataModalOpen}
-                onClose={() => setMetadataModalOpen(false)}
-                item={singleSelectedItem}
-                accountId={singleSelectedItem?.account_id}
+                onClose={() => {
+                    setMetadataModalOpen(false);
+                    setMetadataModalItemId(null);
+                }}
+                item={metadataModalItem}
+                accountId={metadataModalItem?.account_id}
+                hasPrevious={currentMetadataItemIndex > 0}
+                hasNext={currentMetadataItemIndex >= 0 && currentMetadataItemIndex < metadataNavigationItems.length - 1}
+                onPrevious={handleMetadataPrevious}
+                onNext={handleMetadataNext}
                 onSuccess={() => {
                     fetchItems();
                 }}
@@ -2013,7 +2051,9 @@ export default function MetadataManager() {
                                             </div>
                                             <div className="min-w-0">
                                                 <div className="font-semibold">{getLibraryDisplayName(library)}</div>
-                                                <div className="text-xs text-muted-foreground">{library.key}</div>
+                                                {library.key !== 'comics_core' && (
+                                                    <div className="text-xs text-muted-foreground">{library.key}</div>
+                                                )}
                                                 {library.description && (
                                                     <p className="text-sm text-muted-foreground mt-1">{library.description}</p>
                                                 )}

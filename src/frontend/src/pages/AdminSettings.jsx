@@ -86,6 +86,10 @@ export default function AdminSettings() {
         enable_daily_sync_scheduler: true,
         daily_sync_cron: '0 0 * * *',
         worker_job_timeout_seconds: 1800,
+        ai_model_default: '',
+        ai_provider_mode: 'local',
+        ai_base_url_remote: '',
+        ai_api_key_remote: '',
         plugin_settings: [],
     });
 
@@ -102,6 +106,10 @@ export default function AdminSettings() {
                     enable_daily_sync_scheduler: data.enable_daily_sync_scheduler,
                     daily_sync_cron: data.daily_sync_cron,
                     worker_job_timeout_seconds: data.worker_job_timeout_seconds ?? 1800,
+                    ai_model_default: data.ai_model_default || '',
+                    ai_provider_mode: data.ai_provider_mode || 'local',
+                    ai_base_url_remote: data.ai_base_url_remote || '',
+                    ai_api_key_remote: data.ai_api_key_remote || '',
                     plugin_settings: data.plugin_settings || [],
                 });
             } catch (error) {
@@ -132,6 +140,12 @@ export default function AdminSettings() {
                 title: 'Workers',
                 description: 'Background worker execution limits and timeouts.',
                 type: 'workers',
+            },
+            {
+                id: 'ai',
+                title: 'AI',
+                description: 'AI assistant runtime model selection.',
+                type: 'ai',
             },
             ...form.plugin_settings.map((group) => ({
                 id: `plugin:${group.plugin_key}`,
@@ -197,12 +211,20 @@ export default function AdminSettings() {
                 enable_daily_sync_scheduler: form.enable_daily_sync_scheduler,
                 daily_sync_cron: form.daily_sync_cron,
                 worker_job_timeout_seconds: form.worker_job_timeout_seconds,
+                ai_model_default: form.ai_model_default,
+                ai_provider_mode: form.ai_provider_mode,
+                ai_base_url_remote: form.ai_base_url_remote,
+                ai_api_key_remote: form.ai_api_key_remote,
                 plugin_settings: pluginPayload,
             });
             setForm({
                 enable_daily_sync_scheduler: data.enable_daily_sync_scheduler,
                 daily_sync_cron: data.daily_sync_cron,
                 worker_job_timeout_seconds: data.worker_job_timeout_seconds ?? 1800,
+                ai_model_default: data.ai_model_default || '',
+                ai_provider_mode: data.ai_provider_mode || 'local',
+                ai_base_url_remote: data.ai_base_url_remote || '',
+                ai_api_key_remote: data.ai_api_key_remote || '',
                 plugin_settings: data.plugin_settings || [],
             });
             showToast('Settings saved successfully', 'success');
@@ -303,6 +325,92 @@ export default function AdminSettings() {
                         <p className="text-xs text-muted-foreground mt-1">
                             This value is read by worker processes. Restart workers after saving.
                         </p>
+                    </div>
+                </div>
+            );
+        }
+
+        if (selectedGroup.type === 'ai') {
+            return (
+                <div className="space-y-4">
+                    <div>
+                        <h2 className="font-medium">AI Runtime</h2>
+                        <p className="text-sm text-muted-foreground">
+                            Configure model, provider mode and OpenAI-compatible endpoint credentials for AI assistant.
+                        </p>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium mb-1">AI Provider Mode</label>
+                        <select
+                            className="w-full border rounded-md p-2 bg-background text-sm"
+                            value={form.ai_provider_mode}
+                            onChange={(e) =>
+                                setForm((prev) => ({
+                                    ...prev,
+                                    ai_provider_mode: e.target.value,
+                                }))
+                            }
+                        >
+                            <option value="local">Local only (Ollama)</option>
+                            <option value="openai_compatible">OpenAI compatible</option>
+                            <option value="gemini">Gemini (Google API)</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Default AI Model</label>
+                        <input
+                            type="text"
+                            className="w-full border rounded-md p-2 bg-background text-sm"
+                            value={form.ai_model_default}
+                            onChange={(e) =>
+                                setForm((prev) => ({
+                                    ...prev,
+                                    ai_model_default: e.target.value,
+                                }))
+                            }
+                            placeholder="e.g. llama3.1:8b"
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">
+                            Examples: <code>llama3.1:8b</code> (Ollama), <code>gemini-2.0-flash</code> (Gemini, sem <code>models/</code>).
+                        </p>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium mb-1">OpenAI-compatible Base URL</label>
+                        <input
+                            type="text"
+                            className="w-full border rounded-md p-2 bg-background text-sm"
+                            value={form.ai_base_url_remote}
+                            onChange={(e) =>
+                                setForm((prev) => ({
+                                    ...prev,
+                                    ai_base_url_remote: e.target.value,
+                                }))
+                            }
+                            placeholder="e.g. https://api.openai.com/v1"
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">
+                            For Gemini mode, use <code>https://generativelanguage.googleapis.com/v1beta/openai</code>.
+                        </p>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium mb-1">OpenAI-compatible API Key</label>
+                        <input
+                            type="password"
+                            autoComplete="new-password"
+                            className="w-full border rounded-md p-2 bg-background text-sm"
+                            value={form.ai_api_key_remote}
+                            onChange={(e) =>
+                                setForm((prev) => ({
+                                    ...prev,
+                                    ai_api_key_remote: e.target.value,
+                                }))
+                            }
+                            placeholder="e.g. sk-..."
+                        />
                     </div>
                 </div>
             );

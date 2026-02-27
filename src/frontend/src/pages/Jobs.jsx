@@ -53,6 +53,7 @@ export default function Jobs() {
         { value: 'extract_comic_assets', label: 'Extract Comic Assets' },
         { value: 'extract_library_comic_assets', label: 'Extract Library Comic Assets' },
         { value: 'reindex_comic_covers', label: 'Reindex Comic Covers' },
+        { value: 'remove_duplicate_files', label: 'Remove Duplicate Files' },
     ];
 
     const queryKey = useMemo(

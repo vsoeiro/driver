@@ -164,6 +164,11 @@ export const createExtractLibraryComicAssetsJob = async (accountIds = null, chun
     return response.data;
 };
 
+export const createRemoveDuplicatesJob = async (payload) => {
+    const response = await api.post('/jobs/remove-duplicates', payload);
+    return response.data;
+};
+
 export const jobsService = {
     createMoveJob,
     getJobs,
@@ -181,6 +186,7 @@ export const jobsService = {
     createExtractComicAssetsJob,
     createExtractLibraryComicAssetsJob,
     createReindexComicCoversJob,
+    createRemoveDuplicatesJob,
 };
 
 export default jobsService;
