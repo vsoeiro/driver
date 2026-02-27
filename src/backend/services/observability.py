@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.logging_utils import log_event
-from backend.db.models import Job, LinkedAccount
+from backend.db.models import AIChatMessage, AIToolCall, Job, LinkedAccount
 from backend.schemas.admin import (
     DeadLetterJobSummary,
     IntegrationHealthStatus,
@@ -208,6 +208,36 @@ class ObservabilityService:
             provider_counts[account.provider] = provider_counts.get(account.provider, 0) + 1
 
         runtime = await AppSettingsService(self.session).get_runtime_settings()
+        ai_messages_window = (
+            await self.session.scalar(
+                select(func.count(AIChatMessage.id)).where(
+                    AIChatMessage.created_at >= period_start,
+                    AIChatMessage.role == "user",
+                )
+            )
+            or 0
+        )
+        ai_tool_calls_window = (
+            await self.session.scalar(
+                select(func.count(AIToolCall.id)).where(
+                    AIToolCall.created_at >= period_start,
+                )
+            )
+            or 0
+        )
+        ai_failed_tool_calls_window = (
+            await self.session.scalar(
+                select(func.count(AIToolCall.id)).where(
+                    AIToolCall.created_at >= period_start,
+                    AIToolCall.status != "success",
+                )
+            )
+            or 0
+        )
+
+        ai_status = "ok" if int(ai_messages_window) > 0 or int(ai_tool_calls_window) > 0 else "warning"
+        if int(ai_failed_tool_calls_window) > 0:
+            ai_status = "warning"
         integration_health = [
             IntegrationHealthStatus(
                 key="redis",
@@ -226,6 +256,16 @@ class ObservabilityService:
                 label="Linked Accounts",
                 status="ok" if len(active_accounts) > 0 else "warning",
                 detail=f"active={len(active_accounts)} by_provider={provider_counts}",
+            ),
+            IntegrationHealthStatus(
+                key="ai_usage",
+                label="AI Usage",
+                status=ai_status,
+                detail=(
+                    f"mode={runtime.ai_provider_mode}, model='{runtime.ai_model_default}', "
+                    f"user_messages={int(ai_messages_window)}, tool_calls={int(ai_tool_calls_window)}, "
+                    f"failed_tool_calls={int(ai_failed_tool_calls_window)}"
+                ),
             ),
         ]
 
