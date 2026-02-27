@@ -522,10 +522,9 @@ export default function AdminSettings() {
 
     return (
         <div className="app-page">
-            <div className="page-header flex flex-wrap items-start justify-between gap-3">
+            <div className="page-header flex flex-wrap items-start justify-between gap-2">
                 <div>
                     <h1 className="page-title">{t('adminSettings.title')}</h1>
-                    <p className="page-subtitle">{t('adminSettings.subtitle')}</p>
                 </div>
                 <AdminTabs />
             </div>
@@ -535,8 +534,8 @@ export default function AdminSettings() {
                     <Loader2 className="animate-spin text-primary" size={30} />
                 </div>
             ) : (
-                <form onSubmit={handleSave} className="flex-1 min-h-0 flex gap-4">
-                    <aside className="surface-card w-72 p-3 space-y-3 overflow-auto">
+                <form onSubmit={handleSave} className="flex-1 min-h-0 flex gap-3">
+                    <aside className="surface-card w-64 p-2 space-y-2 overflow-auto">
                         <div className="relative">
                             <Search className="w-4 h-4 absolute left-2 top-2.5 text-muted-foreground" />
                             <input
@@ -544,7 +543,7 @@ export default function AdminSettings() {
                                 value={groupFilter}
                                 onChange={(e) => setGroupFilter(e.target.value)}
                                 placeholder={t('adminSettings.searchPlaceholder')}
-                                className="input-shell w-full pl-8 pr-2 py-2 text-sm"
+                                className="input-shell w-full pl-8 pr-2 py-1.5 text-sm"
                             />
                         </div>
 
@@ -554,14 +553,14 @@ export default function AdminSettings() {
                                     key={group.id}
                                     type="button"
                                     onClick={() => setActiveGroupId(group.id)}
-                                    className={`w-full text-left rounded-lg px-3 py-2 border transition-colors ${
+                                    className={`w-full text-left rounded-md px-2.5 py-1.5 border transition-colors ${
                                         activeGroupId === group.id
-                                            ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-                                            : 'bg-card/80 hover:bg-accent/65 text-foreground border-border/70'
+                                            ? 'bg-accent text-accent-foreground border-border'
+                                            : 'bg-card hover:bg-accent/65 text-foreground border-transparent'
                                     }`}
                                 >
                                     <div className="text-sm font-medium truncate">{group.title}</div>
-                                    <div className={`text-xs truncate ${activeGroupId === group.id ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>
+                                    <div className={`text-xs truncate ${activeGroupId === group.id ? 'text-accent-foreground/80' : 'text-muted-foreground'}`}>
                                         {group.description}
                                     </div>
                                 </button>
@@ -569,16 +568,16 @@ export default function AdminSettings() {
                         </div>
                     </aside>
 
-                    <section className="surface-card flex-1 min-h-0 overflow-auto p-5 space-y-5">
-                        <div className="flex items-center justify-between gap-3 border-b border-border/70 pb-4">
+                    <section className="surface-card flex-1 min-h-0 overflow-auto p-4 space-y-4">
+                        <div className="flex items-center justify-between gap-3 border-b border-border/70 pb-3">
                             <div>
-                                <h2 className="text-base font-semibold">{selectedGroup?.title || t('adminSettings.settingsGroup')}</h2>
-                                <p className="text-sm text-muted-foreground">{selectedGroup?.description || t('adminSettings.selectGroup')}</p>
+                                <h2 className="text-sm font-semibold">{selectedGroup?.title || t('adminSettings.settingsGroup')}</h2>
+                                <p className="text-xs text-muted-foreground">{selectedGroup?.description || t('adminSettings.selectGroup')}</p>
                             </div>
                             <button
                                 type="submit"
                                 disabled={saving}
-                                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-lg shadow-primary/20 transition-transform hover:-translate-y-[1px] hover:bg-primary/92 disabled:opacity-50"
+                                className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                             >
                                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                                 {t('adminSettings.save')}

@@ -9,14 +9,14 @@ export default function AdminTabs() {
     ];
 
     return (
-        <div className="inline-flex rounded-xl border border-border/70 bg-card/85 p-1 backdrop-blur-sm shadow-sm">
+        <div className="inline-flex rounded-md border border-border bg-muted/40 p-0.5">
             {tabs.map((tab) => (
                 <NavLink
                     key={tab.to}
                     to={tab.to}
-                    className={({ isActive }) => `px-3 py-1.5 text-sm rounded-lg font-medium transition-all ${
+                    className={({ isActive }) => `px-2.5 py-1 text-xs rounded-sm font-medium transition-colors ${
                         isActive
-                            ? 'bg-primary text-primary-foreground shadow-sm'
+                            ? 'bg-background text-foreground shadow-sm'
                             : 'text-muted-foreground hover:text-foreground hover:bg-accent/70'
                     }`}
                 >
