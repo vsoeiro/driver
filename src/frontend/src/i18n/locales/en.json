@@ -25,8 +25,8 @@
     "settings": "Settings"
   },
   "sidebar": {
-    "product": "Driver Hub",
-    "subtitle": "Storage orchestration",
+    "product": "Driver",
+    "subtitle": "",
     "navigation": "Navigation",
     "accounts": "Accounts",
     "files": "Files",

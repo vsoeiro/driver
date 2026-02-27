@@ -25,8 +25,8 @@
     "settings": "ConfiguraÃ§Ãµes"
   },
   "sidebar": {
-    "product": "Central do motorista",
-    "subtitle": "OrquestraÃ§Ã£o de armazenamento",
+    "product": "Driver",
+    "subtitle": "",
     "navigation": "NavegaÃ§Ã£o",
     "accounts": "Contas",
     "files": "Arquivos",
@@ -34,7 +34,7 @@
     "rules": "Regras",
     "jobs": "Empregos",
     "aiExperimental": "IA (Experimental)",
-    "quota": "Contingente",
+    "quota": "Quota",
     "quotaUsed": "{{percent}}% usado"
   },
   "adminTabs": {
