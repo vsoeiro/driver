@@ -40,10 +40,6 @@ export default function ImagePreviewModal({
         if (!isOpen) return undefined;
 
         const onKeyDown = (event) => {
-            if (event.key === 'Escape') {
-                onClose();
-                return;
-            }
             if (isPdf) return;
             if (event.key === '+' || event.key === '=') {
                 setZoomLevel((prev) => Math.min(4, Number((prev + 0.25).toFixed(2))));
@@ -55,7 +51,7 @@ export default function ImagePreviewModal({
 
         window.addEventListener('keydown', onKeyDown);
         return () => window.removeEventListener('keydown', onKeyDown);
-    }, [isOpen, onClose, isPdf]);
+    }, [isOpen, isPdf]);
 
     if (!isOpen) return null;
 

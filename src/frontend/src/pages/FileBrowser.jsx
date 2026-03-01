@@ -10,7 +10,7 @@ const { getDownloadUrl } = driveService;
 const { batchDeleteMetadata } = metadataService;
 import {
     Folder, File, Download, Trash2,
-    UploadCloud, FolderPlus, Loader2, ArrowRightLeft, Database, XCircle, CheckSquare, Square, Search, X, ChevronDown, BookOpen, RefreshCw, ChevronLeft, ChevronRight
+    UploadCloud, FolderPlus, Loader2, ArrowRightLeft, Database, XCircle, CheckSquare, Square, Search, X, ChevronDown, BookOpen, RefreshCw, ChevronLeft, ChevronRight, Image as ImageIcon
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import MoveModal from '../components/MoveModal';
@@ -22,6 +22,8 @@ import { isPreviewableFileName } from '../utils/imagePreview';
 import { formatDateTime } from '../utils/dateTime';
 
 const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'cbw', 'pdf', 'epub', 'cbr', 'rar', 'cb7', '7z', 'cbt', 'tar']);
+const BOOK_MAPPABLE_EXTS = new Set(['pdf', 'epub']);
+const IMAGE_ANALYZABLE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'tiff', 'tif', 'heic', 'avif']);
 
 export default function FileBrowser() {
     const { t, i18n } = useTranslation();
@@ -79,8 +81,12 @@ export default function FileBrowser() {
     const [newFolderName, setNewFolderName] = useState('');
     const [actionLoading, setActionLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
+    const [sortBy, setSortBy] = useState('name');
+    const [sortOrder, setSortOrder] = useState('asc');
     const [isNavDropActive, setIsNavDropActive] = useState(false);
     const [isComicsLibraryActive, setIsComicsLibraryActive] = useState(false);
+    const [isImagesLibraryActive, setIsImagesLibraryActive] = useState(false);
+    const [isBooksLibraryActive, setIsBooksLibraryActive] = useState(false);
     const [imagePreviewItem, setImagePreviewItem] = useState(null);
     const { showToast } = useToast();
 
@@ -95,9 +101,17 @@ export default function FileBrowser() {
             .listMetadataLibraries()
             .then((rows) => {
                 const comicsLibrary = (rows || []).find((library) => library.key === 'comics_core');
+                const imagesLibrary = (rows || []).find((library) => library.key === 'images_core');
+                const booksLibrary = (rows || []).find((library) => library.key === 'books_core');
                 setIsComicsLibraryActive(Boolean(comicsLibrary?.is_active));
+                setIsImagesLibraryActive(Boolean(imagesLibrary?.is_active));
+                setIsBooksLibraryActive(Boolean(booksLibrary?.is_active));
             })
-            .catch(() => setIsComicsLibraryActive(false));
+            .catch(() => {
+                setIsComicsLibraryActive(false);
+                setIsImagesLibraryActive(false);
+                setIsBooksLibraryActive(false);
+            });
     }, []);
 
     // Helper to format date
@@ -129,11 +143,23 @@ export default function FileBrowser() {
 
     // Sorted items
     const sortedFiles = useMemo(() => {
+        const direction = sortOrder === 'asc' ? 1 : -1;
         return [...files].sort((a, b) => {
-            if (a.item_type === b.item_type) return a.name.localeCompare(b.name);
-            return a.item_type === 'folder' ? -1 : 1;
+            if (a.item_type !== b.item_type) return a.item_type === 'folder' ? -1 : 1;
+
+            if (sortBy === 'modified_at') {
+                const aTs = Date.parse(String(a.modified_at || '')) || 0;
+                const bTs = Date.parse(String(b.modified_at || '')) || 0;
+                if (aTs !== bTs) return (aTs - bTs) * direction;
+            } else if (sortBy === 'size') {
+                const aSize = Number(a.size || 0);
+                const bSize = Number(b.size || 0);
+                if (aSize !== bSize) return (aSize - bSize) * direction;
+            }
+
+            return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) * direction;
         });
-    }, [files]);
+    }, [files, sortBy, sortOrder]);
 
     // Selection Logic
     const toggleSelection = (id, index, multiSelect, rangeSelect) => {
@@ -207,6 +233,11 @@ export default function FileBrowser() {
 
     const executeMapComics = async () => {
         if (!isComicsLibraryActive) return;
+        if (selectedItems.size === 0) return;
+        if (!canMapComics) {
+            showToast(t('fileBrowser.mapComicsAvailability'), 'error');
+            return;
+        }
         setActionLoading(true);
         try {
             await jobsService.createExtractComicAssetsJob(accountId, Array.from(selectedItems));
@@ -214,6 +245,44 @@ export default function FileBrowser() {
             setMetadataMenuOpen(false);
         } catch (e) {
             showToast(`${t('fileBrowser.failedComicsJob')}: ${e.message}`, 'error');
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const executeAnalyzeImages = async () => {
+        if (!isImagesLibraryActive) return;
+        if (selectedItems.size === 0) return;
+        if (!canAnalyzeImages) {
+            showToast(t('fileBrowser.analyzeImagesAvailability'), 'error');
+            return;
+        }
+        setActionLoading(true);
+        try {
+            await jobsService.createAnalyzeImageAssetsJob(accountId, Array.from(selectedItems), false, false);
+            showToast(t('fileBrowser.imageAnalysisJobCreated'), 'success');
+            setMetadataMenuOpen(false);
+        } catch (e) {
+            showToast(`${t('fileBrowser.failedImageAnalysisJob')}: ${e.message}`, 'error');
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const executeMapBooks = async () => {
+        if (!isBooksLibraryActive) return;
+        if (selectedItems.size === 0) return;
+        if (!canMapBooks) {
+            showToast(t('fileBrowser.mapBooksAvailability'), 'error');
+            return;
+        }
+        setActionLoading(true);
+        try {
+            await jobsService.createExtractBookAssetsJob(accountId, Array.from(selectedItems));
+            showToast(t('fileBrowser.booksJobCreated'), 'success');
+            setMetadataMenuOpen(false);
+        } catch (e) {
+            showToast(`${t('fileBrowser.failedBooksJob')}: ${e.message}`, 'error');
         } finally {
             setActionLoading(false);
         }
@@ -333,6 +402,30 @@ export default function FileBrowser() {
         });
     }, [selectedItems, sortedFiles]);
 
+    const canAnalyzeImages = useMemo(() => {
+        if (selectedItems.size === 0) return false;
+        const selected = sortedFiles.filter((file) => selectedItems.has(file.id));
+        return selected.every((item) => {
+            if (item.item_type === 'folder') return true;
+            const dotIndex = item.name.lastIndexOf('.');
+            if (dotIndex < 0) return false;
+            const ext = item.name.slice(dotIndex + 1).toLowerCase();
+            return IMAGE_ANALYZABLE_EXTS.has(ext);
+        });
+    }, [selectedItems, sortedFiles]);
+
+    const canMapBooks = useMemo(() => {
+        if (selectedItems.size === 0) return false;
+        const selected = sortedFiles.filter((file) => selectedItems.has(file.id));
+        return selected.every((item) => {
+            if (item.item_type === 'folder') return true;
+            const dotIndex = item.name.lastIndexOf('.');
+            if (dotIndex < 0) return false;
+            const ext = item.name.slice(dotIndex + 1).toLowerCase();
+            return BOOK_MAPPABLE_EXTS.has(ext);
+        });
+    }, [selectedItems, sortedFiles]);
+
     return (
         <div className="app-page">
             {/* Unified command bar */}
@@ -441,6 +534,26 @@ export default function FileBrowser() {
                         </button>
                     )}
                 </div>
+                <div className="flex items-center gap-2">
+                    <select
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value)}
+                        className="border rounded-md p-1.5 text-xs bg-background"
+                        title={t('fileBrowser.orderBy')}
+                    >
+                        <option value="name">{t('fileBrowser.sort.name')}</option>
+                        <option value="modified_at">{t('fileBrowser.sort.modified')}</option>
+                        <option value="size">{t('fileBrowser.sort.size')}</option>
+                    </select>
+                    <button
+                        type="button"
+                        className="px-2 py-1.5 text-xs border rounded-md hover:bg-accent"
+                        onClick={() => setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
+                        title={t('fileBrowser.sortOrder')}
+                    >
+                        {sortOrder === 'asc' ? t('fileBrowser.asc') : t('fileBrowser.desc')}
+                    </button>
+                </div>
 
                 <div className="flex items-center gap-2">
                     <div className="h-4 w-px bg-border mx-2" />
@@ -505,15 +618,42 @@ export default function FileBrowser() {
                                     >
                                         <XCircle size={14} /> {t('fileBrowser.removeMetadata')}
                                     </button>
-                                    {isComicsLibraryActive && (
-                                        <button
-                                            onClick={executeMapComics}
-                                            disabled={!canMapComics || actionLoading}
-                                            className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
-                                        >
-                                            {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
-                                            {t('fileBrowser.mapComics')}
-                                        </button>
+                                    {(isComicsLibraryActive || isImagesLibraryActive || isBooksLibraryActive) && (
+                                        <>
+                                            <div className="px-4 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                                {t('fileBrowser.analyzeAs')}
+                                            </div>
+                                            {isComicsLibraryActive && (
+                                                <button
+                                                    onClick={executeMapComics}
+                                                    disabled={!canMapComics || actionLoading}
+                                                    className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
+                                                >
+                                                    {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
+                                                    {t('fileBrowser.comics')}
+                                                </button>
+                                            )}
+                                            {isImagesLibraryActive && (
+                                                <button
+                                                    onClick={executeAnalyzeImages}
+                                                    disabled={!canAnalyzeImages || actionLoading}
+                                                    className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
+                                                >
+                                                    {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <ImageIcon size={14} />}
+                                                    {t('fileBrowser.images')}
+                                                </button>
+                                            )}
+                                            {isBooksLibraryActive && (
+                                                <button
+                                                    onClick={executeMapBooks}
+                                                    disabled={!canMapBooks || actionLoading}
+                                                    className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
+                                                >
+                                                    {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
+                                                    {t('fileBrowser.books')}
+                                                </button>
+                                            )}
+                                        </>
                                     )}
                                 </div>
                             </div>

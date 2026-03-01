@@ -36,6 +36,31 @@ const DEFAULT_COMIC_COMPACT_FIELD_KEYS = new Set([
     'max_volumes',
     'max_issues',
 ]);
+const HEX_COLOR_TAG_RE = /^#(?:[A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$/;
+
+function normalizeHexColor(tag) {
+    const text = String(tag || '').trim();
+    if (!HEX_COLOR_TAG_RE.test(text)) return null;
+    if (text.length === 4) {
+        const r = text[1];
+        const g = text[2];
+        const b = text[3];
+        return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+    }
+    return text.toLowerCase();
+}
+
+function buildMapEmbedUrl(latitude, longitude) {
+    const lat = Number(latitude);
+    const lon = Number(longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    const delta = 0.01;
+    const left = (lon - delta).toFixed(6);
+    const right = (lon + delta).toFixed(6);
+    const top = (lat + delta).toFixed(6);
+    const bottom = (lat - delta).toFixed(6);
+    return `https://www.openstreetmap.org/export/embed.html?bbox=${left}%2C${bottom}%2C${right}%2C${top}&layer=mapnik&marker=${lat.toFixed(6)}%2C${lon.toFixed(6)}`;
+}
 
 function getLayoutItemType(item) {
     if (String(item?.item_type || '').toLowerCase() === 'section') return 'section';
@@ -63,6 +88,10 @@ export default function MetadataModal({
     const [coverLoading, setCoverLoading] = useState(false);
     const [isCoverZoomOpen, setIsCoverZoomOpen] = useState(false);
     const [coverZoomLevel, setCoverZoomLevel] = useState(1);
+    const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
+    const [imagePreviewLoading, setImagePreviewLoading] = useState(false);
+    const [isImageZoomOpen, setIsImageZoomOpen] = useState(false);
+    const [imageZoomLevel, setImageZoomLevel] = useState(1);
     const [layoutMap, setLayoutMap] = useState({});
     const [tagInputDrafts, setTagInputDrafts] = useState({});
 
@@ -132,6 +161,8 @@ export default function MetadataModal({
             setTagInputDrafts({});
             setIsCoverZoomOpen(false);
             setCoverZoomLevel(1);
+            setIsImageZoomOpen(false);
+            setImageZoomLevel(1);
         }
     }, [isOpen, item, loadData]);
 
@@ -236,6 +267,7 @@ export default function MetadataModal({
     const selectedCategory = categories.find(c => c.id === selectedCategoryId);
     const libraryView = getCategoryLibraryView(selectedCategory);
     const isComicLibraryCategory = selectedCategory?.plugin_key === 'comics_core';
+    const isImageLibraryCategory = selectedCategory?.plugin_key === 'images_core';
     const rawCategoryLayout = selectedCategory ? layoutMap[String(selectedCategory.id)] : null;
     const hasConfiguredLayout = !!(
         rawCategoryLayout
@@ -286,6 +318,13 @@ export default function MetadataModal({
     const coverItemId = coverAttr ? formValues?.[coverAttr.id] : null;
     const coverAccountId = coverAccountAttr ? formValues?.[coverAccountAttr.id] : accountId;
     const showCoverPanel = !!(selectedCategory && coverAttr && item?.item_type !== 'folder');
+    const showImagePanel = !!(selectedCategory && isImageLibraryCategory && item?.item_type === 'file');
+    const imageGpsLatAttr = selectedCategory?.attributes?.find((attr) => attr.plugin_field_key === 'gps_latitude');
+    const imageGpsLonAttr = selectedCategory?.attributes?.find((attr) => attr.plugin_field_key === 'gps_longitude');
+    const mapEmbedUrl = buildMapEmbedUrl(
+        imageGpsLatAttr ? formValues?.[imageGpsLatAttr.id] : null,
+        imageGpsLonAttr ? formValues?.[imageGpsLonAttr.id] : null,
+    );
 
     useEffect(() => {
         if (!isOpen || !showCoverPanel || !coverItemId || !coverAccountId) {
@@ -326,8 +365,47 @@ export default function MetadataModal({
         };
     }, [isOpen, showCoverPanel, coverItemId, coverAccountId]);
 
+    useEffect(() => {
+        if (!isOpen || !showImagePanel || !accountId || !providerItemId) {
+            setImagePreviewUrl(null);
+            setImagePreviewLoading(false);
+            return;
+        }
+
+        let cancelled = false;
+        const cacheKey = buildCoverCacheKey(String(accountId), String(providerItemId));
+        const cached = getCachedCoverUrl(cacheKey);
+        if (cached) {
+            setImagePreviewUrl(cached);
+            return;
+        }
+
+        const loadImagePreview = async () => {
+            try {
+                setImagePreviewLoading(true);
+                const url = driveService.getDownloadContentUrl(
+                    String(accountId),
+                    String(providerItemId),
+                    { autoResolveAccount: true },
+                );
+                if (cancelled || !url) return;
+                setCachedCoverUrl(cacheKey, url);
+                setImagePreviewUrl(url);
+            } catch (_) {
+                if (!cancelled) setImagePreviewUrl(null);
+            } finally {
+                if (!cancelled) setImagePreviewLoading(false);
+            }
+        };
+
+        loadImagePreview();
+        return () => {
+            cancelled = true;
+        };
+    }, [isOpen, showImagePanel, accountId, providerItemId]);
+
     const renderAttributeField = (attr, className = '', style = null) => {
-        const isReadOnlyComputed = selectedCategory?.plugin_key === 'comics_core'
+        const isReadOnlyComputed = ['comics_core', 'books_core'].includes(selectedCategory?.plugin_key)
             && READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key);
         const tagsValue = tagInputDrafts[attr.id] ?? tagsToInputValue(formValues[attr.id] || []);
 
@@ -358,15 +436,23 @@ export default function MetadataModal({
                     />
                 )}
 
-                {attr.data_type === 'date' && (
-                    <input
-                        type="date"
-                        className="w-full border rounded-md p-2 bg-background"
-                        value={formValues[attr.id] || ''}
-                        disabled={isReadOnlyComputed}
-                        onChange={(e) => handleInputChange(attr.id, e.target.value)}
-                    />
-                )}
+                {attr.data_type === 'date' && (() => {
+                    const rawValue = formValues[attr.id];
+                    const dateValue = rawValue
+                        ? String(rawValue).includes('T')
+                            ? String(rawValue).slice(0, 10)
+                            : String(rawValue)
+                        : '';
+                    return (
+                        <input
+                            type="date"
+                            className="w-full border rounded-md p-2 bg-background"
+                            value={dateValue}
+                            disabled={isReadOnlyComputed}
+                            onChange={(e) => handleInputChange(attr.id, e.target.value)}
+                        />
+                    );
+                })()}
 
                 {attr.data_type === 'boolean' && (
                     <div className="flex items-center gap-2">
@@ -423,6 +509,12 @@ export default function MetadataModal({
                             <div className="flex flex-wrap gap-1">
                                 {formValues[attr.id].map((tag) => (
                                     <span key={`${attr.id}-${tag}`} className="px-2 py-0.5 rounded-full text-xs bg-muted border">
+                                        {normalizeHexColor(tag) && (
+                                            <span
+                                                className="inline-block mr-1.5 h-2.5 w-2.5 rounded-full border border-black/10 align-middle"
+                                                style={{ backgroundColor: normalizeHexColor(tag) }}
+                                            />
+                                        )}
                                         {tag}
                                     </span>
                                 ))}
@@ -475,20 +567,25 @@ export default function MetadataModal({
                             </button>
                         </div>
                     )}
-                    <div className={`grid gap-4 ${showCoverPanel ? 'grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)]' : 'grid-cols-1'}`}>
-                        {showCoverPanel && (
+                    <div className={`grid gap-4 ${(showCoverPanel || showImagePanel) ? 'grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)]' : 'grid-cols-1'}`}>
+                        {(showCoverPanel || showImagePanel) && (
                             <aside className="border rounded-md bg-muted/20 p-3 h-fit lg:sticky lg:top-0">
                                 <div className="flex items-center justify-between gap-2 mb-2">
                                     <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                        {t('metadataModal.coverPreview')}
+                                        {showCoverPanel ? t('metadataModal.coverPreview') : t('metadataModal.imagePreview')}
                                     </div>
-                                    {coverUrl && (
+                                    {(showCoverPanel ? coverUrl : imagePreviewUrl) && (
                                         <button
                                             type="button"
                                             className="text-xs px-2 py-1 border rounded hover:bg-accent flex items-center gap-1"
                                             onClick={() => {
-                                                setCoverZoomLevel(1);
-                                                setIsCoverZoomOpen(true);
+                                                if (showCoverPanel) {
+                                                    setCoverZoomLevel(1);
+                                                    setIsCoverZoomOpen(true);
+                                                } else {
+                                                    setImageZoomLevel(1);
+                                                    setIsImageZoomOpen(true);
+                                                }
                                             }}
                                         >
                                             <ZoomIn size={12} />
@@ -496,28 +593,56 @@ export default function MetadataModal({
                                         </button>
                                     )}
                                 </div>
-                                <div className="w-full aspect-[3/4] rounded-md overflow-hidden border bg-background">
-                                    {coverLoading ? (
+                                <div className={`w-full rounded-md overflow-hidden border bg-background ${showCoverPanel ? 'aspect-[3/4]' : 'aspect-square'}`}>
+                                    {(showCoverPanel ? coverLoading : imagePreviewLoading) ? (
                                         <div className="w-full h-full flex items-center justify-center">
                                             <Loader2 className="animate-spin text-primary" size={24} />
                                         </div>
-                                    ) : coverUrl ? (
+                                    ) : (showCoverPanel ? coverUrl : imagePreviewUrl) ? (
                                         <button
                                             type="button"
                                             className="w-full h-full cursor-zoom-in"
                                             onClick={() => {
-                                                setCoverZoomLevel(1);
-                                                setIsCoverZoomOpen(true);
+                                                if (showCoverPanel) {
+                                                    setCoverZoomLevel(1);
+                                                    setIsCoverZoomOpen(true);
+                                                } else {
+                                                    setImageZoomLevel(1);
+                                                    setIsImageZoomOpen(true);
+                                                }
                                             }}
                                         >
-                                            <img src={coverUrl} alt={item?.name || t('metadataModal.cover')} className="w-full h-full object-cover" />
+                                            <img
+                                                src={showCoverPanel ? coverUrl : imagePreviewUrl}
+                                                alt={item?.name || (showCoverPanel ? t('metadataModal.cover') : t('metadataModal.imagePreview'))}
+                                                className={`w-full h-full ${showCoverPanel ? 'object-cover' : 'object-contain'}`}
+                                            />
                                         </button>
                                     ) : (
                                         <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground">
-                                            {t('metadataModal.noCover')}
+                                            {showCoverPanel ? t('metadataModal.noCover') : t('metadataModal.noImagePreview')}
                                         </div>
                                     )}
                                 </div>
+                                {showImagePanel && (
+                                    <div className="mt-3">
+                                        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                                            {t('metadataModal.locationMap')}
+                                        </div>
+                                        {mapEmbedUrl ? (
+                                            <iframe
+                                                src={mapEmbedUrl}
+                                                title={t('metadataModal.locationMap')}
+                                                className="w-full h-52 rounded-md border"
+                                                loading="lazy"
+                                            />
+                                        ) : (
+                                            <div className="text-xs text-muted-foreground border rounded-md p-3 bg-background">
+                                                {t('metadataModal.noCoordinates')}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </aside>
                         )}
 
@@ -725,6 +850,70 @@ export default function MetadataModal({
                             alt={item?.name || t('metadataModal.coverZoom')}
                             className="max-w-none rounded shadow-2xl"
                             style={{ transform: `scale(${coverZoomLevel})`, transformOrigin: 'center center' }}
+                        />
+                    </div>
+                </div>
+            )}
+            {isImageZoomOpen && imagePreviewUrl && (
+                <div
+                    className="fixed inset-0 z-[70] bg-black/85 flex flex-col"
+                    onClick={() => setIsImageZoomOpen(false)}
+                >
+                    <div className="flex items-center justify-between p-3 border-b border-white/10">
+                        <div className="text-xs text-white/80 truncate pr-2">
+                            {item?.name || t('metadataModal.imagePreview')}
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                className="px-2 py-1 text-white border border-white/20 rounded hover:bg-white/10"
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    setImageZoomLevel((prev) => Math.max(1, Number((prev - 0.25).toFixed(2))));
+                                }}
+                            >
+                                <ZoomOut size={14} />
+                            </button>
+                            <div className="text-xs text-white min-w-12 text-center">{Math.round(imageZoomLevel * 100)}%</div>
+                            <button
+                                type="button"
+                                className="px-2 py-1 text-white border border-white/20 rounded hover:bg-white/10"
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    setImageZoomLevel((prev) => Math.min(4, Number((prev + 0.25).toFixed(2))));
+                                }}
+                            >
+                                <ZoomIn size={14} />
+                            </button>
+                            <button
+                                type="button"
+                                className="px-2 py-1 text-white border border-white/20 rounded hover:bg-white/10"
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    setIsImageZoomOpen(false);
+                                }}
+                            >
+                                <X size={14} />
+                            </button>
+                        </div>
+                    </div>
+                    <div
+                        className="flex-1 overflow-auto p-4 flex items-center justify-center"
+                        onClick={(event) => event.stopPropagation()}
+                        onWheel={(event) => {
+                            if (!event.ctrlKey) return;
+                            event.preventDefault();
+                            setImageZoomLevel((prev) => {
+                                const delta = event.deltaY < 0 ? 0.1 : -0.1;
+                                return Math.max(1, Math.min(4, Number((prev + delta).toFixed(2))));
+                            });
+                        }}
+                    >
+                        <img
+                            src={imagePreviewUrl}
+                            alt={item?.name || t('metadataModal.imagePreview')}
+                            className="max-w-none rounded shadow-2xl"
+                            style={{ transform: `scale(${imageZoomLevel})`, transformOrigin: 'center center' }}
                         />
                     </div>
                 </div>

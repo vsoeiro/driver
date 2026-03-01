@@ -64,7 +64,7 @@ export default function Layout() {
                 <div className="app-panel flex h-screen overflow-hidden rounded-none shadow-none">
                     <Sidebar />
                     <div className="flex flex-1 min-w-0 min-h-0 flex-col">
-                        <header className="relative z-[90] flex h-14 items-center border-b border-border px-3 md:px-4">
+                        <header className="relative z-[320] flex h-14 items-center border-b border-border px-3 md:px-4">
                             <div className="flex w-full items-center justify-between gap-2">
                                 {showAccountSelector ? (
                                     <div className="relative flex min-w-0 items-center gap-2" ref={accountMenuRef}>
@@ -88,7 +88,7 @@ export default function Layout() {
                                             <ChevronDown size={16} className="shrink-0 text-muted-foreground" />
                                         </button>
                                         {accountMenuOpen && accounts.length > 0 && (
-                                            <div className="absolute left-[56px] top-10 z-[140] max-h-72 w-[340px] overflow-auto rounded-lg border border-border bg-card p-1 shadow-lg">
+                                            <div className="absolute left-[56px] top-10 z-[340] max-h-72 w-[340px] overflow-auto rounded-lg border border-border bg-card p-1 shadow-lg">
                                                 {accounts.map((account) => (
                                                     <button
                                                         key={account.id}

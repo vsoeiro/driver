@@ -4,8 +4,16 @@ function resolveLocale(language) {
   return language;
 }
 
+function toValidDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+}
+
 export function formatDateTime(value, language) {
-  if (!value) return '-';
+  const date = toValidDate(value);
+  if (!date) return '-';
   return new Intl.DateTimeFormat(resolveLocale(language), {
     day: '2-digit',
     month: '2-digit',
@@ -13,15 +21,16 @@ export function formatDateTime(value, language) {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
-  }).format(new Date(value));
+  }).format(date);
 }
 
 export function formatDateOnly(value, language) {
-  if (!value) return '-';
+  const date = toValidDate(value);
+  if (!date) return '-';
   return new Intl.DateTimeFormat(resolveLocale(language), {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
     hour12: false,
-  }).format(new Date(value));
+  }).format(date);
 }

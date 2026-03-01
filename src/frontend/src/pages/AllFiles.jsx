@@ -17,7 +17,7 @@ import {
 import {
     File, Folder, FolderOpen, Search, Filter, Database, CheckSquare, Square,
     Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, X, Trash2, ChevronDown, BookOpen, Pencil, Columns3, GripVertical,
-    Download, ArrowRightLeft, XCircle, UploadCloud
+    Download, ArrowRightLeft, XCircle, UploadCloud, Image as ImageIcon
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import ProviderIcon from '../components/ProviderIcon';
@@ -30,6 +30,8 @@ import { isPreviewableFileName } from '../utils/imagePreview';
 import { formatDateTime } from '../utils/dateTime';
 
 const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'cbw', 'pdf', 'epub', 'cbr', 'rar', 'cb7', '7z', 'cbt', 'tar']);
+const BOOK_MAPPABLE_EXTS = new Set(['pdf', 'epub']);
+const IMAGE_ANALYZABLE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'tiff', 'tif', 'heic', 'avif']);
 const ALL_FILES_COLUMNS_STORAGE_KEY = 'driver-all-files-columns-v1';
 const ALL_FILES_COLUMNS = [
     { id: 'name', label: 'Name', width: 280, minWidth: 180, sortKey: 'name' },
@@ -357,7 +359,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                                 {orderedAttributes.map(attr => (
                                     <div key={attr.id}>
                                         {(() => {
-                                            const isReadOnlyComputed = currentCategory?.plugin_key === 'comics_core'
+                                            const isReadOnlyComputed = ['comics_core', 'books_core'].includes(currentCategory?.plugin_key)
                                                 && READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key);
                                             return (
                                                 <>
@@ -585,6 +587,8 @@ export default function AllFiles() {
     const [selectedItems, setSelectedItems] = useState(new Set());
     const [lastSelectedIndex, setLastSelectedIndex] = useState(null);
     const [isComicsLibraryActive, setIsComicsLibraryActive] = useState(false);
+    const [isImagesLibraryActive, setIsImagesLibraryActive] = useState(false);
+    const [isBooksLibraryActive, setIsBooksLibraryActive] = useState(false);
 
     const [batchModalOpen, setBatchModalOpen] = useState(false);
     const [metadataModalOpen, setMetadataModalOpen] = useState(false);
@@ -595,6 +599,8 @@ export default function AllFiles() {
     const [actionLoading, setActionLoading] = useState(false);
     const [mapLibraryLoading, setMapLibraryLoading] = useState(false);
     const [mapLibraryConfirmOpen, setMapLibraryConfirmOpen] = useState(false);
+    const [mapLibraryMode, setMapLibraryMode] = useState('comics');
+    const [analyzeLibraryMenuOpen, setAnalyzeLibraryMenuOpen] = useState(false);
     const [mapLibraryChunkSize, setMapLibraryChunkSize] = useState(1000);
     const [renameModalOpen, setRenameModalOpen] = useState(false);
     const [renameValue, setRenameValue] = useState('');
@@ -606,6 +612,7 @@ export default function AllFiles() {
     const [imagePreviewItem, setImagePreviewItem] = useState(null);
     const fileInputRef = useRef(null);
     const metadataMenuRef = useRef(null);
+    const analyzeLibraryMenuRef = useRef(null);
     const [columnsMenuOpen, setColumnsMenuOpen] = useState(false);
     const columnsMenuRef = useRef(null);
     const resizeStateRef = useRef(null);
@@ -638,13 +645,20 @@ export default function AllFiles() {
 
     useEffect(() => {
         const comicsLibrary = (metadataLibraries || []).find((library) => library.key === 'comics_core');
+        const imagesLibrary = (metadataLibraries || []).find((library) => library.key === 'images_core');
+        const booksLibrary = (metadataLibraries || []).find((library) => library.key === 'books_core');
         setIsComicsLibraryActive(Boolean(comicsLibrary?.is_active));
+        setIsImagesLibraryActive(Boolean(imagesLibrary?.is_active));
+        setIsBooksLibraryActive(Boolean(booksLibrary?.is_active));
     }, [metadataLibraries]);
 
     useEffect(() => {
         const handleClickOutside = (event) => {
             if (metadataMenuRef.current && !metadataMenuRef.current.contains(event.target)) {
                 setMetadataMenuOpen(false);
+            }
+            if (analyzeLibraryMenuRef.current && !analyzeLibraryMenuRef.current.contains(event.target)) {
+                setAnalyzeLibraryMenuOpen(false);
             }
             if (columnsMenuRef.current && !columnsMenuRef.current.contains(event.target)) {
                 setColumnsMenuOpen(false);
@@ -814,6 +828,30 @@ export default function AllFiles() {
             if (dotIndex < 0) return false;
             const ext = item.name.slice(dotIndex + 1).toLowerCase();
             return COMIC_MAPPABLE_EXTS.has(ext);
+        });
+    }, [selectedItems, items]);
+
+    const canAnalyzeImages = useMemo(() => {
+        if (selectedItems.size === 0) return false;
+        const selected = items.filter((item) => selectedItems.has(item.id));
+        return selected.every((item) => {
+            if (item.item_type === 'folder') return true;
+            const dotIndex = item.name.lastIndexOf('.');
+            if (dotIndex < 0) return false;
+            const ext = item.name.slice(dotIndex + 1).toLowerCase();
+            return IMAGE_ANALYZABLE_EXTS.has(ext);
+        });
+    }, [selectedItems, items]);
+
+    const canMapBooks = useMemo(() => {
+        if (selectedItems.size === 0) return false;
+        const selected = items.filter((item) => selectedItems.has(item.id));
+        return selected.every((item) => {
+            if (item.item_type === 'folder') return true;
+            const dotIndex = item.name.lastIndexOf('.');
+            if (dotIndex < 0) return false;
+            const ext = item.name.slice(dotIndex + 1).toLowerCase();
+            return BOOK_MAPPABLE_EXTS.has(ext);
         });
     }, [selectedItems, items]);
 
@@ -999,6 +1037,70 @@ export default function AllFiles() {
         }
     };
 
+    const executeAnalyzeImages = async () => {
+        if (!isImagesLibraryActive) return;
+        if (selectedItems.size === 0) return;
+        if (!canAnalyzeImages) {
+            showToast(t('allFiles.analyzeImagesAvailability'), 'error');
+            return;
+        }
+        setActionLoading(true);
+        try {
+            const selected = getSelectedObjects();
+            const byAccount = {};
+            for (const item of selected) {
+                if (!byAccount[item.account_id]) byAccount[item.account_id] = [];
+                byAccount[item.account_id].push(item.item_id);
+            }
+
+            const entries = Object.entries(byAccount);
+            await Promise.all(
+                entries.map(([accountId, itemIds]) =>
+                    jobsService.createAnalyzeImageAssetsJob(accountId, itemIds, false, false)
+                )
+            );
+
+            showToast(t('allFiles.imageAnalysisJobsCreated', { count: entries.length }), 'success');
+            setMetadataMenuOpen(false);
+        } catch (error) {
+            showToast(`${t('allFiles.failedCreateImageAnalysisJob')}: ${error.message}`, 'error');
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const executeMapBooks = async () => {
+        if (!isBooksLibraryActive) return;
+        if (selectedItems.size === 0) return;
+        if (!canMapBooks) {
+            showToast(t('allFiles.mapBooksAvailability'), 'error');
+            return;
+        }
+        setActionLoading(true);
+        try {
+            const selected = getSelectedObjects();
+            const byAccount = {};
+            for (const item of selected) {
+                if (!byAccount[item.account_id]) byAccount[item.account_id] = [];
+                byAccount[item.account_id].push(item.item_id);
+            }
+
+            const entries = Object.entries(byAccount);
+            await Promise.all(
+                entries.map(([accountId, itemIds]) =>
+                    jobsService.createExtractBookAssetsJob(accountId, itemIds)
+                )
+            );
+
+            showToast(t('allFiles.bookJobsCreated', { count: entries.length }), 'success');
+            setMetadataMenuOpen(false);
+        } catch (error) {
+            showToast(`${t('allFiles.failedCreateBookJob')}: ${error.message}`, 'error');
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
     const handleDownload = async () => {
         const selectedFiles = getSelectedObjects().filter((item) => item.item_type === 'file');
         for (const file of selectedFiles) {
@@ -1123,7 +1225,9 @@ export default function AllFiles() {
 
     const executeMapLibraryComics = async () => {
         if (!isComicsLibraryActive) return;
+        setMapLibraryMode('comics');
         setMapLibraryConfirmOpen(true);
+        setAnalyzeLibraryMenuOpen(false);
     };
 
     const confirmMapLibraryComics = async () => {
@@ -1149,6 +1253,78 @@ export default function AllFiles() {
             );
         } catch (error) {
             showToast(`${t('allFiles.failedLibraryComicJob')}: ${error.message}`, 'error');
+        } finally {
+            setMapLibraryLoading(false);
+            setMapLibraryConfirmOpen(false);
+        }
+    };
+
+    const executeMapLibraryImages = async () => {
+        if (!isImagesLibraryActive) return;
+        setMapLibraryMode('images');
+        setMapLibraryConfirmOpen(true);
+        setAnalyzeLibraryMenuOpen(false);
+    };
+
+    const executeMapLibraryBooks = async () => {
+        if (!isBooksLibraryActive) return;
+        setMapLibraryMode('books');
+        setMapLibraryConfirmOpen(true);
+        setAnalyzeLibraryMenuOpen(false);
+    };
+
+    const confirmMapLibraryImages = async () => {
+        const selectedAccountId = filters.account_id ? String(filters.account_id) : null;
+        const accountScope = selectedAccountId ? [selectedAccountId] : null;
+        const parsedChunkSize = Number(mapLibraryChunkSize);
+        const safeChunkSize = Number.isFinite(parsedChunkSize)
+            ? Math.max(1, Math.min(5000, Math.floor(parsedChunkSize)))
+            : 1000;
+
+        setMapLibraryLoading(true);
+        try {
+            const summary = await jobsService.createAnalyzeLibraryImageAssetsJob(accountScope, safeChunkSize, false);
+            if (!summary?.total_jobs) {
+                showToast(t('allFiles.noUnmappedImages'), 'success');
+                return;
+            }
+            showToast(
+                selectedAccountId
+                    ? t('allFiles.createdImagesJobForAccount', { jobs: summary.total_jobs, items: summary.total_items, chunk: summary.chunk_size })
+                    : t('allFiles.createdImagesJobsAllAccounts', { jobs: summary.total_jobs, items: summary.total_items, chunk: summary.chunk_size }),
+                'success',
+            );
+        } catch (error) {
+            showToast(`${t('allFiles.failedLibraryImageJob')}: ${error.message}`, 'error');
+        } finally {
+            setMapLibraryLoading(false);
+            setMapLibraryConfirmOpen(false);
+        }
+    };
+
+    const confirmMapLibraryBooks = async () => {
+        const selectedAccountId = filters.account_id ? String(filters.account_id) : null;
+        const accountScope = selectedAccountId ? [selectedAccountId] : null;
+        const parsedChunkSize = Number(mapLibraryChunkSize);
+        const safeChunkSize = Number.isFinite(parsedChunkSize)
+            ? Math.max(1, Math.min(5000, Math.floor(parsedChunkSize)))
+            : 500;
+
+        setMapLibraryLoading(true);
+        try {
+            const summary = await jobsService.createMapLibraryBooksJob(accountScope, safeChunkSize);
+            if (!summary?.total_jobs) {
+                showToast(t('allFiles.noUnmappedBooks'), 'success');
+                return;
+            }
+            showToast(
+                selectedAccountId
+                    ? t('allFiles.createdBooksJobForAccount', { jobs: summary.total_jobs, items: summary.total_items, chunk: summary.chunk_size })
+                    : t('allFiles.createdBooksJobsAllAccounts', { jobs: summary.total_jobs, items: summary.total_items, chunk: summary.chunk_size }),
+                'success',
+            );
+        } catch (error) {
+            showToast(`${t('allFiles.failedLibraryBooksJob')}: ${error.message}`, 'error');
         } finally {
             setMapLibraryLoading(false);
             setMapLibraryConfirmOpen(false);
@@ -1287,16 +1463,53 @@ export default function AllFiles() {
                             </div>
                         )}
                     </div>
-                    {isComicsLibraryActive && (
-                        <button
-                            onClick={executeMapLibraryComics}
-                            disabled={mapLibraryLoading}
-                            className="flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium hover:bg-accent disabled:opacity-50"
-                            title={t('allFiles.mapAllComicsHelp')}
-                        >
-                            {mapLibraryLoading ? <Loader2 size={16} className="animate-spin" /> : <BookOpen size={16} />}
-                            {t('allFiles.mapAllComics')}
-                        </button>
+                    {(isComicsLibraryActive || isImagesLibraryActive || isBooksLibraryActive) && (
+                        <div className="relative z-[230]" ref={analyzeLibraryMenuRef}>
+                            <button
+                                onClick={() => setAnalyzeLibraryMenuOpen((prev) => !prev)}
+                                disabled={mapLibraryLoading}
+                                className="flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium hover:bg-accent disabled:opacity-50"
+                                title={t('allFiles.mapAllHelp')}
+                            >
+                                {mapLibraryLoading ? <Loader2 size={16} className="animate-spin" /> : <BookOpen size={16} />}
+                                {t('allFiles.mapAllAs')}
+                                <ChevronDown size={14} className={`transition-transform ${analyzeLibraryMenuOpen ? 'rotate-180' : ''}`} />
+                            </button>
+                            {analyzeLibraryMenuOpen && (
+                                <div className="absolute right-0 top-full mt-2 w-52 bg-popover border rounded-md shadow-lg py-1 z-[280]">
+                                    {isComicsLibraryActive && (
+                                        <button
+                                            onClick={executeMapLibraryComics}
+                                            className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2"
+                                            disabled={mapLibraryLoading}
+                                        >
+                                            <BookOpen size={14} />
+                                            {t('allFiles.mapAllComics')}
+                                        </button>
+                                    )}
+                                    {isImagesLibraryActive && (
+                                        <button
+                                            onClick={executeMapLibraryImages}
+                                            className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2"
+                                            disabled={mapLibraryLoading}
+                                        >
+                                            <ImageIcon size={14} />
+                                            {t('allFiles.mapAllImages')}
+                                        </button>
+                                    )}
+                                    {isBooksLibraryActive && (
+                                        <button
+                                            onClick={executeMapLibraryBooks}
+                                            className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2"
+                                            disabled={mapLibraryLoading}
+                                        >
+                                            <BookOpen size={14} />
+                                            {t('allFiles.mapAllBooks')}
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+                        </div>
                     )}
                 </div>
             </div>
@@ -1390,15 +1603,42 @@ export default function AllFiles() {
                                     >
                                         <XCircle size={14} /> {t('allFiles.removeMetadata')}
                                     </button>
-                                    {isComicsLibraryActive && (
-                                        <button
-                                            onClick={executeMapComics}
-                                            disabled={!canMapComics || actionLoading}
-                                            className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
-                                        >
-                                            {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
-                                            {t('allFiles.mapComics')}
-                                        </button>
+                                    {(isComicsLibraryActive || isImagesLibraryActive || isBooksLibraryActive) && (
+                                        <>
+                                            <div className="px-4 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                                {t('allFiles.analyzeAs')}
+                                            </div>
+                                            {isComicsLibraryActive && (
+                                                <button
+                                                    onClick={executeMapComics}
+                                                    disabled={!canMapComics || actionLoading}
+                                                    className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
+                                                >
+                                                    {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
+                                                    {t('allFiles.comics')}
+                                                </button>
+                                            )}
+                                            {isImagesLibraryActive && (
+                                                <button
+                                                    onClick={executeAnalyzeImages}
+                                                    disabled={!canAnalyzeImages || actionLoading}
+                                                    className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
+                                                >
+                                                    {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <ImageIcon size={14} />}
+                                                    {t('allFiles.images')}
+                                                </button>
+                                            )}
+                                            {isBooksLibraryActive && (
+                                                <button
+                                                    onClick={executeMapBooks}
+                                                    disabled={!canMapBooks || actionLoading}
+                                                    className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
+                                                >
+                                                    {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
+                                                    {t('allFiles.books')}
+                                                </button>
+                                            )}
+                                        </>
                                     )}
                                 </div>
                             </div>
@@ -1668,13 +1908,33 @@ export default function AllFiles() {
             <Modal
                 isOpen={mapLibraryConfirmOpen}
                 onClose={() => !mapLibraryLoading && setMapLibraryConfirmOpen(false)}
-                title={t('allFiles.mapAllComics')}
+                title={
+                    mapLibraryMode === 'images'
+                        ? t('allFiles.mapAllImages')
+                        : mapLibraryMode === 'books'
+                            ? t('allFiles.mapAllBooks')
+                            : t('allFiles.mapAllComics')
+                }
                 maxWidthClass="max-w-lg"
             >
                 <p className="text-sm text-muted-foreground mb-4">
-                    {filters.account_id
-                        ? t('allFiles.mapAllComicsSelectedAccount')
-                        : t('allFiles.mapAllComicsAllAccounts')}
+                    {mapLibraryMode === 'images'
+                        ? (
+                            filters.account_id
+                                ? t('allFiles.mapAllImagesSelectedAccount')
+                                : t('allFiles.mapAllImagesAllAccounts')
+                        )
+                        : mapLibraryMode === 'books'
+                            ? (
+                                filters.account_id
+                                    ? t('allFiles.mapAllBooksSelectedAccount')
+                                    : t('allFiles.mapAllBooksAllAccounts')
+                            )
+                            : (
+                            filters.account_id
+                                ? t('allFiles.mapAllComicsSelectedAccount')
+                                : t('allFiles.mapAllComicsAllAccounts')
+                        )}
                 </p>
                 <div className="mb-4">
                     <label className="block text-sm font-medium mb-1">{t('allFiles.chunkSizePerJob')}</label>
@@ -1703,7 +1963,13 @@ export default function AllFiles() {
                     </button>
                     <button
                         type="button"
-                        onClick={confirmMapLibraryComics}
+                        onClick={
+                            mapLibraryMode === 'images'
+                                ? confirmMapLibraryImages
+                                : mapLibraryMode === 'books'
+                                    ? confirmMapLibraryBooks
+                                    : confirmMapLibraryComics
+                        }
                         disabled={mapLibraryLoading}
                         className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
                     >

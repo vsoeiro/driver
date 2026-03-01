@@ -56,6 +56,8 @@ export default function Jobs() {
         { value: 'extract_comic_assets', label: t('jobs.typeOptions.extract_comic_assets') },
         { value: 'extract_library_comic_assets', label: t('jobs.typeOptions.extract_library_comic_assets') },
         { value: 'reindex_comic_covers', label: t('jobs.typeOptions.reindex_comic_covers') },
+        { value: 'analyze_image_assets', label: t('jobs.typeOptions.analyze_image_assets') },
+        { value: 'analyze_library_image_assets', label: t('jobs.typeOptions.analyze_library_image_assets') },
         { value: 'remove_duplicate_files', label: t('jobs.typeOptions.remove_duplicate_files') },
     ];
 

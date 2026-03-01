@@ -39,11 +39,30 @@ const BASE_SORT_OPTIONS = [
     { value: 'created_at', key: 'created' },
 ];
 const METADATA_TABLE_COLUMNS_STORAGE_PREFIX = 'driver-metadata-table-columns-v1';
+const HEX_COLOR_TAG_RE = /^#(?:[A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$/;
 
-const getLibraryDisplayName = (library) => (library?.key === 'comics_core' ? 'Comics' : library?.name);
+const normalizeHexColor = (value) => {
+    const text = String(value || '').trim();
+    if (!HEX_COLOR_TAG_RE.test(text)) return null;
+    if (text.length === 4) {
+        const r = text[1];
+        const g = text[2];
+        const b = text[3];
+        return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+    }
+    return text.toLowerCase();
+};
+
+const getLibraryDisplayName = (library, t) => {
+    if (library?.key === 'comics_core') return t('metadataManager.libraryNames.comics');
+    if (library?.key === 'images_core') return t('metadataManager.libraryNames.images');
+    if (library?.key === 'books_core') return t('metadataManager.libraryNames.books');
+    return library?.name;
+};
 const getLibraryDescription = (library, t) => {
     if (!library) return '';
-    if (library.key === 'comics_core') return t('metadataManager.comicsLibraryDescription');
+    const displayName = getLibraryDisplayName(library, t) || library.name || '';
+    if (displayName) return t('metadataManager.libraryDescriptionByName', { name: displayName });
     return library.description || '';
 };
 
@@ -478,7 +497,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
         const coverAccountAttr = (category.attributes || []).find(
             (attr) => attr.plugin_field_key === libraryView?.gallery?.coverAccountField
         );
-        if (!coverAttr) {
+        if (!coverAttr && !libraryView?.gallery?.useItemAsCover) {
             setCoverUrlsByItemId({});
             return;
         }
@@ -489,9 +508,13 @@ const CategoryItemsTable = ({ category, onBack }) => {
             const preloaded = {};
             const misses = [];
             for (const item of items) {
-                const coverItemId = item.metadata?.values?.[coverAttr.id];
+                const coverItemId = libraryView?.gallery?.useItemAsCover
+                    ? item.item_id
+                    : item.metadata?.values?.[coverAttr?.id];
                 if (!coverItemId) continue;
-                const coverAccountId = coverAccountAttr
+                const coverAccountId = libraryView?.gallery?.useItemAsCover
+                    ? item.account_id
+                    : coverAccountAttr
                     ? item.metadata?.values?.[coverAccountAttr.id]
                     : item.account_id;
                 if (!coverAccountId) continue;
@@ -579,9 +602,16 @@ const CategoryItemsTable = ({ category, onBack }) => {
         return String(val);
     };
 
+    const getAttributeTags = (item, attr) => {
+        if (!item.metadata?.values) return [];
+        const val = item.metadata.values[attr.id];
+        if (val === undefined || val === null || val === '') return [];
+        return Array.isArray(val) ? val : parseTagsInput(String(val));
+    };
+
     const isReadOnlyAttribute = (attr) => {
         if (!attr) return true;
-        if (attr.plugin_key === 'comics_core') {
+        if (['comics_core', 'books_core'].includes(attr.plugin_key)) {
             return READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key);
         }
         return Boolean(attr.is_locked || attr.managed_by_plugin);
@@ -936,6 +966,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
             const isSaving = savingCellKey === cellKey;
             const readOnly = isReadOnlyAttribute(attr);
             const displayValue = getAttributeValue(item, attr);
+            const displayTags = attr.data_type === 'tags' ? getAttributeTags(item, attr) : [];
 
             return (
                 <div
@@ -1031,6 +1062,27 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                 <X size={12} />
                             </button>
                         </div>
+                    ) : attr.data_type === 'tags' ? (
+                        displayTags.length > 0 ? (
+                            <div className={`flex flex-wrap gap-1 ${readOnly ? 'text-muted-foreground' : ''}`}>
+                                {displayTags.map((tag) => {
+                                    const color = normalizeHexColor(tag);
+                                    return (
+                                        <span key={`${cellKey}-${tag}`} className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs bg-muted border">
+                                            {color && (
+                                                <span
+                                                    className="inline-block mr-1.5 h-2.5 w-2.5 rounded-full border border-black/10"
+                                                    style={{ backgroundColor: color }}
+                                                />
+                                            )}
+                                            <span className="truncate max-w-32">{tag}</span>
+                                        </span>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <div className={`truncate ${readOnly ? 'text-muted-foreground' : ''}`}>{t('metadataManager.dash')}</div>
+                        )
                     ) : (
                         <div className={`truncate ${readOnly ? 'text-muted-foreground' : ''}`}>{displayValue}</div>
                     )}
@@ -1500,17 +1552,19 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                     const isSelected = selectedItems.has(item.id);
                                     const titleValue = titleAttr ? item.metadata?.values?.[titleAttr.id] : null;
                                     const seriesValue = subtitleAttr ? item.metadata?.values?.[subtitleAttr.id] : null;
-                                    const baseLabel = (seriesValue && String(seriesValue).trim())
-                                        || (titleValue && String(titleValue).trim())
+                                    const baseLabel = (titleValue && String(titleValue).trim())
+                                        || (seriesValue && String(seriesValue).trim())
                                         || item.name;
-                                    const volumeValue = volumeAttr ? item.metadata?.values?.[volumeAttr.id] : null;
-                                    const issueValue = issueNumberAttr ? item.metadata?.values?.[issueNumberAttr.id] : null;
-                                    const hasVolume = volumeValue !== null && volumeValue !== undefined && String(volumeValue).trim() !== '';
-                                    const hasIssue = issueValue !== null && issueValue !== undefined && String(issueValue).trim() !== '';
-                                    const titleSuffix = `${hasVolume ? ` - Vol. ${String(volumeValue).trim()}` : ''}${hasIssue ? ` #${String(issueValue).trim()}` : ''}`;
-                                    const title = `${baseLabel}${titleSuffix}`;
-                                    const subtitle = (titleValue && String(titleValue).trim()) || null;
+                                    const subFromMeta = (seriesValue && String(seriesValue).trim()) || null;
+                                    const subtitle = subFromMeta
+                                        || (libraryView?.gallery?.useItemAsCover ? item.name : null);
+                                    const title = baseLabel;
                                     const pageCount = pageCountAttr ? item.metadata?.values?.[pageCountAttr.id] : null;
+                                    const isImageGallery = Boolean(libraryView?.gallery?.useItemAsCover);
+                                    const classificationLabel = attributes.find((attr) => attr.plugin_field_key === 'classification_label');
+                                    const classificationConfidence = attributes.find((attr) => attr.plugin_field_key === 'classification_confidence');
+                                    const labelVal = classificationLabel ? item.metadata?.values?.[classificationLabel.id] : null;
+                                    const confVal = classificationConfidence ? item.metadata?.values?.[classificationConfidence.id] : null;
                                     return (
                                         <button
                                             key={item.id}
@@ -1529,7 +1583,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                     />
                                                 ) : (
                                                     <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground">
-                                                        No cover
+                                                        {t('metadataManager.noCover')}
                                                     </div>
                                                 )}
                                             </div>
@@ -1546,9 +1600,14 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                         {item.name}
                                                     </div>
                                                 )}
-                                                {pageCount !== null && pageCount !== undefined && pageCount !== '' && (
+                                                {!isImageGallery && pageCount !== null && pageCount !== undefined && pageCount !== '' && (
                                                     <div className="text-[11px] text-muted-foreground">
-                                                        {pageCount} pages
+                                                        {t('metadataManager.pages', { count: pageCount })}
+                                                    </div>
+                                                )}
+                                                {isImageGallery && labelVal && (
+                                                    <div className="text-[11px] text-muted-foreground truncate">
+                                                        {String(labelVal)}{confVal !== undefined && confVal !== null && confVal !== '' ? ` (${Math.round(Number(confVal) * 100)}%)` : ''}
                                                     </div>
                                                 )}
                                             </div>
@@ -1823,19 +1882,23 @@ export default function MetadataManager() {
         }
     }, [librariesError, showToast, t]);
 
-    const knownLibraries = useMemo(
-        () => (
-            libraries.length > 0
-                ? libraries
-                : [{ key: 'comics_core', name: 'Comics', description: 'Managed comics metadata schema.', is_active: false }]
-        ),
-        [libraries]
-    );
+    const knownLibraries = useMemo(() => {
+        const defaults = [
+            { key: 'comics_core', name: t('metadataManager.libraryNames.comics'), description: t('metadataManager.libraryDescriptionByName', { name: t('metadataManager.libraryNames.comics') }), is_active: false },
+            { key: 'images_core', name: t('metadataManager.libraryNames.images'), description: t('metadataManager.libraryDescriptionByName', { name: t('metadataManager.libraryNames.images') }), is_active: false },
+            { key: 'books_core', name: t('metadataManager.libraryNames.books'), description: t('metadataManager.libraryDescriptionByName', { name: t('metadataManager.libraryNames.books') }), is_active: false },
+        ];
+        const byKey = new Map(defaults.map((library) => [library.key, library]));
+        for (const library of libraries) {
+            byKey.set(library.key, { ...byKey.get(library.key), ...library });
+        }
+        return Array.from(byKey.values());
+    }, [libraries, t]);
 
     const toggleLibrary = async (library) => {
         try {
             setTogglingLibraryKey(library.key);
-            const libraryName = getLibraryDisplayName(library);
+            const libraryName = getLibraryDisplayName(library, t);
             if (library.is_active) {
                 await metadataService.deactivateMetadataLibrary(library.key);
                 showToast(t('metadataManager.libraryDisabled', { name: libraryName }), 'success');
@@ -2069,18 +2132,15 @@ export default function MetadataManager() {
                         ) : (
                             <div className="grid gap-3">
                                 {knownLibraries.map((library) => (
-                                    <div key={library.key} className="rounded-xl border border-border/70 bg-background p-3 flex items-center justify-between gap-3">
+                                    <div key={library.key} className="rounded-xl border border-border/70 bg-background px-3 py-2.5 flex items-center justify-between gap-3">
                                         <div className="flex items-start gap-3 min-w-0">
-                                            <div className="p-2 rounded-md bg-primary/10 text-primary">
+                                            <div className="p-1.5 rounded-md bg-primary/10 text-primary">
                                                 <BookOpen size={16} />
                                             </div>
                                             <div className="min-w-0">
-                                                <div className="font-semibold">{getLibraryDisplayName(library)}</div>
-                                                {library.key !== 'comics_core' && (
-                                                    <div className="text-xs text-muted-foreground">{library.key}</div>
-                                                )}
+                                                <div className="font-semibold">{getLibraryDisplayName(library, t)}</div>
                                                 {getLibraryDescription(library, t) && (
-                                                    <p className="text-sm text-muted-foreground mt-1">{getLibraryDescription(library, t)}</p>
+                                                    <p className="text-xs text-muted-foreground mt-0.5 truncate">{getLibraryDescription(library, t)}</p>
                                                 )}
                                             </div>
                                         </div>

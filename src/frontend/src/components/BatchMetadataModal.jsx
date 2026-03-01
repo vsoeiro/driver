@@ -270,7 +270,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
     }, [isOpen, showCoverPanel, coverAccountId, coverItemId]);
 
     const renderAttributeInput = (attr, className = '', style = null) => {
-        const isReadOnlyComputed = currentCategory?.plugin_key === 'comics_core'
+        const isReadOnlyComputed = ['comics_core', 'books_core'].includes(currentCategory?.plugin_key)
             && READ_ONLY_COMIC_FIELD_KEYS.has(attr.plugin_field_key);
         const rawValue = attributeValues[attr.id];
         const value = rawValue ?? '';

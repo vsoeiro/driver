@@ -40,6 +40,26 @@ export const metadataCategoryViews = {
             ],
         },
     },
+    images_core: {
+        key: 'images_core',
+        modes: ['table', 'gallery'],
+        gallery: {
+            useItemAsCover: true,
+            titleField: 'classification_label',
+            subtitleField: 'ocr_text',
+        },
+    },
+    books_core: {
+        key: 'books_core',
+        modes: ['table', 'gallery'],
+        gallery: {
+            coverField: 'cover_item_id',
+            coverAccountField: 'cover_account_id',
+            titleField: 'title',
+            subtitleField: 'author',
+            pageCountField: 'page_count',
+        },
+    },
 };
 
 export const getCategoryLibraryView = (category) => {

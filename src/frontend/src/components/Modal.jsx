@@ -1,6 +1,9 @@
 import { X } from 'lucide-react';
 import { createPortal } from 'react-dom';
+import { useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+
+let modalStack = [];
 
 export default function Modal({
     isOpen,
@@ -11,10 +14,28 @@ export default function Modal({
     bodyClassName = '',
 }) {
     const { t } = useTranslation();
+    const modalId = useMemo(() => `modal_${Math.random().toString(36).slice(2)}`, []);
+    const canRender = isOpen && typeof document !== 'undefined';
 
-    if (!isOpen) return null;
+    useEffect(() => {
+        if (!canRender) return undefined;
+        modalStack.push(modalId);
+        const onKeyDown = (event) => {
+            if (event.key !== 'Escape') return;
+            const top = modalStack[modalStack.length - 1];
+            if (top !== modalId) return;
+            event.preventDefault();
+            event.stopPropagation();
+            onClose?.();
+        };
+        window.addEventListener('keydown', onKeyDown, true);
+        return () => {
+            modalStack = modalStack.filter((id) => id !== modalId);
+            window.removeEventListener('keydown', onKeyDown, true);
+        };
+    }, [modalId, onClose, canRender]);
 
-    if (typeof document === 'undefined') return null;
+    if (!canRender) return null;
 
     return createPortal(
         <div className="fixed inset-0 z-[400] flex items-start justify-center overflow-y-auto bg-slate-900/35 p-4 pt-10 backdrop-blur-sm">

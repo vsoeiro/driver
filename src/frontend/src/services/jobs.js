@@ -147,6 +147,33 @@ export const createExtractComicAssetsJob = async (accountId, itemIds) => {
     return response.data;
 };
 
+export const createExtractBookAssetsJob = async (accountId, itemIds) => {
+    const response = await api.post('/jobs/books/extract', {
+        account_id: accountId,
+        item_ids: itemIds,
+    });
+    return response.data;
+};
+
+export const createAnalyzeImageAssetsJob = async (accountId, itemIds, useIndexedItems = true, reprocess = false) => {
+    const response = await api.post('/jobs/images/analyze', {
+        account_id: accountId,
+        item_ids: itemIds,
+        use_indexed_items: useIndexedItems,
+        reprocess: reprocess,
+    });
+    return response.data;
+};
+
+export const createAnalyzeLibraryImageAssetsJob = async (accountIds = null, chunkSize = 500, reprocess = false) => {
+    const payload = { chunk_size: chunkSize, reprocess: reprocess };
+    if (Array.isArray(accountIds) && accountIds.length > 0) {
+        payload.account_ids = accountIds;
+    }
+    const response = await api.post('/jobs/images/analyze-library', payload);
+    return response.data;
+};
+
 export const createReindexComicCoversJob = async (libraryKey = 'comics_core') => {
     const response = await api.post('/jobs/comics/reindex-covers', {
         library_key: libraryKey,
@@ -161,6 +188,24 @@ export const createExtractLibraryComicAssetsJob = async (accountIds = null, chun
     }
     payload.chunk_size = chunkSize;
     const response = await api.post('/jobs/comics/extract-library', payload);
+    return response.data;
+};
+
+export const createMapLibraryBooksJob = async (accountIds = null, chunkSize = 500) => {
+    const payload = { chunk_size: chunkSize };
+    if (Array.isArray(accountIds) && accountIds.length > 0) {
+        payload.account_ids = accountIds;
+    }
+    const response = await api.post('/jobs/books/extract-library', payload);
+    return response.data;
+};
+
+export const createExtractLibraryBookAssetsJob = async (accountIds = null, chunkSize = 500) => {
+    const payload = { chunk_size: chunkSize };
+    if (Array.isArray(accountIds) && accountIds.length > 0) {
+        payload.account_ids = accountIds;
+    }
+    const response = await api.post('/jobs/books/extract-library', payload);
     return response.data;
 };
 
@@ -184,7 +229,12 @@ export const jobsService = {
     createMetadataUndoJob,
     createApplyRuleJob,
     createExtractComicAssetsJob,
+    createExtractBookAssetsJob,
+    createAnalyzeImageAssetsJob,
+    createAnalyzeLibraryImageAssetsJob,
     createExtractLibraryComicAssetsJob,
+    createMapLibraryBooksJob,
+    createExtractLibraryBookAssetsJob,
     createReindexComicCoversJob,
     createRemoveDuplicatesJob,
 };

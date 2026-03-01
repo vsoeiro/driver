@@ -332,14 +332,14 @@ export default function AIAssistant() {
     };
 
     return (
-        <div className="app-page">
+        <div className="app-page h-full min-h-0">
             <div className="page-header">
                 <h1 className="page-title">{t('aiAssistant.title')}</h1>
                 <p className="page-subtitle">{t('aiAssistant.subtitle')}</p>
             </div>
 
-            <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
-                <section className="surface-card flex min-h-0 flex-col p-3">
+            <div className="grid h-full min-h-0 flex-1 grid-cols-1 gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
+                <section className="surface-card flex min-h-0 flex-col overflow-hidden p-3">
                     <div className="mb-3 flex items-center justify-between">
                         <div className="text-sm font-semibold">{t('aiAssistant.sessions')}</div>
                         <button
@@ -399,13 +399,13 @@ export default function AIAssistant() {
                     </div>
                 </section>
 
-                <section className="surface-card flex min-h-0 flex-col">
+                <section className="surface-card flex min-h-0 flex-col overflow-hidden">
                     <header className="flex h-14 items-center gap-2 border-b border-border/70 px-4">
                         <Bot size={16} className="text-primary" />
                         <h1 className="text-sm font-semibold">{t('aiAssistant.title')}</h1>
                     </header>
 
-                    <div ref={messagesContainerRef} className="min-h-0 flex-1 space-y-3 overflow-auto px-4 py-4">
+                    <div ref={messagesContainerRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
                         {!selectedSessionId && (
                             <div className="text-sm text-muted-foreground">{t('aiAssistant.createSessionHelp')}</div>
                         )}

@@ -171,7 +171,7 @@ export default function NotificationBell() {
             </button>
 
             {open && (
-                <div className="absolute right-0 top-10 z-[220] w-[380px] max-w-[90vw] rounded-lg border border-border bg-card p-2 shadow-xl">
+                <div className="absolute right-0 top-10 z-[360] w-[380px] max-w-[90vw] rounded-lg border border-border bg-card p-2 shadow-xl">
                     <div className="mb-2 flex items-center justify-between px-2 py-1">
                         <div className="text-sm font-semibold">{t('notifications.title')}</div>
                         <button

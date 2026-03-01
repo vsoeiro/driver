@@ -13,13 +13,14 @@ export function getSelectOptions(attrOptions) {
         .filter(Boolean);
 }
 
-export const READ_ONLY_COMIC_FIELD_KEYS = new Set([
+export const READ_ONLY_LIBRARY_ASSET_FIELD_KEYS = new Set([
     'cover_item_id',
     'cover_filename',
     'cover_account_id',
     'page_count',
     'file_format',
 ]);
+export const READ_ONLY_COMIC_FIELD_KEYS = READ_ONLY_LIBRARY_ASSET_FIELD_KEYS;
 
 const COMIC_FIELD_ORDER = [
     'series',
