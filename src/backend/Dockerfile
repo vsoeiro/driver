@@ -13,8 +13,8 @@ RUN apt-get update \
 
 RUN pip install --no-cache-dir uv
 
-COPY src/backend/pyproject.toml src/backend/README.md uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+COPY src/backend/pyproject.toml src/backend/README.md src/backend/uv.lock ./
+RUN uv sync --frozen --no-dev
 
 COPY src/backend ./src/backend
 COPY src/alembic ./src/alembic

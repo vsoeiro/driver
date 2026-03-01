@@ -20,6 +20,10 @@ from backend.services.item_index import (
     delete_items_by_ids,
     fetch_item_signatures_by_item_id,
 )
+from backend.services.auto_metadata_mapper import (
+    AutoMapCandidate,
+    enqueue_auto_mapping_jobs,
+)
 from backend.services.providers.base import DriveProviderClient
 from backend.services.providers.factory import build_drive_client
 from backend.workers.dispatcher import register_handler
@@ -194,6 +198,7 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
     remote_ids: set[str] = set()
     pending_upsert_payloads: list[dict] = []
     upsert_batch_size = 500
+    auto_map_candidates: list[AutoMapCandidate] = []
 
     for entry in entries:
         item_id = str(getattr(entry.item, "id"))
@@ -211,9 +216,25 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
             if old_signature is None:
                 stats["created"] += 1
                 pending_upsert_payloads.append(payload)
+                auto_map_candidates.append(
+                    AutoMapCandidate(
+                        item_id=item_id,
+                        name=getattr(entry.item, "name", None),
+                        extension=getattr(entry.item, "extension", None),
+                        item_type=getattr(entry.item, "item_type", "file"),
+                    )
+                )
             elif old_signature != new_signature:
                 stats["updated"] += 1
                 pending_upsert_payloads.append(payload)
+                auto_map_candidates.append(
+                    AutoMapCandidate(
+                        item_id=item_id,
+                        name=getattr(entry.item, "name", None),
+                        extension=getattr(entry.item, "extension", None),
+                        item_type=getattr(entry.item, "item_type", "file"),
+                    )
+                )
             else:
                 stats["unchanged"] += 1
         except Exception as exc:  # noqa: BLE001
@@ -269,6 +290,27 @@ async def sync_items_handler(payload: dict, session: AsyncSession) -> dict:
         )
 
     await session.commit()
+
+    # Best effort: enqueue automatic metadata jobs for created/updated files.
+    try:
+        auto_summary = await enqueue_auto_mapping_jobs(
+            session,
+            account_id=account.id,
+            candidates=auto_map_candidates,
+            source="sync_items",
+            chunk_size=500,
+        )
+        stats["auto_jobs_created"] = int(auto_summary.get("total_jobs", 0))
+        stats["auto_items_by_type"] = auto_summary.get("items_by_type", {})
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "Auto metadata mapping enqueue failed after sync account_id=%s: %s",
+            account_id,
+            exc,
+        )
+        stats["auto_jobs_created"] = 0
+        stats["auto_items_by_type"] = {}
+
     await progress.update_metrics(
         processed=stats["processed"],
         created=stats["created"],

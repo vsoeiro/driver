@@ -18,8 +18,11 @@ DEFAULT_JOB_QUEUE_ALIAS_BY_TYPE: dict[str, str] = {
     JobType.UNDO_METADATA_BATCH.value: "metadata",
     JobType.APPLY_METADATA_RULE.value: "rules",
     JobType.EXTRACT_COMIC_ASSETS.value: "comics",
+    JobType.EXTRACT_BOOK_ASSETS.value: "comics",
     JobType.EXTRACT_LIBRARY_COMIC_ASSETS.value: "comics",
     JobType.REINDEX_COMIC_COVERS.value: "comics",
+    JobType.ANALYZE_IMAGE_ASSETS.value: "vision",
+    JobType.ANALYZE_LIBRARY_IMAGE_ASSETS.value: "vision",
     JobType.REMOVE_DUPLICATE_FILES.value: "io",
 }
 
@@ -33,8 +36,11 @@ DEFAULT_JOB_MAX_RETRIES_BY_TYPE: dict[str, int] = {
     JobType.UNDO_METADATA_BATCH.value: 2,
     JobType.APPLY_METADATA_RULE.value: 2,
     JobType.EXTRACT_COMIC_ASSETS.value: 1,
+    JobType.EXTRACT_BOOK_ASSETS.value: 1,
     JobType.EXTRACT_LIBRARY_COMIC_ASSETS.value: 1,
     JobType.REINDEX_COMIC_COVERS.value: 1,
+    JobType.ANALYZE_IMAGE_ASSETS.value: 1,
+    JobType.ANALYZE_LIBRARY_IMAGE_ASSETS.value: 1,
     JobType.REMOVE_DUPLICATE_FILES.value: 1,
 }
 
@@ -46,8 +52,11 @@ DEFAULT_JOB_DEDUPE_KEYS_BY_TYPE: dict[str, tuple[str, ...]] = {
     JobType.UNDO_METADATA_BATCH.value: ("batch_id",),
     JobType.APPLY_METADATA_RULE.value: ("rule_id",),
     JobType.EXTRACT_COMIC_ASSETS.value: ("account_id", "item_ids", "use_indexed_items"),
+    JobType.EXTRACT_BOOK_ASSETS.value: ("account_id", "item_ids", "use_indexed_items"),
     JobType.EXTRACT_LIBRARY_COMIC_ASSETS.value: ("account_ids", "chunk_size"),
     JobType.REINDEX_COMIC_COVERS.value: ("plugin_key", "library_key"),
+    JobType.ANALYZE_IMAGE_ASSETS.value: ("account_id", "item_ids", "reprocess"),
+    JobType.ANALYZE_LIBRARY_IMAGE_ASSETS.value: ("account_ids", "chunk_size", "reprocess"),
     JobType.REMOVE_DUPLICATE_FILES.value: (
         "preferred_account_id",
         "account_id",

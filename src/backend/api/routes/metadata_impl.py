@@ -60,7 +60,9 @@ from backend.schemas.metadata import (
     MetadataRule as MetadataRuleSchema,
 )
 from backend.services.metadata_libraries.service import (
+    BOOKS_LIBRARY_KEY,
     COMICS_LIBRARY_KEY,
+    IMAGES_LIBRARY_KEY,
     MetadataLibraryService,
 )
 from backend.services.metadata_versioning import (
@@ -566,8 +568,8 @@ def _to_form_layout_response(
 
 
 def _can_inline_edit_attribute(attribute: MetadataAttribute) -> bool:
-    # Comics library fields are editable except technical read-only keys.
-    if attribute.plugin_key == COMICS_LIBRARY_KEY:
+    # Library fields are editable except technical read-only keys.
+    if attribute.plugin_key in {COMICS_LIBRARY_KEY, BOOKS_LIBRARY_KEY}:
         return (attribute.plugin_field_key or "") not in READ_ONLY_COMIC_FIELD_KEYS
     # Non-library attributes follow lock rules.
     return not (attribute.is_locked or attribute.managed_by_plugin)
@@ -1151,12 +1153,17 @@ async def activate_metadata_library(
     library_key: str, session: AsyncSession = Depends(get_session)
 ):
     """Activate a metadata library and ensure managed schema exists."""
-    if library_key != COMICS_LIBRARY_KEY:
+    if library_key not in {COMICS_LIBRARY_KEY, IMAGES_LIBRARY_KEY, BOOKS_LIBRARY_KEY}:
         raise HTTPException(status_code=404, detail="Unknown metadata library")
 
     service = MetadataLibraryService(session)
     try:
-        library = await service.activate_comics_library()
+        if library_key == COMICS_LIBRARY_KEY:
+            library = await service.activate_comics_library()
+        elif library_key == IMAGES_LIBRARY_KEY:
+            library = await service.activate_images_library()
+        else:
+            library = await service.activate_books_library()
     except ValueError as exc:
         await session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1181,12 +1188,17 @@ async def deactivate_metadata_library(
     library_key: str, session: AsyncSession = Depends(get_session)
 ):
     """Deactivate a metadata library."""
-    if library_key != COMICS_LIBRARY_KEY:
+    if library_key not in {COMICS_LIBRARY_KEY, IMAGES_LIBRARY_KEY, BOOKS_LIBRARY_KEY}:
         raise HTTPException(status_code=404, detail="Unknown metadata library")
 
     service = MetadataLibraryService(session)
     try:
-        library = await service.deactivate_comics_library()
+        if library_key == COMICS_LIBRARY_KEY:
+            library = await service.deactivate_comics_library()
+        elif library_key == IMAGES_LIBRARY_KEY:
+            library = await service.deactivate_images_library()
+        else:
+            library = await service.deactivate_books_library()
     except OperationalError as exc:
         await session.rollback()
         if "no such table: metadata_plugins" in str(exc).lower():

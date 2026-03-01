@@ -155,6 +155,13 @@ class JobExtractComicAssetsRequest(BaseModel):
     item_ids: list[str]
 
 
+class JobExtractBookAssetsRequest(BaseModel):
+    """Schema for book asset extraction request."""
+
+    account_id: UUID
+    item_ids: list[str]
+
+
 class JobReindexComicCoversRequest(BaseModel):
     """Schema for metadata-library-driven comic cover reindex request."""
 
@@ -172,6 +179,64 @@ class JobExtractLibraryComicAssetsRequest(BaseModel):
 
 class JobExtractLibraryComicAssetsResponse(BaseModel):
     """Summary of chunked comic extraction jobs created from library index."""
+
+    total_items: int
+    total_jobs: int
+    chunk_size: int
+    job_ids: list[UUID]
+
+
+class JobExtractLibraryBookAssetsRequest(BaseModel):
+    """Schema for library-wide book extraction (all supported books already synced)."""
+
+    account_ids: list[UUID] | None = None
+    chunk_size: int = 500
+
+
+class JobExtractLibraryBookAssetsResponse(BaseModel):
+    """Summary of chunked book extraction jobs created from library index."""
+
+    total_items: int
+    total_jobs: int
+    chunk_size: int
+    job_ids: list[UUID]
+
+
+class JobAnalyzeImageAssetsRequest(BaseModel):
+    """Schema for image analysis request on selected item ids."""
+
+    account_id: UUID
+    item_ids: list[str]
+    use_indexed_items: bool = True
+    reprocess: bool = False
+
+
+class JobAnalyzeLibraryImageAssetsRequest(BaseModel):
+    """Schema for chunked image analysis over indexed files."""
+
+    account_ids: list[UUID] | None = None
+    chunk_size: int = 500
+    reprocess: bool = False
+
+
+class JobAnalyzeLibraryImageAssetsResponse(BaseModel):
+    """Summary of chunked image analysis jobs."""
+
+    total_items: int
+    total_jobs: int
+    chunk_size: int
+    job_ids: list[UUID]
+
+
+class JobMapLibraryBooksRequest(BaseModel):
+    """Schema for chunked books metadata mapping over indexed files."""
+
+    account_ids: list[UUID] | None = None
+    chunk_size: int = 500
+
+
+class JobMapLibraryBooksResponse(BaseModel):
+    """Summary of chunked books mapping jobs."""
 
     total_items: int
     total_jobs: int

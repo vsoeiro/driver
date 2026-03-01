@@ -1,4 +1,7 @@
-from backend.api.routes.jobs import _is_comic_item_already_mapped
+from backend.api.routes.jobs import (
+    _is_comic_item_already_mapped,
+    _is_image_item_already_analyzed,
+)
 
 
 def test_is_comic_item_already_mapped_true_when_cover_present():
@@ -21,3 +24,9 @@ def test_is_comic_item_already_mapped_false_when_fields_empty():
     }
     values = {"a1": "", "a2": None}
     assert _is_comic_item_already_mapped(values, attr_ids) is False
+
+
+def test_is_image_item_already_analyzed():
+    assert _is_image_item_already_analyzed("completed") is True
+    assert _is_image_item_already_analyzed("skipped") is False
+    assert _is_image_item_already_analyzed(None) is False

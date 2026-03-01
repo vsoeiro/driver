@@ -1,0 +1,2 @@
+"""Books metadata-library implementation."""
+

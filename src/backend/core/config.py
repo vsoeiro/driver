@@ -136,6 +136,15 @@ class Settings(BaseSettings):
     ai_max_rows_scanned: int = Field(default=5000, alias="AI_MAX_ROWS_SCANNED")
     ai_redaction_enabled: bool = Field(default=True, alias="AI_REDACTION_ENABLED")
     ai_persist_raw: bool = Field(default=False, alias="AI_PERSIST_RAW")
+    image_analysis_enabled: bool = Field(default=True, alias="IMAGE_ANALYSIS_ENABLED")
+    image_analysis_confidence_threshold: float = Field(
+        default=0.72,
+        alias="IMAGE_ANALYSIS_CONFIDENCE_THRESHOLD",
+    )
+    image_analysis_max_infer_side: int = Field(default=1280, alias="IMAGE_ANALYSIS_MAX_INFER_SIDE")
+    image_analysis_model_device: str = Field(default="cpu", alias="IMAGE_ANALYSIS_MODEL_DEVICE")
+    image_analysis_yolo_model: str = Field(default="yolov8n.pt", alias="IMAGE_ANALYSIS_YOLO_MODEL")
+    image_analysis_timeout_seconds: int = Field(default=20, alias="IMAGE_ANALYSIS_TIMEOUT_SECONDS")
 
     @model_validator(mode="after")
     def assemble_db_connection(self) -> "Settings":
@@ -235,6 +244,18 @@ class Settings(BaseSettings):
             raise ValueError("AI_MAX_TOOL_CALLS_PER_MESSAGE must be greater than 0")
         if self.ai_max_rows_scanned <= 0:
             raise ValueError("AI_MAX_ROWS_SCANNED must be greater than 0")
+        if not 0 <= self.image_analysis_confidence_threshold <= 1:
+            raise ValueError("IMAGE_ANALYSIS_CONFIDENCE_THRESHOLD must be in [0, 1]")
+        if self.image_analysis_max_infer_side < 256:
+            raise ValueError("IMAGE_ANALYSIS_MAX_INFER_SIDE must be >= 256")
+        self.image_analysis_model_device = (
+            self.image_analysis_model_device.strip().lower() or "cpu"
+        )
+        if self.image_analysis_model_device not in {"cpu", "cuda"}:
+            raise ValueError("IMAGE_ANALYSIS_MODEL_DEVICE must be one of: cpu, cuda")
+        self.image_analysis_yolo_model = self.image_analysis_yolo_model.strip() or "yolov8n.pt"
+        if self.image_analysis_timeout_seconds <= 0:
+            raise ValueError("IMAGE_ANALYSIS_TIMEOUT_SECONDS must be greater than 0")
         return self
 
     @property

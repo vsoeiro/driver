@@ -24,6 +24,17 @@ def test_resolve_job_queue_alias_prefers_requested_value_then_policy():
     assert resolve_job_queue_alias("unknown_type", settings, None) == "default"
 
 
+def test_default_policy_for_image_analysis_jobs():
+    settings = _settings()
+    assert resolve_job_queue_alias(JobType.ANALYZE_IMAGE_ASSETS.value, settings, None) == "vision"
+    dedupe = build_default_dedupe_key(
+        JobType.ANALYZE_IMAGE_ASSETS,
+        {"account_id": "a1", "item_ids": ["1", "2"], "reprocess": False},
+    )
+    assert dedupe is not None
+    assert dedupe.startswith("analyze_image_assets:")
+
+
 def test_resolve_job_max_retries_uses_requested_policy_and_default():
     settings = _settings()
     assert resolve_job_max_retries("sync_items", settings, 2) == 2

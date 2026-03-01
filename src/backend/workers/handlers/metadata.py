@@ -333,7 +333,8 @@ async def apply_metadata_recursive_handler(
         "path_prefix": "/Comics/Marvel",
         "category_id": "uuid",
         "values": {"attr-uuid-1": "value1", "attr-uuid-2": "value2"},
-        "include_folders": false
+        "include_folders": false,
+        "item_ids": ["provider-item-id-1", "provider-item-id-2"]
     }
     """
     account_id = UUID(payload["account_id"])
@@ -341,15 +342,22 @@ async def apply_metadata_recursive_handler(
     category_id = UUID(payload["category_id"])
     values = payload.get("values", {})
     include_folders = payload.get("include_folders", False)
+    item_ids_raw = payload.get("item_ids")
+    item_ids = (
+        [str(item_id) for item_id in item_ids_raw if str(item_id).strip()]
+        if isinstance(item_ids_raw, list)
+        else None
+    )
     batch_id = (
         UUID(payload.get("batch_id")) if payload.get("batch_id") else uuid.uuid4()
     )
     progress = JobProgressReporter.from_payload(session, payload)
 
-    query = select(Item).where(
-        Item.account_id == account_id,
-        Item.path.ilike(f"{path_prefix}/%"),
-    )
+    query = select(Item).where(Item.account_id == account_id)
+    if item_ids:
+        query = query.where(Item.item_id.in_(item_ids))
+    else:
+        query = query.where(Item.path.ilike(f"{path_prefix}/%"))
 
     if not include_folders:
         query = query.where(Item.item_type == "file")

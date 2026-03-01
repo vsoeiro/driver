@@ -521,6 +521,48 @@ class ItemMetadataHistory(Base):
     )
 
 
+class ImageAnalysisResult(Base):
+    """Persisted raw output for automatic image analysis jobs."""
+
+    __tablename__ = "image_analysis_results"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+    )
+    item_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="completed")
+    suggested_category: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    confidence: Mapped[float | None] = mapped_column(nullable=True)
+    detected_objects: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    entities: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    technical_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    ocr_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    processing_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    model_version: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "item_id", name="uq_image_analysis_results_account_item"),
+        Index("ix_image_analysis_results_status", "status"),
+        Index("ix_image_analysis_results_updated_at", "updated_at"),
+    )
+
+
 class MetadataRule(Base):
     """Automatic metadata rule."""
 

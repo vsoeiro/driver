@@ -21,14 +21,22 @@ from starlette.concurrency import run_in_threadpool
 
 from backend.api.dependencies import DBSession, JobServiceDep
 from backend.application.jobs.commands import enqueue_job_command
-from backend.db.models import Item, ItemMetadata
+from backend.db.models import ImageAnalysisResult, Item, ItemMetadata
 from backend.domain.errors import DomainError, NotFoundError
 from backend.schemas.jobs import (
+    JobMapLibraryBooksRequest,
+    JobMapLibraryBooksResponse,
+    JobAnalyzeImageAssetsRequest,
+    JobAnalyzeLibraryImageAssetsRequest,
+    JobAnalyzeLibraryImageAssetsResponse,
     Job,
     JobApplyMetadataRecursiveRequest,
     JobApplyRuleRequest,
     JobAttempt,
+    JobExtractBookAssetsRequest,
     JobExtractComicAssetsRequest,
+    JobExtractLibraryBookAssetsRequest,
+    JobExtractLibraryBookAssetsResponse,
     JobExtractLibraryComicAssetsRequest,
     JobExtractLibraryComicAssetsResponse,
     JobMetadataUpdateRequest,
@@ -40,11 +48,16 @@ from backend.schemas.jobs import (
     JobUndoMetadataBatchRequest,
 )
 from backend.services.metadata_libraries.service import (
+    BOOKS_LIBRARY_KEY,
     COMICS_LIBRARY_KEY,
+    IMAGES_LIBRARY_KEY,
     MetadataLibraryService,
 )
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
+COMIC_EXTENSIONS = {"cbz", "zip", "cbw", "pdf", "epub", "cbr", "rar", "cb7", "7z", "cbt", "tar"}
+BOOK_EXTENSIONS = {"pdf", "epub"}
+IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff", "tif", "heic", "avif"}
 
 
 def _map_domain_error_to_http(exc: DomainError) -> None:
@@ -66,6 +79,10 @@ def _is_comic_item_already_mapped(
         if value is not None and value != "":
             return True
     return False
+
+
+def _is_image_item_already_analyzed(status: str | None) -> bool:
+    return (status or "").strip().lower() == "completed"
 
 
 async def _filter_unmapped_comic_items(
@@ -110,7 +127,134 @@ async def _filter_unmapped_comic_items(
         ]
         if remaining:
             filtered[account_id] = remaining
+    return await _filter_items_without_conflicting_metadata(
+        db,
+        filtered,
+        category_id=category.id,
+    )
+
+
+async def _filter_unmapped_image_items(
+    db: DBSession,
+    by_account: dict[UUID, list[str]],
+    *,
+    category_id: UUID,
+) -> dict[UUID, list[str]]:
+    if not by_account:
+        return by_account
+
+    filtered: dict[UUID, list[str]] = {}
+    for account_id, item_ids in by_account.items():
+        if not item_ids:
+            continue
+        stmt = select(ImageAnalysisResult.item_id, ImageAnalysisResult.status).where(
+            ImageAnalysisResult.account_id == account_id,
+            ImageAnalysisResult.item_id.in_(item_ids),
+        )
+        rows = (await db.execute(stmt)).all()
+        completed_ids = {
+            str(item_id)
+            for item_id, status in rows
+            if _is_image_item_already_analyzed(status)
+        }
+        remaining = [item_id for item_id in item_ids if str(item_id) not in completed_ids]
+        if remaining:
+            filtered[account_id] = remaining
+    return await _filter_items_without_conflicting_metadata(
+        db,
+        filtered,
+        category_id=category_id,
+    )
+
+
+async def _filter_items_without_category(
+    db: DBSession,
+    by_account: dict[UUID, list[str]],
+    *,
+    category_id: UUID,
+) -> dict[UUID, list[str]]:
+    if not by_account:
+        return by_account
+
+    filtered: dict[UUID, list[str]] = {}
+    for account_id, item_ids in by_account.items():
+        if not item_ids:
+            continue
+        stmt = select(ItemMetadata.item_id).where(
+            ItemMetadata.account_id == account_id,
+            ItemMetadata.category_id == category_id,
+            ItemMetadata.item_id.in_(item_ids),
+        )
+        rows = (await db.execute(stmt)).scalars().all()
+        mapped_ids = {str(item_id) for item_id in rows}
+        remaining = [item_id for item_id in item_ids if str(item_id) not in mapped_ids]
+        if remaining:
+            filtered[account_id] = remaining
     return filtered
+
+
+async def _filter_items_without_conflicting_metadata(
+    db: DBSession,
+    by_account: dict[UUID, list[str]],
+    *,
+    category_id: UUID,
+) -> dict[UUID, list[str]]:
+    """Exclude items already mapped to any other metadata category."""
+    if not by_account:
+        return by_account
+
+    filtered: dict[UUID, list[str]] = {}
+    for account_id, item_ids in by_account.items():
+        if not item_ids:
+            continue
+        stmt = select(ItemMetadata.item_id, ItemMetadata.category_id).where(
+            ItemMetadata.account_id == account_id,
+            ItemMetadata.item_id.in_(item_ids),
+        )
+        rows = (await db.execute(stmt)).all()
+        conflicting_ids = {
+            str(item_id)
+            for item_id, existing_category_id in rows
+            if existing_category_id and existing_category_id != category_id
+        }
+        remaining = [item_id for item_id in item_ids if str(item_id) not in conflicting_ids]
+        if remaining:
+            filtered[account_id] = remaining
+    return filtered
+
+
+async def _validate_selected_extensions(
+    db: DBSession,
+    *,
+    account_id: UUID,
+    item_ids: list[str],
+    supported_exts: set[str],
+    library_name: str,
+) -> None:
+    """Block direct mapping requests when selected files contain unsupported extensions."""
+    if not item_ids:
+        return
+    stmt = select(Item.item_id, Item.item_type, Item.extension).where(
+        Item.account_id == account_id,
+        Item.item_id.in_(item_ids),
+    )
+    rows = (await db.execute(stmt)).all()
+    invalid_ids: list[str] = []
+    for item_id, item_type, extension in rows:
+        if str(item_type or "").lower() != "file":
+            continue
+        ext = str(extension or "").lower().strip(".")
+        if ext not in supported_exts:
+            invalid_ids.append(str(item_id))
+    if invalid_ids:
+        sample = ", ".join(invalid_ids[:5])
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{library_name} mapping allows only supported extensions. "
+                f"Invalid selected file(s): {sample}"
+            ),
+        )
 
 
 @router.post("/move", response_model=Job, status_code=status.HTTP_201_CREATED)
@@ -345,14 +489,150 @@ async def create_apply_rule_job(
 @router.post("/comics/extract", response_model=Job, status_code=status.HTTP_201_CREATED)
 async def create_extract_comic_assets_job(
     request: JobExtractComicAssetsRequest,
-    job_service: JobServiceDep,
+    db: DBSession,
 ) -> Job:
     """Create a job that extracts comic cover/page metadata for selected items/folders."""
+    await _validate_selected_extensions(
+        db,
+        account_id=request.account_id,
+        item_ids=request.item_ids,
+        supported_exts=COMIC_EXTENSIONS,
+        library_name="Comics",
+    )
     payload = request.model_dump(mode="json")
     return await enqueue_job_command(
-        job_service.session,
+        db,
         job_type="extract_comic_assets",
         payload=payload,
+    )
+
+
+@router.post("/books/extract", response_model=Job, status_code=status.HTTP_201_CREATED)
+async def create_extract_book_assets_job(
+    request: JobExtractBookAssetsRequest,
+    db: DBSession,
+) -> Job:
+    """Create a job that extracts book cover/page metadata for selected items/folders."""
+    library_service = MetadataLibraryService(db)
+    books_category = await library_service.get_active_books_category()
+    if books_category is None or books_category.plugin_key != BOOKS_LIBRARY_KEY:
+        raise HTTPException(
+            status_code=400,
+            detail="Books metadata library is not active. Activate books_core first.",
+        )
+    await _validate_selected_extensions(
+        db,
+        account_id=request.account_id,
+        item_ids=request.item_ids,
+        supported_exts=BOOK_EXTENSIONS,
+        library_name="Books",
+    )
+    return await enqueue_job_command(
+        db,
+        job_type="extract_book_assets",
+        payload=request.model_dump(mode="json"),
+    )
+
+
+@router.post("/images/analyze", response_model=Job, status_code=status.HTTP_201_CREATED)
+async def create_analyze_image_assets_job(
+    request: JobAnalyzeImageAssetsRequest,
+    db: DBSession,
+) -> Job:
+    """Create a job that analyzes selected image files/folders."""
+    library_service = MetadataLibraryService(db)
+    images_category = await library_service.get_active_images_category()
+    if images_category is None or images_category.plugin_key != IMAGES_LIBRARY_KEY:
+        raise HTTPException(
+            status_code=400,
+            detail="Images metadata library is not active. Activate images_core first.",
+        )
+    await _validate_selected_extensions(
+        db,
+        account_id=request.account_id,
+        item_ids=request.item_ids,
+        supported_exts=IMAGE_EXTENSIONS,
+        library_name="Images",
+    )
+    return await enqueue_job_command(
+        db,
+        job_type="analyze_image_assets",
+        payload=request.model_dump(mode="json"),
+    )
+
+
+@router.post(
+    "/images/analyze-library",
+    response_model=JobAnalyzeLibraryImageAssetsResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_analyze_library_image_assets_job(
+    request: JobAnalyzeLibraryImageAssetsRequest,
+    db: DBSession,
+) -> JobAnalyzeLibraryImageAssetsResponse:
+    """Create chunked jobs to analyze all indexed image files."""
+    chunk_size = max(1, min(5000, int(request.chunk_size or 500)))
+    supported_exts = tuple(IMAGE_EXTENSIONS)
+
+    stmt = select(Item.account_id, Item.item_id).where(
+        Item.item_type == "file",
+        func.lower(func.coalesce(Item.extension, "")).in_(supported_exts),
+    )
+    if request.account_ids:
+        stmt = stmt.where(Item.account_id.in_(request.account_ids))
+
+    rows = (await db.execute(stmt)).all()
+    if not rows:
+        return JobAnalyzeLibraryImageAssetsResponse(
+            total_items=0,
+            total_jobs=0,
+            chunk_size=chunk_size,
+            job_ids=[],
+        )
+
+    by_account: dict[UUID, list[str]] = {}
+    for account_id, item_id in rows:
+        by_account.setdefault(account_id, []).append(item_id)
+
+    if not request.reprocess:
+        library_service = MetadataLibraryService(db)
+        images_category = await library_service.ensure_active_images_category()
+        by_account = await _filter_unmapped_image_items(
+            db,
+            by_account,
+            category_id=images_category.id,
+        )
+
+    total_items = sum(len(item_ids) for item_ids in by_account.values())
+    if total_items == 0:
+        return JobAnalyzeLibraryImageAssetsResponse(
+            total_items=0,
+            total_jobs=0,
+            chunk_size=chunk_size,
+            job_ids=[],
+        )
+
+    created_job_ids: list[UUID] = []
+    for account_id, item_ids in by_account.items():
+        for i in range(0, len(item_ids), chunk_size):
+            chunk_ids = item_ids[i : i + chunk_size]
+            job = await enqueue_job_command(
+                db,
+                job_type="analyze_image_assets",
+                payload={
+                    "account_id": str(account_id),
+                    "item_ids": chunk_ids,
+                    "use_indexed_items": True,
+                    "reprocess": bool(request.reprocess),
+                },
+            )
+            created_job_ids.append(job.id)
+
+    return JobAnalyzeLibraryImageAssetsResponse(
+        total_items=total_items,
+        total_jobs=len(created_job_ids),
+        chunk_size=chunk_size,
+        job_ids=created_job_ids,
     )
 
 
@@ -389,7 +669,7 @@ async def create_extract_library_comic_assets_job(
 
     stmt = select(Item.account_id, Item.item_id).where(
         Item.item_type == "file",
-        func.lower(func.coalesce(Item.extension, "")).in_(("cbr", "cbz")),
+        func.lower(func.coalesce(Item.extension, "")).in_(tuple(COMIC_EXTENSIONS)),
     )
     if request.account_ids:
         stmt = stmt.where(Item.account_id.in_(request.account_ids))
@@ -437,6 +717,115 @@ async def create_extract_library_comic_assets_job(
         total_jobs=len(created_job_ids),
         chunk_size=chunk_size,
         job_ids=created_job_ids,
+    )
+
+
+@router.post(
+    "/books/map-library",
+    response_model=JobMapLibraryBooksResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_map_library_books_job(
+    request: JobMapLibraryBooksRequest,
+    db: DBSession,
+) -> JobMapLibraryBooksResponse:
+    """Create chunked jobs that map book files into the active Books metadata library."""
+    chunk_size = max(1, min(5000, int(request.chunk_size or 500)))
+    book_exts = tuple(BOOK_EXTENSIONS)
+
+    library_service = MetadataLibraryService(db)
+    books_category = await library_service.get_active_books_category()
+    if books_category is None or books_category.plugin_key != BOOKS_LIBRARY_KEY:
+        raise HTTPException(
+            status_code=400,
+            detail="Books metadata library is not active. Activate books_core first.",
+        )
+
+    stmt = select(Item.account_id, Item.item_id).where(
+        Item.item_type == "file",
+        func.lower(func.coalesce(Item.extension, "")).in_(book_exts),
+    )
+    if request.account_ids:
+        stmt = stmt.where(Item.account_id.in_(request.account_ids))
+
+    rows = (await db.execute(stmt)).all()
+    if not rows:
+        return JobMapLibraryBooksResponse(
+            total_items=0,
+            total_jobs=0,
+            chunk_size=chunk_size,
+            job_ids=[],
+        )
+
+    by_account: dict[UUID, list[str]] = {}
+    for account_id, item_id in rows:
+        by_account.setdefault(account_id, []).append(item_id)
+
+    by_account = await _filter_items_without_category(
+        db,
+        by_account,
+        category_id=books_category.id,
+    )
+    by_account = await _filter_items_without_conflicting_metadata(
+        db,
+        by_account,
+        category_id=books_category.id,
+    )
+    total_unmapped_items = sum(len(item_ids) for item_ids in by_account.values())
+    if total_unmapped_items == 0:
+        return JobMapLibraryBooksResponse(
+            total_items=0,
+            total_jobs=0,
+            chunk_size=chunk_size,
+            job_ids=[],
+        )
+
+    created_job_ids: list[UUID] = []
+    for account_id, item_ids in by_account.items():
+        for i in range(0, len(item_ids), chunk_size):
+            chunk_ids = item_ids[i : i + chunk_size]
+            job = await enqueue_job_command(
+                db,
+                job_type="extract_book_assets",
+                payload={
+                    "account_id": str(account_id),
+                    "item_ids": chunk_ids,
+                    "use_indexed_items": True,
+                },
+                dedupe_key=f"books-map:{account_id}:{i}:{chunk_size}",
+            )
+            created_job_ids.append(job.id)
+
+    return JobMapLibraryBooksResponse(
+        total_items=total_unmapped_items,
+        total_jobs=len(created_job_ids),
+        chunk_size=chunk_size,
+        job_ids=created_job_ids,
+    )
+
+
+@router.post(
+    "/books/extract-library",
+    response_model=JobExtractLibraryBookAssetsResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_extract_library_book_assets_job(
+    request: JobExtractLibraryBookAssetsRequest,
+    db: DBSession,
+) -> JobExtractLibraryBookAssetsResponse:
+    """Create chunked jobs that map all synced supported book files."""
+    summary = await create_map_library_books_job(
+        JobMapLibraryBooksRequest(
+            account_ids=request.account_ids,
+            chunk_size=request.chunk_size,
+        ),
+        db,
+    )
+    return JobExtractLibraryBookAssetsResponse(
+        total_items=summary.total_items,
+        total_jobs=summary.total_jobs,
+        chunk_size=summary.chunk_size,
+        job_ids=summary.job_ids,
     )
 
 

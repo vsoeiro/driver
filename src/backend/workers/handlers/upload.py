@@ -16,6 +16,10 @@ from backend.services.item_index import (
     path_from_breadcrumb,
     upsert_item_record,
 )
+from backend.services.auto_metadata_mapper import (
+    AutoMapCandidate,
+    enqueue_auto_mapping_jobs,
+)
 from backend.services.providers.factory import build_drive_client
 from backend.workers.dispatcher import register_handler
 from backend.workers.job_progress import JobProgressReporter
@@ -115,6 +119,33 @@ async def upload_file_handler(payload: dict, session: AsyncSession) -> dict:
             )
             await session.commit()
 
+            # Best effort: trigger metadata mapping for uploaded files.
+            auto_summary = {"total_jobs": 0, "job_ids": [], "items_by_type": {}}
+            try:
+                auto_summary = await enqueue_auto_mapping_jobs(
+                    session,
+                    account_id=account.id,
+                    candidates=[
+                        AutoMapCandidate(
+                            item_id=str(uploaded_item.id),
+                            name=getattr(uploaded_item, "name", filename),
+                            extension=getattr(uploaded_item, "extension", None),
+                            item_type=getattr(uploaded_item, "item_type", "file"),
+                        )
+                    ],
+                    source="upload_file",
+                    chunk_size=100,
+                )
+            except Exception as auto_exc:  # noqa: BLE001
+                logger.exception(
+                    "Auto metadata mapping enqueue failed after upload account_id=%s item_id=%s: %s",
+                    account.id,
+                    uploaded_item_id,
+                    auto_exc,
+                )
+        else:
+            auto_summary = {"total_jobs": 0, "job_ids": [], "items_by_type": {}}
+
         progress.current = 1
         await progress.update_metrics(
             total=1,
@@ -135,6 +166,9 @@ async def upload_file_handler(payload: dict, session: AsyncSession) -> dict:
             "skipped": 0,
             "error_items": [],
             "error_items_truncated": 0,
+            "auto_jobs_created": int(auto_summary.get("total_jobs", 0)),
+            "auto_items_by_type": auto_summary.get("items_by_type", {}),
+            "auto_job_ids": auto_summary.get("job_ids", []),
             "metrics": {
                 "total": 1,
                 "success": 1,

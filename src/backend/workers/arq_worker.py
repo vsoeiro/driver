@@ -17,8 +17,10 @@ from backend.services.job_queue import resolve_queue_name
 from backend.services.jobs import JobCancelledError, JobService
 from backend.workers.dispatcher import get_handler
 from backend.workers.handlers import ai as _ai_handler  # noqa: F401
+from backend.workers.handlers import books as _books_handler  # noqa: F401
 from backend.workers.handlers import comics as _comics_handler  # noqa: F401
 from backend.workers.handlers import dedupe as _dedupe_handler  # noqa: F401
+from backend.workers.handlers import images as _images_handler  # noqa: F401
 from backend.workers.handlers import metadata as _metadata_handler  # noqa: F401
 from backend.workers.handlers import move as _move_handler  # noqa: F401
 from backend.workers.handlers import rules as _rules_handler  # noqa: F401

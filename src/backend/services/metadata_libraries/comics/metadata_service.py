@@ -1218,8 +1218,11 @@ class ComicMetadataService:
         )
         result = await self.session.execute(stmt)
         existing = result.scalar_one_or_none()
-        if existing is None or existing.category_id != category_id:
+        if existing is None:
             return False
+        if existing.category_id != category_id:
+            # Do not overwrite metadata mapped by another category/library.
+            return True
 
         values = existing.values or {}
         check_fields = (
