@@ -16,6 +16,7 @@ const DEFAULT_FORM = {
     include_folders: false,
     target_category_id: '',
     apply_metadata: true,
+    apply_remove_metadata: false,
     apply_rename: false,
     rename_template: '',
     apply_move: false,
@@ -97,6 +98,7 @@ export default function RulesManager() {
                 target_category_id: form.target_category_id,
                 target_values: normalizedTargetValues,
                 apply_metadata: form.apply_metadata,
+                apply_remove_metadata: form.apply_remove_metadata,
                 apply_rename: form.apply_rename,
                 rename_template: form.rename_template || null,
                 apply_move: form.apply_move,
@@ -129,6 +131,7 @@ export default function RulesManager() {
                 target_category_id: form.target_category_id,
                 target_values: normalizedTargetValues,
                 apply_metadata: form.apply_metadata,
+                apply_remove_metadata: form.apply_remove_metadata,
                 apply_rename: form.apply_rename,
                 rename_template: form.rename_template || null,
                 apply_move: form.apply_move,
@@ -294,9 +297,33 @@ export default function RulesManager() {
                                 <input
                                     type="checkbox"
                                     checked={form.apply_metadata}
-                                    onChange={(e) => setForm((prev) => ({ ...prev, apply_metadata: e.target.checked }))}
+                                    onChange={(e) =>
+                                        setForm((prev) => ({
+                                            ...prev,
+                                            apply_metadata: e.target.checked,
+                                            apply_remove_metadata: e.target.checked
+                                                ? false
+                                                : prev.apply_remove_metadata,
+                                        }))
+                                    }
                                 />
                                 {t('rules.applyMetadataValues')}
+                            </label>
+                            <label className="flex items-center gap-2 text-sm">
+                                <input
+                                    type="checkbox"
+                                    checked={form.apply_remove_metadata}
+                                    onChange={(e) =>
+                                        setForm((prev) => ({
+                                            ...prev,
+                                            apply_remove_metadata: e.target.checked,
+                                            apply_metadata: e.target.checked
+                                                ? false
+                                                : prev.apply_metadata,
+                                        }))
+                                    }
+                                />
+                                {t('rules.removeMetadata')}
                             </label>
                             <label className="flex items-center gap-2 text-sm">
                                 <input
@@ -359,7 +386,7 @@ export default function RulesManager() {
                         </>
                     )}
 
-                    {selectedCategory && (
+                    {selectedCategory && form.apply_metadata && (
                         <div className="md:col-span-2 lg:col-span-3 border rounded-md p-3 bg-background">
                             <div className="text-sm font-medium mb-3">{t('rules.metadataValues')}</div>
                             {selectedCategory.attributes.length === 0 ? (
@@ -452,6 +479,7 @@ export default function RulesManager() {
                                     </div>
                                     <div className="text-xs text-muted-foreground space-y-0.5">
                                         <div>{t('rules.metadata')}: {rule.apply_metadata ? t('rules.on') : t('rules.off')}</div>
+                                        <div>{t('rules.removeMetadata')}: {rule.apply_remove_metadata ? t('rules.on') : t('rules.off')}</div>
                                         <div>{t('rules.rename')}: {rule.apply_rename ? (rule.rename_template || '-') : t('rules.off')}</div>
                                         <div>{t('rules.move')}: {rule.apply_move ? `${rule.destination_folder_id || 'root'} / ${rule.destination_path_template || '-'}` : t('rules.off')}</div>
                                     </div>

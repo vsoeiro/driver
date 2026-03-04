@@ -34,9 +34,9 @@ function asDateMs(value) {
 }
 
 function toneClass(kind) {
-    if (kind === 'error') return 'border-rose-300/60 bg-rose-50/70';
-    if (kind === 'warning') return 'border-amber-300/70 bg-amber-50/70';
-    return 'border-border/70 bg-card/70';
+    if (kind === 'error') return 'status-badge-danger';
+    if (kind === 'warning') return 'status-badge-warning';
+    return 'status-badge-info';
 }
 
 function relativeTime(value, t) {
@@ -97,7 +97,7 @@ export default function NotificationBell() {
         const alerts = (alertsQuery.data?.recent_alerts || []).map((alert) => ({
             id: `alert:${alert.code}:${alert.created_at}`,
             kind: alert.severity === 'error' ? 'error' : alert.severity === 'warning' ? 'warning' : 'info',
-            title: `${String(alert.severity || 'info').toUpperCase()} · ${alert.code}`,
+            title: `${String(alert.severity || 'info').toUpperCase()} - ${alert.code}`,
             message: alert.message,
             created_at: alert.created_at,
         }));
@@ -157,27 +157,27 @@ export default function NotificationBell() {
         <div className="relative" ref={wrapperRef}>
             <button
                 type="button"
-                className="ghost-icon-button relative"
+                className="btn-minimal relative"
                 onClick={() => setOpen((prev) => !prev)}
                 title={t('notifications.title')}
                 aria-label={t('notifications.title')}
             >
                 <Bell size={16} />
                 {badgeCount > 0 && (
-                    <span className="absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                    <span className="absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full border border-destructive/35 bg-destructive px-1.5 py-0.5 text-[10px] font-semibold text-destructive-foreground">
                         {badgeCount > 99 ? '99+' : badgeCount}
                     </span>
                 )}
             </button>
 
             {open && (
-                <div className="absolute right-0 top-10 z-[360] w-[380px] max-w-[90vw] rounded-lg border border-border bg-card p-2 shadow-xl">
+                <div className="layer-popover absolute right-0 top-10 w-[380px] max-w-[90vw] rounded-sm border border-border/90 bg-card p-2 shadow-lg">
                     <div className="mb-2 flex items-center justify-between px-2 py-1">
                         <div className="text-sm font-semibold">{t('notifications.title')}</div>
                         <button
                             type="button"
                             onClick={dismissAll}
-                            className="inline-flex items-center gap-1 rounded border border-border/80 px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+                            className="btn-minimal px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
                             disabled={visibleNotifications.length === 0}
                         >
                             <CheckCheck size={12} />
@@ -193,15 +193,18 @@ export default function NotificationBell() {
                         )}
 
                         {!loading && visibleNotifications.length === 0 && (
-                            <div className="rounded border border-border/70 bg-muted/20 px-3 py-6 text-center text-sm text-muted-foreground">
+                            <div className="rounded-sm border border-border/85 bg-muted/20 px-3 py-6 text-center text-sm text-muted-foreground">
                                 {t('notifications.none')}
                             </div>
                         )}
 
                         {visibleNotifications.map((item) => (
-                            <div key={item.id} className={`rounded border px-2.5 py-2 ${toneClass(item.kind)}`}>
+                            <div key={item.id} className="rounded-sm border border-border/90 bg-card px-2.5 py-2">
                                 <div className="flex items-start justify-between gap-2">
                                     <div className="min-w-0">
+                                        <div className="mb-1 inline-flex">
+                                            <span className={`status-badge ${toneClass(item.kind)}`}>{item.kind.toUpperCase()}</span>
+                                        </div>
                                         <div className="truncate text-xs font-semibold">{item.title}</div>
                                         <div className="mt-0.5 text-xs text-muted-foreground">{item.message}</div>
                                         <div className="mt-1 text-[11px] text-muted-foreground">{relativeTime(item.created_at, t)}</div>
@@ -209,7 +212,7 @@ export default function NotificationBell() {
                                     <button
                                         type="button"
                                         onClick={() => dismissOne(item.id)}
-                                        className="rounded p-1 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+                                        className="btn-minimal h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
                                         title={t('notifications.dismiss')}
                                     >
                                         <X size={12} />

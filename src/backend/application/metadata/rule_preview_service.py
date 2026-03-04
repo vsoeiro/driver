@@ -51,11 +51,16 @@ class RulePreviewService:
         for item in items:
             current = metadata_by_pair.get((item.account_id, item.item_id))
             current_values = normalize_metadata_values(current.values) if current else {}
-            same_metadata = (
-                current is not None
-                and current.category_id == request.target_category_id
-                and current_values == target_values
-            )
+            if request.apply_remove_metadata:
+                same_metadata = current is None
+            elif request.apply_metadata:
+                same_metadata = (
+                    current is not None
+                    and current.category_id == request.target_category_id
+                    and current_values == target_values
+                )
+            else:
+                same_metadata = True
             same = same_metadata and not has_organize_actions
             if same:
                 already_compliant += 1

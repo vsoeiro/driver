@@ -38,13 +38,13 @@ export default function Modal({
     if (!canRender) return null;
 
     return createPortal(
-        <div className="fixed inset-0 z-[400] flex items-start justify-center overflow-y-auto bg-slate-900/35 p-4 pt-10 backdrop-blur-sm">
-            <div className={`w-full ${maxWidthClass} max-h-[90vh] flex flex-col rounded-2xl border border-border/70 bg-card/95 text-card-foreground shadow-[0_22px_60px_-30px_rgba(10,25,50,0.65)] animate-in fade-in zoom-in-95 duration-200`}>
+        <div className="layer-modal fixed inset-0 flex items-start justify-center overflow-y-auto bg-slate-900/25 p-4 pt-10 backdrop-blur-[2px]">
+            <div className={`w-full ${maxWidthClass} max-h-[90vh] flex flex-col rounded-sm border border-border/85 bg-card text-card-foreground shadow-lg animate-in fade-in zoom-in-95 duration-200`}>
                 <div className="flex items-center justify-between border-b border-border/70 p-4">
                     <h3 className="text-lg font-semibold tracking-tight">{title}</h3>
                     <button
                         onClick={onClose}
-                        className="ghost-icon-button"
+                        className="btn-minimal"
                         aria-label={t('modal.close')}
                     >
                         <X size={18} />

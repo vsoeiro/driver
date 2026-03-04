@@ -30,6 +30,9 @@ export default function Jobs() {
     const [statusFilter, setStatusFilter] = useState('ALL');
     const [typeFilter, setTypeFilter] = useState('ALL');
     const [dateRangeFilter, setDateRangeFilter] = useState('ALL');
+    const [selectedJobIds, setSelectedJobIds] = useState(new Set());
+    const [bulkCancelling, setBulkCancelling] = useState(false);
+    const [bulkDeleting, setBulkDeleting] = useState(false);
     const { showToast } = useToast();
     const queryClient = useQueryClient();
     const PAGE_SIZE = 20;
@@ -111,6 +114,43 @@ export default function Jobs() {
         setPage((current) => current + 1);
     };
 
+    const canDeleteJobStatus = (status) => ['COMPLETED', 'FAILED', 'DEAD_LETTER', 'CANCELLED'].includes(status);
+    const canCancelJobStatus = (status) => ['PENDING', 'RUNNING', 'RETRY_SCHEDULED', 'CANCEL_REQUESTED'].includes(status);
+    const canTriggerCancelJobStatus = (status) => ['PENDING', 'RUNNING', 'RETRY_SCHEDULED'].includes(status);
+
+    const selectedJobs = useMemo(
+        () => jobs.filter((job) => selectedJobIds.has(job.id)),
+        [jobs, selectedJobIds],
+    );
+    const allJobsSelectedOnPage = jobs.length > 0 && jobs.every((job) => selectedJobIds.has(job.id));
+    const canBulkDelete = selectedJobs.length > 0 && selectedJobs.every((job) => canDeleteJobStatus(job.status));
+    const canBulkStop = selectedJobs.length > 0 && selectedJobs.every((job) => canTriggerCancelJobStatus(job.status));
+
+    useEffect(() => {
+        setSelectedJobIds(new Set());
+    }, [page, statusFilter, typeFilter, dateRangeFilter]);
+
+    const toggleJobSelection = (jobId) => {
+        setSelectedJobIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(jobId)) next.delete(jobId);
+            else next.add(jobId);
+            return next;
+        });
+    };
+
+    const toggleSelectAllOnPage = () => {
+        setSelectedJobIds((prev) => {
+            const next = new Set(prev);
+            if (allJobsSelectedOnPage) {
+                jobs.forEach((job) => next.delete(job.id));
+            } else {
+                jobs.forEach((job) => next.add(job.id));
+            }
+            return next;
+        });
+    };
+
     const getStatusIcon = (status) => {
         switch (status) {
             case 'COMPLETED':
@@ -128,6 +168,14 @@ export default function Jobs() {
             default:
                 return <Clock className="w-4 h-4" />;
         }
+    };
+
+    const getStatusTone = (status) => {
+        if (status === 'COMPLETED') return 'status-badge-success';
+        if (status === 'FAILED' || status === 'DEAD_LETTER') return 'status-badge-danger';
+        if (status === 'RUNNING') return 'status-badge-info';
+        if (status === 'CANCEL_REQUESTED') return 'status-badge-warning';
+        return 'status-badge';
     };
 
     const triggerUndo = async (batchId) => {
@@ -193,6 +241,91 @@ export default function Jobs() {
             showToast(message, 'error');
         } finally {
             setReprocessingJobId(null);
+        }
+    };
+
+    const requestBulkCancel = async () => {
+        if (!canBulkStop || bulkCancelling) return;
+        setBulkCancelling(true);
+        const targetIds = selectedJobs.map((job) => job.id);
+        try {
+            const results = await Promise.allSettled(targetIds.map((jobId) => cancelJob(jobId)));
+            const successIds = targetIds.filter((_, index) => results[index].status === 'fulfilled');
+            const successSet = new Set(successIds);
+
+            if (successSet.size > 0) {
+                queryClient.setQueryData(queryKey, (prev = []) =>
+                    prev.map((job) =>
+                        successSet.has(job.id)
+                            ? {
+                                ...job,
+                                status: 'CANCELLED',
+                            }
+                            : job
+                    )
+                );
+                setSelectedJobIds((prev) => {
+                    const next = new Set(prev);
+                    successIds.forEach((jobId) => next.delete(jobId));
+                    return next;
+                });
+            }
+
+            if (successIds.length === targetIds.length) {
+                showToast(t('jobs.bulkStopRequested', { count: successIds.length }), 'success');
+            } else if (successIds.length > 0) {
+                showToast(
+                    t('jobs.bulkStopPartial', { success: successIds.length, total: targetIds.length }),
+                    'warning',
+                );
+            } else {
+                showToast(t('jobs.bulkStopFailed'), 'error');
+            }
+            refetch();
+        } catch {
+            showToast(t('jobs.bulkStopFailed'), 'error');
+        } finally {
+            setBulkCancelling(false);
+        }
+    };
+
+    const removeBulkJobs = async () => {
+        if (!canBulkDelete || bulkDeleting) return;
+        setBulkDeleting(true);
+        const targetIds = selectedJobs.map((job) => job.id);
+        try {
+            const results = await Promise.allSettled(targetIds.map((jobId) => deleteJob(jobId)));
+            const successIds = targetIds.filter((_, index) => results[index].status === 'fulfilled');
+            const successSet = new Set(successIds);
+
+            if (successSet.size > 0) {
+                queryClient.setQueryData(queryKey, (prev = []) =>
+                    prev.filter((job) => !successSet.has(job.id))
+                );
+                if (selectedJob?.id && successSet.has(selectedJob.id)) {
+                    setSelectedJob(null);
+                }
+                setSelectedJobIds((prev) => {
+                    const next = new Set(prev);
+                    successIds.forEach((jobId) => next.delete(jobId));
+                    return next;
+                });
+            }
+
+            if (successIds.length === targetIds.length) {
+                showToast(t('jobs.bulkDeleteSuccess', { count: successIds.length }), 'success');
+            } else if (successIds.length > 0) {
+                showToast(
+                    t('jobs.bulkDeletePartial', { success: successIds.length, total: targetIds.length }),
+                    'warning',
+                );
+            } else {
+                showToast(t('jobs.bulkDeleteFailed'), 'error');
+            }
+        } catch {
+            showToast(t('jobs.bulkDeleteFailed'), 'error');
+        } finally {
+            setBulkDeleting(false);
         }
     };
 
@@ -322,7 +455,7 @@ export default function Jobs() {
     const selectedErrorItemsTruncated = selectedJob ? getErrorItemsTruncated(selectedJob) : 0;
 
     return (
-        <div className="app-page">
+        <div className="app-page density-compact">
             <div className="page-header flex flex-wrap items-start justify-between gap-3">
                 <div>
                     <h1 className="page-title">{t('jobs.title')}</h1>
@@ -417,9 +550,44 @@ export default function Jobs() {
                         <p className="empty-state-text">{t('jobs.noJobsHelp')}</p>
                     </div>
                 ) : (
-                    <div className="surface-card overflow-x-auto">
-                        <div className="min-w-[1480px]">
-                            <div className="grid grid-cols-[112px_110px_1fr_132px_132px_132px_95px_130px_110px_72px_72px_72px_78px_118px] gap-3 p-3 border-b border-border/70 bg-muted/45 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
+                    <div className="space-y-3">
+                        <div className="surface-card px-4 py-2 flex flex-wrap items-center justify-between gap-3 text-sm">
+                            <div className="flex items-center gap-2">
+                                <span className="font-medium tabular-nums">{t('jobs.selectedCount', { count: selectedJobIds.size })}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={requestBulkCancel}
+                                    disabled={!canBulkStop || bulkCancelling}
+                                    className="p-2 hover:bg-background rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                    title={canBulkStop ? t('jobs.stopSelected') : t('jobs.stopSelectedBlocked')}
+                                >
+                                    <Square size={16} />
+                                    <span>{t('jobs.stopSelected')}</span>
+                                </button>
+                                <button
+                                    onClick={removeBulkJobs}
+                                    disabled={!canBulkDelete || bulkDeleting}
+                                    className="p-2 hover:bg-background rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                    title={canBulkDelete ? t('jobs.deleteSelected') : t('jobs.deleteSelectedBlocked')}
+                                >
+                                    <Trash2 size={16} />
+                                    <span>{t('jobs.deleteSelected')}</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="surface-card overflow-x-auto">
+                        <div className="min-w-[1240px]">
+                            <div className="grid grid-cols-[38px_104px_96px_minmax(260px,1.5fr)_116px_116px_116px_82px_112px_minmax(280px,1.3fr)_106px] gap-3 p-3 border-b border-border/70 bg-muted/45 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
+                                <div>
+                                    <input
+                                        type="checkbox"
+                                        checked={allJobsSelectedOnPage}
+                                        onChange={toggleSelectAllOnPage}
+                                        aria-label={t('jobs.selectAllOnPage')}
+                                    />
+                                </div>
                                 <div>{t('jobs.status')}</div>
                                 <div>{t('jobs.jobId')}</div>
                                 <div>{t('jobs.type')}</div>
@@ -429,10 +597,6 @@ export default function Jobs() {
                                 <div className="text-right">{t('jobs.duration')}</div>
                                 <div>{t('jobs.eta')}</div>
                                 <div>{t('jobs.progress')}</div>
-                                <div className="text-right">{t('jobs.total')}</div>
-                                <div className="text-right">{t('jobs.success')}</div>
-                                <div className="text-right">{t('jobs.failed')}</div>
-                                <div className="text-right">{t('jobs.skipped')}</div>
                                 <div className="text-center"></div>
                             </div>
 
@@ -446,26 +610,39 @@ export default function Jobs() {
                                 const finishedAt = job.completed_at || job.dead_lettered_at || null;
                                 const progressPercent = job.progress_percent ?? 0;
                                 const metricSummary = getMetricSummary(job);
+                                const normalizedProgressPercent = Math.max(0, Math.min(100, progressPercent));
+                                const processedItems = metricSummary.success + metricSummary.failed + metricSummary.skipped;
+                                const breakdownTotal = metricSummary.total > 0 ? metricSummary.total : processedItems;
+                                const breakdownDenominator = breakdownTotal > 0 ? breakdownTotal : 1;
+                                const successWidth = (Math.max(0, metricSummary.success) / breakdownDenominator) * 100;
+                                const failedWidth = (Math.max(0, metricSummary.failed) / breakdownDenominator) * 100;
+                                const skippedWidth = (Math.max(0, metricSummary.skipped) / breakdownDenominator) * 100;
+                                const completionPercent = breakdownTotal > 0
+                                    ? Math.round((processedItems / breakdownTotal) * 100)
+                                    : normalizedProgressPercent;
                                 const isQueued = ['PENDING', 'RETRY_SCHEDULED'].includes(job.status);
                                 const etaText = isQueued
                                     ? `~${formatDuration(job.estimated_wait_seconds)} (${job.queue_position ? `#${job.queue_position}` : '-'})`
                                     : '-';
                                 const canUndo = job.status === 'COMPLETED' && job.result?.batch_id;
-                                const canDelete = ['COMPLETED', 'FAILED', 'DEAD_LETTER', 'CANCELLED'].includes(job.status);
-                                const canCancel = ['PENDING', 'RUNNING', 'RETRY_SCHEDULED', 'CANCEL_REQUESTED'].includes(job.status);
+                                const canDelete = canDeleteJobStatus(job.status);
+                                const canCancel = canCancelJobStatus(job.status);
 
                                     return (
                                         <div
                                             key={job.id}
-                                            className="grid grid-cols-[112px_110px_1fr_132px_132px_132px_95px_130px_110px_72px_72px_72px_78px_118px] gap-3 p-3 items-center hover:bg-accent/35 transition-colors pointer-events-none"
+                                            className="grid grid-cols-[38px_104px_96px_minmax(260px,1.5fr)_116px_116px_116px_82px_112px_minmax(280px,1.3fr)_106px] gap-3 p-3 items-center hover:bg-accent/35 transition-colors pointer-events-none"
                                         >
                                         <div className="pointer-events-auto">
-                                            <div className={`inline-flex items-center gap-2 font-medium ${job.status === 'COMPLETED' ? 'text-green-600' :
-                                                job.status === 'FAILED' || job.status === 'DEAD_LETTER' ? 'text-red-500' :
-                                                    job.status === 'RUNNING' ? 'text-blue-500' :
-                                                        job.status === 'CANCEL_REQUESTED' ? 'text-amber-600' :
-                                                            job.status === 'CANCELLED' ? 'text-zinc-500' : 'text-zinc-500'
-                                                }`}>
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedJobIds.has(job.id)}
+                                                onChange={() => toggleJobSelection(job.id)}
+                                                aria-label={`${t('jobs.jobId')} ${String(job.id).slice(0, 8)}`}
+                                            />
+                                        </div>
+                                        <div className="pointer-events-auto">
+                                            <div className={`status-badge ${getStatusTone(job.status)}`}>
                                                 {getStatusIcon(job.status)}
                                                 <span>{formatJobStatus(job.status, t)}</span>
                                             </div>
@@ -497,27 +674,34 @@ export default function Jobs() {
                                             )}
                                         </div>
                                         <div className="pointer-events-auto">
-                                            <div className="h-2 w-full bg-muted rounded overflow-hidden">
-                                                <div
-                                                    className={`h-full ${job.status === 'FAILED' || job.status === 'DEAD_LETTER' ? 'bg-red-500' : 'bg-primary'}`}
-                                                    style={{ width: `${Math.max(0, Math.min(100, progressPercent))}%` }}
-                                                />
+                                            <div className="h-3 w-full rounded-sm border border-border/60 bg-muted/60 overflow-hidden flex">
+                                                {breakdownTotal > 0 ? (
+                                                    <>
+                                                        <div className="h-full bg-emerald-500" style={{ width: `${successWidth}%` }} />
+                                                        <div className="h-full bg-destructive" style={{ width: `${failedWidth}%` }} />
+                                                        <div className="h-full bg-amber-400" style={{ width: `${skippedWidth}%` }} />
+                                                    </>
+                                                ) : (
+                                                    <div
+                                                        className={`h-full ${job.status === 'FAILED' || job.status === 'DEAD_LETTER' ? 'bg-destructive' : 'bg-primary'}`}
+                                                        style={{ width: `${normalizedProgressPercent}%` }}
+                                                    />
+                                                )}
                                             </div>
-                                            <div className="text-xs text-muted-foreground mt-1">
-                                                {progressPercent}%
+                                            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] tabular-nums">
+                                                <span className="rounded bg-emerald-500/12 px-1.5 py-0.5 text-emerald-700">
+                                                    {t('jobs.success')}: {metricSummary.success}
+                                                </span>
+                                                <span className={`rounded px-1.5 py-0.5 ${metricSummary.failed > 0 ? 'bg-destructive/12 text-destructive' : 'bg-muted text-muted-foreground'}`}>
+                                                    {t('jobs.failed')}: {metricSummary.failed}
+                                                </span>
+                                                <span className="rounded bg-amber-400/15 px-1.5 py-0.5 text-amber-700">
+                                                    {t('jobs.skipped')}: {metricSummary.skipped}
+                                                </span>
+                                                <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
+                                                    {completionPercent}%
+                                                </span>
                                             </div>
-                                        </div>
-                                        <div className="text-right text-xs tabular-nums text-foreground pointer-events-auto">
-                                            {metricSummary.total}
-                                        </div>
-                                        <div className="text-right text-xs tabular-nums text-emerald-600 pointer-events-auto">
-                                            {metricSummary.success}
-                                        </div>
-                                        <div className={`text-right text-xs tabular-nums pointer-events-auto ${metricSummary.failed > 0 ? 'text-red-600 font-semibold' : 'text-muted-foreground'}`}>
-                                            {metricSummary.failed}
-                                        </div>
-                                        <div className="text-right text-xs tabular-nums text-amber-600 pointer-events-auto">
-                                            {metricSummary.skipped}
                                         </div>
                                         <div className="text-right pointer-events-auto">
                                             <div className="flex items-center justify-end gap-1">
@@ -586,6 +770,7 @@ export default function Jobs() {
                                 })}
                             </div>
                         </div>
+                        </div>
                     </div>
                 )}
 
@@ -602,12 +787,7 @@ export default function Jobs() {
                         <div className="flex items-center justify-between pb-4 border-b">
                             <div>
                                 <span className="text-sm text-muted-foreground block mb-1">{t('jobs.status')}</span>
-                                <div className={`flex items-center gap-2 font-medium ${selectedJob.status === 'COMPLETED' ? 'text-green-600' :
-                                    selectedJob.status === 'FAILED' || selectedJob.status === 'DEAD_LETTER' ? 'text-red-500' :
-                                        selectedJob.status === 'RUNNING' ? 'text-blue-500' :
-                                            selectedJob.status === 'CANCEL_REQUESTED' ? 'text-amber-600' :
-                                                selectedJob.status === 'CANCELLED' ? 'text-zinc-500' : 'text-zinc-500'
-                                    }`}>
+                                <div className={`status-badge ${getStatusTone(selectedJob.status)}`}>
                                     {getStatusIcon(selectedJob.status)}
                                     <span>{formatJobStatus(selectedJob.status, t)}</span>
                                 </div>
@@ -621,9 +801,9 @@ export default function Jobs() {
                         </div>
                         <div className="space-y-2">
                             <span className="text-sm text-muted-foreground block">{t('jobs.progress')}</span>
-                            <div className="h-2 w-full bg-muted rounded overflow-hidden">
+                            <div className="h-2 w-full bg-muted rounded-sm overflow-hidden">
                                 <div
-                                    className={`h-full ${selectedJob.status === 'FAILED' || selectedJob.status === 'DEAD_LETTER' ? 'bg-red-500' : 'bg-primary'}`}
+                                    className={`h-full ${selectedJob.status === 'FAILED' || selectedJob.status === 'DEAD_LETTER' ? 'bg-destructive' : 'bg-primary'}`}
                                     style={{ width: `${Math.max(0, Math.min(100, selectedJob.progress_percent ?? 0))}%` }}
                                 />
                             </div>
@@ -634,7 +814,7 @@ export default function Jobs() {
                                 {t('jobs.retry', { current: selectedJob.retry_count, max: selectedJob.max_retries })}
                             </div>
                             {selectedJob.next_retry_at && (
-                                <div className="text-xs text-amber-600">
+                                <div className="text-xs text-muted-foreground">
                                     {t('jobs.nextRetry', { value: formatDate(selectedJob.next_retry_at) })}
                                 </div>
                             )}
@@ -648,7 +828,7 @@ export default function Jobs() {
                                 </div>
                             )}
                             {selectedJob.dead_lettered_at && (
-                                <div className="text-xs text-red-600">
+                                <div className="text-xs text-destructive">
                                     {t('jobs.deadLetter', { value: formatDate(selectedJob.dead_lettered_at) })}
                                 </div>
                             )}
@@ -658,17 +838,17 @@ export default function Jobs() {
                                         <div className="text-muted-foreground">{t('jobs.total')}</div>
                                         <div className="font-semibold tabular-nums">{selectedMetricSummary.total}</div>
                                     </div>
-                                    <div className="rounded border border-emerald-500/30 bg-emerald-500/5 px-2 py-1 text-xs">
-                                        <div className="text-emerald-700">{t('jobs.success')}</div>
-                                        <div className="font-semibold tabular-nums text-emerald-700">{selectedMetricSummary.success}</div>
+                                    <div className="status-badge status-badge-success rounded-sm px-2 py-1 text-xs">
+                                        <div>{t('jobs.success')}</div>
+                                        <div className="font-semibold tabular-nums">{selectedMetricSummary.success}</div>
                                     </div>
-                                    <div className={`rounded border px-2 py-1 text-xs ${selectedMetricSummary.failed > 0 ? 'border-red-500/30 bg-red-500/5' : 'border-muted bg-muted/20'}`}>
-                                        <div className={selectedMetricSummary.failed > 0 ? 'text-red-700' : 'text-muted-foreground'}>{t('jobs.failed')}</div>
-                                        <div className={`font-semibold tabular-nums ${selectedMetricSummary.failed > 0 ? 'text-red-700' : 'text-muted-foreground'}`}>{selectedMetricSummary.failed}</div>
+                                    <div className={`rounded-sm border px-2 py-1 text-xs ${selectedMetricSummary.failed > 0 ? 'status-badge-danger' : 'status-badge'}`}>
+                                        <div>{t('jobs.failed')}</div>
+                                        <div className="font-semibold tabular-nums">{selectedMetricSummary.failed}</div>
                                     </div>
-                                    <div className="rounded border border-amber-500/30 bg-amber-500/5 px-2 py-1 text-xs">
-                                        <div className="text-amber-700">{t('jobs.skipped')}</div>
-                                        <div className="font-semibold tabular-nums text-amber-700">{selectedMetricSummary.skipped}</div>
+                                    <div className="status-badge status-badge-warning rounded-sm px-2 py-1 text-xs">
+                                        <div>{t('jobs.skipped')}</div>
+                                        <div className="font-semibold tabular-nums">{selectedMetricSummary.skipped}</div>
                                     </div>
                                 </div>
                             )}
@@ -730,15 +910,15 @@ export default function Jobs() {
                         )}
 
                         {selectedMetricSummary && selectedMetricSummary.failed > 0 && selectedErrorItems.length === 0 && !selectedErrorText && (
-                            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">
+                            <div className="status-badge status-badge-warning rounded-sm px-3 py-2 text-xs">
                                 {t('jobs.failedItemsNoDetails')}
                             </div>
                         )}
 
                         {selectedJob.status === 'COMPLETED' && selectedJob.result && (
                             <div>
-                                <span className="text-sm font-medium text-green-600 mb-2 block">{t('jobs.result')}</span>
-                                <div className="bg-green-500/5 p-3 rounded-md border border-green-500/20 text-xs font-mono overflow-auto max-h-60 text-green-600">
+                                <span className="text-sm font-medium text-foreground mb-2 block">{t('jobs.result')}</span>
+                                <div className="status-badge status-badge-success block p-3 rounded-sm text-xs font-mono overflow-auto max-h-60">
                                     <pre className="whitespace-pre-wrap break-all">
                                         {JSON.stringify(selectedJob.result, null, 2)}
                                     </pre>

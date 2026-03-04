@@ -11,6 +11,9 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.config import get_settings
+from backend.services.metadata_libraries.implementations.books.schema import (
+    BOOKS_LIBRARY_KEY,
+)
 from backend.db.models import AppSetting, MetadataPlugin
 from backend.services.metadata_libraries.implementations.comics.schema import (
     COMICS_LIBRARY_KEY,
@@ -44,7 +47,7 @@ class MetadataLibrarySettingSpec:
 
 
 @dataclass(frozen=True, slots=True)
-class ComicsRuntimeSettings:
+class CoverRuntimeSettings:
     storage_account_id: str | None
     storage_parent_folder_id: str
     storage_folder_name: str
@@ -52,6 +55,10 @@ class ComicsRuntimeSettings:
     max_height: int
     target_bytes: int
     quality_steps: tuple[int, ...]
+
+
+# Backward-compatible alias used by comics metadata service.
+ComicsRuntimeSettings = CoverRuntimeSettings
 
 
 def _comics_library_setting_spec() -> MetadataLibrarySettingSpec:
@@ -120,8 +127,75 @@ def _comics_library_setting_spec() -> MetadataLibrarySettingSpec:
     )
 
 
+def _books_library_setting_spec() -> MetadataLibrarySettingSpec:
+    cfg = get_settings()
+    return MetadataLibrarySettingSpec(
+        library_key=BOOKS_LIBRARY_KEY,
+        library_name="Books Core",
+        description="Storage and optimization settings for book cover extraction.",
+        schema_version=1,
+        fields=(
+            MetadataLibrarySettingFieldSpec(
+                key="cover_storage_target",
+                label="Cover Destination",
+                input_type="folder_target",
+                description="Choose account and folder where extracted covers are uploaded.",
+                default={
+                    "account_id": cfg.comic_cover_storage_account_id or "",
+                    "folder_id": cfg.comic_cover_storage_parent_folder_id,
+                    "folder_path": "Root",
+                },
+            ),
+            MetadataLibrarySettingFieldSpec(
+                key="cover_storage_folder_name",
+                label="Cover Folder Name",
+                input_type="text",
+                description="Subfolder name created under destination to store covers.",
+                default=cfg.comic_cover_storage_folder_name,
+                placeholder="__driver_comic_covers__",
+            ),
+            MetadataLibrarySettingFieldSpec(
+                key="cover_max_width",
+                label="Cover Max Width",
+                input_type="number",
+                description="Maximum cover width in pixels after optimization.",
+                default=cfg.comic_cover_max_width,
+                minimum=100,
+                maximum=4000,
+            ),
+            MetadataLibrarySettingFieldSpec(
+                key="cover_max_height",
+                label="Cover Max Height",
+                input_type="number",
+                description="Maximum cover height in pixels after optimization.",
+                default=cfg.comic_cover_max_height,
+                minimum=100,
+                maximum=6000,
+            ),
+            MetadataLibrarySettingFieldSpec(
+                key="cover_target_bytes",
+                label="Cover Target Size (bytes)",
+                input_type="number",
+                description="Target cover file size used when selecting JPEG quality.",
+                default=cfg.comic_cover_target_bytes,
+                minimum=20000,
+                maximum=5_000_000,
+            ),
+            MetadataLibrarySettingFieldSpec(
+                key="cover_jpeg_quality_steps",
+                label="JPEG Quality Steps",
+                input_type="text",
+                description="Comma-separated JPEG qualities used in compression fallback.",
+                default=cfg.comic_cover_jpeg_quality_steps,
+                placeholder="84,78,72,66,60",
+            ),
+        ),
+    )
+
+
 METADATA_LIBRARY_SETTINGS_REGISTRY: dict[str, MetadataLibrarySettingSpec] = {
     COMICS_LIBRARY_KEY: _comics_library_setting_spec(),
+    BOOKS_LIBRARY_KEY: _books_library_setting_spec(),
 }
 
 
@@ -216,12 +290,20 @@ class MetadataLibrarySettingsService:
         if changed:
             await self.session.commit()
 
-    async def get_comics_runtime_settings(self) -> ComicsRuntimeSettings:
-        spec = METADATA_LIBRARY_SETTINGS_REGISTRY[COMICS_LIBRARY_KEY]
+    async def get_comics_runtime_settings(self) -> CoverRuntimeSettings:
+        return await self._get_cover_runtime_settings(COMICS_LIBRARY_KEY)
+
+    async def get_books_runtime_settings(self) -> CoverRuntimeSettings:
+        return await self._get_cover_runtime_settings(BOOKS_LIBRARY_KEY)
+
+    async def _get_cover_runtime_settings(
+        self, library_key: str
+    ) -> CoverRuntimeSettings:
+        spec = METADATA_LIBRARY_SETTINGS_REGISTRY[library_key]
         rows = await self._ensure_library_defaults(spec)
         values: dict[str, Any] = {}
         for field in spec.fields:
-            row = rows[setting_db_key(COMICS_LIBRARY_KEY, field.key)]
+            row = rows[setting_db_key(library_key, field.key)]
             values[field.key] = self._parse_value(field, row.value)
 
         target = values["cover_storage_target"] or {}
@@ -234,7 +316,7 @@ class MetadataLibrarySettingsService:
         quality_steps = self._parse_quality_steps(
             str(values["cover_jpeg_quality_steps"])
         )
-        return ComicsRuntimeSettings(
+        return CoverRuntimeSettings(
             storage_account_id=account_id,
             storage_parent_folder_id=folder_id,
             storage_folder_name=folder_name,

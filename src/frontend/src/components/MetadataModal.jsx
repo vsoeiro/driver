@@ -115,6 +115,7 @@ export default function MetadataModal({
                 map[String(layout.category_id)] = {
                     columns: layout.columns,
                     row_height: layout.row_height,
+                    hide_read_only_fields: !!layout.hide_read_only_fields,
                     items: (layout.items || []).map((item, index) => ({
                         item_type: String(item.item_type || (item.attribute_id ? 'attribute' : 'section')),
                         item_id: String(item.item_id || (item.attribute_id ? String(item.attribute_id) : `section_${index + 1}`)),
@@ -291,23 +292,31 @@ export default function MetadataModal({
         selectedCategory,
         categoryLayout?.ordered_attribute_ids || null,
     );
+    const hideReadOnlyFields = !!categoryLayout?.hide_read_only_fields;
+    const isReadOnlyLibraryAttribute = (attr) => (
+        ['comics_core', 'books_core'].includes(selectedCategory?.plugin_key)
+        && READ_ONLY_COMIC_FIELD_KEYS.has(attr?.plugin_field_key)
+    );
+    const visibleOrderedAttributes = orderedAttributes.filter(
+        (attr) => !(hideReadOnlyFields && isReadOnlyLibraryAttribute(attr)),
+    );
     const orderedFieldGroups = (() => {
         if (isComicLibraryCategory) {
             const configuredKeys = configuredFieldGroups.flat();
             const grouped = configuredFieldGroups
                 .map((group) =>
                     group
-                        .map((fieldKey) => orderedAttributes.find((attr) => attr.plugin_field_key === fieldKey))
+                        .map((fieldKey) => visibleOrderedAttributes.find((attr) => attr.plugin_field_key === fieldKey))
                         .filter(Boolean)
                 )
                 .filter((group) => group.length > 0);
-            const leftovers = orderedAttributes
+            const leftovers = visibleOrderedAttributes
                 .filter((attr) => !configuredKeys.includes(attr.plugin_field_key || ''))
                 .map((attr) => [attr]);
             return [...grouped, ...leftovers];
         }
 
-        return orderedAttributes.map((attr) => [attr]);
+        return visibleOrderedAttributes.map((attr) => [attr]);
     })();
     const coverAttr = selectedCategory?.attributes?.find(
         (attr) => attr.plugin_field_key === libraryView?.gallery?.coverField
@@ -648,13 +657,13 @@ export default function MetadataModal({
 
                         <div className="space-y-4 min-w-0">
                             {item?.item_type === 'folder' && (
-                                <div className="bg-yellow-500/10 border-l-4 border-yellow-500 p-4 mb-4">
+                                <div className="status-badge status-badge-warning mb-4 block border-l-4 p-4">
                                     <div className="flex">
                                         <div className="flex-shrink-0">
-                                            <AlertTriangle className="h-5 w-5 text-yellow-500" aria-hidden="true" />
+                                            <AlertTriangle className="h-5 w-5" aria-hidden="true" />
                                         </div>
                                         <div className="ml-3">
-                                            <p className="text-sm text-yellow-700 dark:text-yellow-400">
+                                            <p className="text-sm">
                                                 {t('metadataModal.folderWarningBefore')} <strong>{t('metadataModal.folderWarningStrong')}</strong> {t('metadataModal.folderWarningAfter')}
                                             </p>
                                         </div>
@@ -680,7 +689,7 @@ export default function MetadataModal({
 
                             {selectedCategory && (
                                 <div className="space-y-3 border-t pt-4">
-                                    {orderedAttributes.length === 0 ? (
+                                    {visibleOrderedAttributes.length === 0 ? (
                                         <p className="text-sm text-muted-foreground italic">{t('metadataModal.noAttributes')}</p>
                                     ) : (
                                         categoryLayout ? (
@@ -718,6 +727,7 @@ export default function MetadataModal({
 
                                                     const attr = categoryAttributesById.get(String(layoutItem.attribute_id));
                                                     if (!attr) return null;
+                                                    if (hideReadOnlyFields && isReadOnlyLibraryAttribute(attr)) return null;
                                                     return renderAttributeField(attr, 'min-w-0', style);
                                                 })}
                                             </div>
@@ -792,7 +802,7 @@ export default function MetadataModal({
             )}
             {isCoverZoomOpen && coverUrl && (
                 <div
-                    className="fixed inset-0 z-[70] bg-black/85 flex flex-col"
+                    className="layer-overlay fixed inset-0 bg-black/85 flex flex-col"
                     onClick={() => setIsCoverZoomOpen(false)}
                 >
                     <div className="flex items-center justify-between p-3 border-b border-white/10">
@@ -856,7 +866,7 @@ export default function MetadataModal({
             )}
             {isImageZoomOpen && imagePreviewUrl && (
                 <div
-                    className="fixed inset-0 z-[70] bg-black/85 flex flex-col"
+                    className="layer-overlay fixed inset-0 bg-black/85 flex flex-col"
                     onClick={() => setIsImageZoomOpen(false)}
                 >
                     <div className="flex items-center justify-between p-3 border-b border-white/10">

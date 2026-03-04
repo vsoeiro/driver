@@ -290,9 +290,9 @@ export default function AdminDashboard() {
                                                         {row.requests_in_window}/{row.max_requests} in {row.window_seconds}s
                                                     </div>
                                                 </div>
-                                                <div className="mt-2 h-2 rounded bg-muted overflow-hidden">
+                                                <div className="mt-2 h-2 rounded-sm bg-muted overflow-hidden">
                                                     <div
-                                                        className={`h-full rounded ${pct >= 90 ? 'bg-destructive' : pct >= 75 ? 'bg-amber-500' : 'bg-primary'}`}
+                                                        className={`h-full rounded-sm ${pct >= 90 ? 'bg-destructive' : pct >= 75 ? 'bg-primary/70' : 'bg-primary'}`}
                                                         style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
                                                     />
                                                 </div>
@@ -326,13 +326,7 @@ export default function AdminDashboard() {
                                                 <div className="text-sm font-medium">{item.label}</div>
                                                 <div className="text-xs text-muted-foreground">{item.detail || '-'}</div>
                                             </div>
-                                            <span className={`status-chip ${
-                                                item.status === 'ok'
-                                                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                                    : item.status === 'warning'
-                                                        ? 'border-amber-200 bg-amber-50 text-amber-700'
-                                                        : 'border-rose-200 bg-rose-50 text-rose-700'
-                                            }`}>
+                                            <span className={`status-chip ${item.status === 'ok' ? 'status-badge-success' : item.status === 'warning' ? 'status-badge-warning' : 'status-badge-danger'}`}>
                                                 {item.status}
                                             </span>
                                         </div>

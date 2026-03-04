@@ -96,6 +96,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                 map[String(layout.category_id)] = {
                     columns: layout.columns,
                     row_height: layout.row_height,
+                    hide_read_only_fields: !!layout.hide_read_only_fields,
                     items: (layout.items || []).map((item, index) => ({
                         item_type: String(item.item_type || (item.attribute_id ? 'attribute' : 'section')),
                         item_id: String(item.item_id || (item.attribute_id ? String(item.attribute_id) : `section_${index + 1}`)),
@@ -203,6 +204,14 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
     const orderedAttributes = sortAttributesForCategory(
         currentCategory,
         categoryLayout?.ordered_attribute_ids || null,
+    );
+    const hideReadOnlyFields = !!categoryLayout?.hide_read_only_fields;
+    const isReadOnlyLibraryAttribute = (attr) => (
+        ['comics_core', 'books_core'].includes(currentCategory?.plugin_key)
+        && READ_ONLY_COMIC_FIELD_KEYS.has(attr?.plugin_field_key)
+    );
+    const visibleOrderedAttributes = orderedAttributes.filter(
+        (attr) => !(hideReadOnlyFields && isReadOnlyLibraryAttribute(attr)),
     );
     const categoryAttributesById = new Map(
         (currentCategory?.attributes || []).map((attr) => [String(attr.id), attr]),
@@ -443,19 +452,20 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
 
                                             const attr = categoryAttributesById.get(String(layoutItem.attribute_id));
                                             if (!attr) return null;
+                                            if (hideReadOnlyFields && isReadOnlyLibraryAttribute(attr)) return null;
                                             return renderAttributeInput(attr, 'min-w-0', style);
                                         })}
                                     </div>
                                 ) : (
                                     <div className="space-y-3">
-                                        {orderedAttributes.map((attr) => renderAttributeInput(attr))}
+                                        {visibleOrderedAttributes.map((attr) => renderAttributeInput(attr))}
                                     </div>
                                 )}
                             </div>
                         )}
 
                         {hasFolders && (
-                            <label className="flex items-center gap-2 text-sm border p-3 rounded-md bg-amber-50 text-amber-800">
+                            <label className="status-badge status-badge-warning flex items-center gap-2 p-3 text-sm">
                                 <input
                                     type="checkbox"
                                     checked={applyRecursive}

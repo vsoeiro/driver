@@ -26,6 +26,8 @@ GRAPH_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 GRAPH_THROTTLE_MAX_RETRIES = 5
 GRAPH_THROTTLE_BASE_DELAY_SECONDS = 0.5
 GRAPH_THROTTLE_MAX_DELAY_SECONDS = 15.0
+GRAPH_DOWNLOAD_MAX_RETRIES = 3
+GRAPH_DOWNLOAD_RETRYABLE_STATUS = {401, 403, 408, 429, 500, 502, 503, 504}
 
 
 def _encode_drive_path_component(value: str) -> str:
@@ -67,6 +69,13 @@ class GraphClient(OAuthHTTPClientBase):
         retry_after = GraphClient._parse_retry_after_seconds(response)
         if retry_after is not None:
             return min(retry_after, GRAPH_THROTTLE_MAX_DELAY_SECONDS)
+        exponent = max(0, attempt - 1)
+        base = GRAPH_THROTTLE_BASE_DELAY_SECONDS * (2 ** exponent)
+        jitter = random.uniform(0.0, 0.35)
+        return min(base + jitter, GRAPH_THROTTLE_MAX_DELAY_SECONDS)
+
+    @staticmethod
+    def _build_download_retry_delay_seconds(attempt: int) -> float:
         exponent = max(0, attempt - 1)
         base = GRAPH_THROTTLE_BASE_DELAY_SECONDS * (2 ** exponent)
         jitter = random.uniform(0.0, 0.35)
@@ -305,53 +314,103 @@ class GraphClient(OAuthHTTPClientBase):
         GraphAPIError
             If the item is a folder or download fails.
         """
-        item_data = await self._request("GET", f"/me/drive/items/{item_id}", account)
-
-        if "folder" in item_data:
-            raise GraphAPIError("Cannot download a folder as a file", status_code=400)
-
-        download_url = item_data.get("@microsoft.graph.downloadUrl")
-        if not download_url:
-            raise GraphAPIError("Download URL not available for this item")
-
-        filename = item_data.get("name", "file")
         download_timeout = (
             httpx.Timeout(timeout_seconds, connect=10.0)
             if timeout_seconds
             else GRAPH_TIMEOUT
         )
+        filename = "file"
 
-        try:
-            client = await self._get_http_client(timeout=GRAPH_TIMEOUT)
-            response = await client.get(download_url, timeout=download_timeout)
-            await provider_request_usage_tracker.record_response(
-                provider=account.provider,
-                status_code=response.status_code,
-            )
-        except httpx.TimeoutException as exc:
-            await provider_request_usage_tracker.record_transport_error(
-                provider=account.provider,
-                kind="timeout",
-            )
-            raise GraphAPIError(
-                f"Timed out downloading file {filename}",
-                status_code=504,
-            ) from exc
-        except httpx.HTTPError as exc:
-            await provider_request_usage_tracker.record_transport_error(
-                provider=account.provider,
-                kind="connection",
-            )
-            raise GraphAPIError(
-                f"Failed to download file {filename}",
-                status_code=502,
-            ) from exc
+        for attempt in range(1, GRAPH_DOWNLOAD_MAX_RETRIES + 1):
+            item_data = await self._request("GET", f"/me/drive/items/{item_id}", account)
 
-        if response.status_code >= 400:
-            error_msg = response.text or "Download failed"
-            raise GraphAPIError(error_msg, status_code=response.status_code)
+            if "folder" in item_data:
+                raise GraphAPIError("Cannot download a folder as a file", status_code=400)
 
-        return filename, response.content
+            download_url = item_data.get("@microsoft.graph.downloadUrl")
+            if not download_url:
+                raise GraphAPIError("Download URL not available for this item")
+            filename = item_data.get("name", "file")
+
+            try:
+                client = await self._get_http_client(timeout=GRAPH_TIMEOUT)
+                response = await client.get(download_url, timeout=download_timeout)
+                await provider_request_usage_tracker.record_response(
+                    provider=account.provider,
+                    status_code=response.status_code,
+                )
+            except httpx.TimeoutException as exc:
+                await provider_request_usage_tracker.record_transport_error(
+                    provider=account.provider,
+                    kind="timeout",
+                )
+                if attempt < GRAPH_DOWNLOAD_MAX_RETRIES:
+                    delay_seconds = self._build_download_retry_delay_seconds(attempt)
+                    logger.warning(
+                        "Graph download timeout account=%s item=%s attempt=%s/%s; retrying in %.2fs",
+                        account.id,
+                        item_id,
+                        attempt,
+                        GRAPH_DOWNLOAD_MAX_RETRIES,
+                        delay_seconds,
+                    )
+                    await asyncio.sleep(delay_seconds)
+                    continue
+                raise GraphAPIError(
+                    f"Timed out downloading file {filename}",
+                    status_code=504,
+                ) from exc
+            except httpx.HTTPError as exc:
+                await provider_request_usage_tracker.record_transport_error(
+                    provider=account.provider,
+                    kind="connection",
+                )
+                if attempt < GRAPH_DOWNLOAD_MAX_RETRIES:
+                    delay_seconds = self._build_download_retry_delay_seconds(attempt)
+                    logger.warning(
+                        "Graph download connection error account=%s item=%s attempt=%s/%s; retrying in %.2fs",
+                        account.id,
+                        item_id,
+                        attempt,
+                        GRAPH_DOWNLOAD_MAX_RETRIES,
+                        delay_seconds,
+                    )
+                    await asyncio.sleep(delay_seconds)
+                    continue
+                raise GraphAPIError(
+                    f"Failed to download file {filename}",
+                    status_code=502,
+                ) from exc
+
+            if (
+                response.status_code in GRAPH_DOWNLOAD_RETRYABLE_STATUS
+                and attempt < GRAPH_DOWNLOAD_MAX_RETRIES
+            ):
+                delay_seconds = self._build_throttle_delay_seconds(attempt, response)
+                logger.warning(
+                    "Graph download status=%s account=%s item=%s attempt=%s/%s; retrying in %.2fs",
+                    response.status_code,
+                    account.id,
+                    item_id,
+                    attempt,
+                    GRAPH_DOWNLOAD_MAX_RETRIES,
+                    delay_seconds,
+                )
+                await asyncio.sleep(delay_seconds)
+                continue
+
+            if response.status_code >= 400:
+                error_msg = self.parse_error_message(
+                    response, default=response.text or "Download failed"
+                )
+                raise GraphAPIError(error_msg, status_code=response.status_code)
+
+            return filename, response.content
+
+        raise GraphAPIError(
+            f"Failed to download file {filename}",
+            status_code=502,
+        )
 
     async def download_file_to_path(
         self,
@@ -376,62 +435,112 @@ class GraphClient(OAuthHTTPClientBase):
         str
             The filename of the downloaded file.
         """
-        item_data = await self._request("GET", f"/me/drive/items/{item_id}", account)
-
-        if "folder" in item_data:
-            raise GraphAPIError("Cannot download a folder as a file", status_code=400)
-
-        download_url = item_data.get("@microsoft.graph.downloadUrl")
-        if not download_url:
-            raise GraphAPIError("Download URL not available for this item")
-
-        filename = item_data.get("name", "file")
         download_timeout = (
             httpx.Timeout(timeout_seconds, connect=10.0)
             if timeout_seconds
             else GRAPH_TIMEOUT
         )
+        filename = "file"
 
-        try:
-            client = await self._get_http_client(timeout=GRAPH_TIMEOUT)
-            async with client.stream(
-                "GET", download_url, timeout=download_timeout
-            ) as response:
-                await provider_request_usage_tracker.record_response(
-                    provider=account.provider,
-                    status_code=response.status_code,
-                )
-                if response.status_code >= 400:
-                    await response.read()  # Read error body.
-                    raise GraphAPIError(
-                        f"Download failed: {response.status_code}",
+        for attempt in range(1, GRAPH_DOWNLOAD_MAX_RETRIES + 1):
+            item_data = await self._request("GET", f"/me/drive/items/{item_id}", account)
+
+            if "folder" in item_data:
+                raise GraphAPIError("Cannot download a folder as a file", status_code=400)
+
+            download_url = item_data.get("@microsoft.graph.downloadUrl")
+            if not download_url:
+                raise GraphAPIError("Download URL not available for this item")
+            filename = item_data.get("name", "file")
+
+            try:
+                client = await self._get_http_client(timeout=GRAPH_TIMEOUT)
+                async with client.stream(
+                    "GET", download_url, timeout=download_timeout
+                ) as response:
+                    await provider_request_usage_tracker.record_response(
+                        provider=account.provider,
                         status_code=response.status_code,
                     )
+                    if (
+                        response.status_code in GRAPH_DOWNLOAD_RETRYABLE_STATUS
+                        and attempt < GRAPH_DOWNLOAD_MAX_RETRIES
+                    ):
+                        await response.aread()
+                        delay_seconds = self._build_throttle_delay_seconds(
+                            attempt, response
+                        )
+                        logger.warning(
+                            "Graph stream download status=%s account=%s item=%s attempt=%s/%s; retrying in %.2fs",
+                            response.status_code,
+                            account.id,
+                            item_id,
+                            attempt,
+                            GRAPH_DOWNLOAD_MAX_RETRIES,
+                            delay_seconds,
+                        )
+                        await asyncio.sleep(delay_seconds)
+                        continue
 
-                with open(target_path, "wb") as f:
-                    async for chunk in response.aiter_bytes():
-                        f.write(chunk)
+                    if response.status_code >= 400:
+                        await response.aread()
+                        raise GraphAPIError(
+                            f"Download failed: {response.status_code}",
+                            status_code=response.status_code,
+                        )
 
-        except httpx.TimeoutException as exc:
-            await provider_request_usage_tracker.record_transport_error(
-                provider=account.provider,
-                kind="timeout",
-            )
-            raise GraphAPIError(
-                f"Timed out downloading file {filename}",
-                status_code=504,
-            ) from exc
-        except httpx.HTTPError as exc:
-            await provider_request_usage_tracker.record_transport_error(
-                provider=account.provider,
-                kind="connection",
-            )
-            raise GraphAPIError(
-                f"Failed to download file {filename}",
-                status_code=502,
-            ) from exc
+                    with open(target_path, "wb") as f:
+                        async for chunk in response.aiter_bytes():
+                            f.write(chunk)
+                    return filename
 
-        return filename
+            except httpx.TimeoutException as exc:
+                await provider_request_usage_tracker.record_transport_error(
+                    provider=account.provider,
+                    kind="timeout",
+                )
+                if attempt < GRAPH_DOWNLOAD_MAX_RETRIES:
+                    delay_seconds = self._build_download_retry_delay_seconds(attempt)
+                    logger.warning(
+                        "Graph stream download timeout account=%s item=%s attempt=%s/%s; retrying in %.2fs",
+                        account.id,
+                        item_id,
+                        attempt,
+                        GRAPH_DOWNLOAD_MAX_RETRIES,
+                        delay_seconds,
+                    )
+                    await asyncio.sleep(delay_seconds)
+                    continue
+                raise GraphAPIError(
+                    f"Timed out downloading file {filename}",
+                    status_code=504,
+                ) from exc
+            except httpx.HTTPError as exc:
+                await provider_request_usage_tracker.record_transport_error(
+                    provider=account.provider,
+                    kind="connection",
+                )
+                if attempt < GRAPH_DOWNLOAD_MAX_RETRIES:
+                    delay_seconds = self._build_download_retry_delay_seconds(attempt)
+                    logger.warning(
+                        "Graph stream download connection error account=%s item=%s attempt=%s/%s; retrying in %.2fs",
+                        account.id,
+                        item_id,
+                        attempt,
+                        GRAPH_DOWNLOAD_MAX_RETRIES,
+                        delay_seconds,
+                    )
+                    await asyncio.sleep(delay_seconds)
+                    continue
+                raise GraphAPIError(
+                    f"Failed to download file {filename}",
+                    status_code=502,
+                ) from exc
+
+        raise GraphAPIError(
+            f"Failed to download file {filename}",
+            status_code=502,
+        )
 
     def _parse_drive_items(self, data: dict, folder_path: str) -> DriveListResponse:
         """Parse Graph API response into DriveListResponse.

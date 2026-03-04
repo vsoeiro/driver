@@ -79,7 +79,7 @@ const FilterBar = ({ onFilter, filters, accounts, categories }) => {
     };
 
     return (
-        <div className="relative z-[220]">
+        <div className="relative layer-dropdown">
             <button
                 onClick={() => setIsOpen(!isOpen)}
                 className={`flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium ${isOpen ? 'bg-accent text-accent-foreground' : 'hover:bg-accent'}`}
@@ -88,7 +88,7 @@ const FilterBar = ({ onFilter, filters, accounts, categories }) => {
             </button>
 
             {isOpen && (
-                <div className="absolute right-0 top-full mt-2 w-72 bg-popover border rounded-md shadow-lg p-4 z-[260] space-y-4">
+                <div className="menu-popover absolute right-0 top-full mt-2 w-72 p-4 layer-popover space-y-4">
                     <div>
                         <label className="block text-sm font-medium mb-1">{t('allFiles.account')}</label>
                         <select
@@ -419,7 +419,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                         )}
 
                         {hasFolders && (
-                            <label className="flex items-center gap-2 text-sm border p-3 rounded-md bg-amber-50 text-amber-800">
+                            <label className="status-badge status-badge-warning flex items-center gap-2 p-3 text-sm">
                                 <input
                                     type="checkbox"
                                     checked={applyRecursive}
@@ -432,11 +432,11 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                 )}
 
                 <div className="flex justify-end gap-2 pt-2">
-                    <button onClick={onClose} className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent">{t('common.cancel')}</button>
+                    <button onClick={onClose} className="btn-minimal">{t('common.cancel')}</button>
                     <button
                         onClick={handleSave}
                         disabled={saving || !selectedCategory}
-                        className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
+                        className="btn-minimal-primary disabled:opacity-50"
                     >
                         {saving && <Loader2 className="animate-spin" size={14} />}
                         {t('allFiles.saveChanges')}
@@ -510,7 +510,7 @@ const RemoveMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showTo
                                 <div className="border rounded-md divide-y max-h-40 overflow-y-auto">
                                     {filesWithMeta.map(item => (
                                         <div key={item.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
-                                            <File size={14} className="text-gray-400 shrink-0" />
+                                            <File size={14} className="text-muted-foreground shrink-0" />
                                             <span className="truncate">{item.name}</span>
                                             <span className="ml-auto text-xs text-muted-foreground shrink-0">
                                                 {item.metadata?.category_name}
@@ -527,7 +527,7 @@ const RemoveMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showTo
                                 <div className="border rounded-md divide-y max-h-40 overflow-y-auto">
                                     {folders.map(item => (
                                         <div key={item.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
-                                            <Folder size={14} className="text-blue-500 shrink-0" />
+                                            <Folder size={14} className="text-primary shrink-0" />
                                             <span className="truncate">{item.name}</span>
                                             <span className="ml-auto text-xs text-muted-foreground shrink-0">{t('allFiles.plusAllContents')}</span>
                                         </div>
@@ -542,12 +542,12 @@ const RemoveMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showTo
                 )}
 
                 <div className="flex justify-end gap-2 pt-2">
-                    <button onClick={onClose} className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent">{t('common.cancel')}</button>
+                    <button onClick={onClose} className="btn-minimal">{t('common.cancel')}</button>
                     {hasAnything && (
                         <button
                             onClick={handleRemove}
                             disabled={removing}
-                            className="px-4 py-2 text-sm font-medium bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 flex items-center gap-2"
+                            className="btn-minimal-danger disabled:opacity-50"
                         >
                             {removing && <Loader2 className="animate-spin" size={14} />}
                             {t('allFiles.confirmRemoval')}
@@ -924,6 +924,29 @@ export default function AllFiles() {
 
     const getAccountById = (accountId) => accounts.find((a) => a.id === accountId);
 
+    const getParentPath = (path) => {
+        if (!path || path === '/') return '/';
+        const normalized = String(path).replace(/\/+$/, '');
+        const lastSlash = normalized.lastIndexOf('/');
+        if (lastSlash <= 0) return '/';
+        return normalized.slice(0, lastSlash);
+    };
+
+    const openFolderFromPath = (item, event) => {
+        event.stopPropagation();
+        const targetPath = item.item_type === 'folder' ? (item.path || `/${item.name}`) : getParentPath(item.path || '');
+        const targetFolder = {
+            account_id: item.account_id,
+            item_id: item.item_type === 'folder' ? item.item_id : (item.parent_id || null),
+            path: targetPath,
+        };
+        setCurrentFolderTarget(targetFolder);
+        setFolderTargetsByPath((prev) => ({ ...prev, [targetPath]: targetFolder }));
+        setSearchTerm('');
+        setPathPrefix(targetPath);
+        setPage(1);
+    };
+
     const renderColumnCell = (item, column) => {
         switch (column.id) {
             case 'name':
@@ -968,7 +991,7 @@ export default function AllFiles() {
                     <div className="text-right text-sm text-muted-foreground truncate">
                         {item.metadata
                             ? (
-                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800" title={item.metadata.category_name}>
+                                <span className="status-badge status-badge-info" title={item.metadata.category_name}>
                                     {item.metadata.category_name || 'N/A'}
                                 </span>
                             )
@@ -978,7 +1001,18 @@ export default function AllFiles() {
             case 'modified':
                 return <div className="text-right text-sm text-muted-foreground tabular-nums">{formatDate(item.modified_at)}</div>;
             case 'path':
-                return <div className="text-right text-xs text-muted-foreground truncate" title={item.path}>{item.path}</div>;
+                return (
+                    <div className="text-right text-xs text-muted-foreground truncate">
+                        <button
+                            type="button"
+                            className="max-w-full truncate text-right hover:text-foreground hover:underline"
+                            onClick={(event) => openFolderFromPath(item, event)}
+                            title={t('allFiles.showFolderContents')}
+                        >
+                            {item.path}
+                        </button>
+                    </div>
+                );
             default:
                 return null;
         }
@@ -1350,7 +1384,7 @@ export default function AllFiles() {
     };
 
     return (
-        <div className="app-page">
+        <div className="app-page density-compact">
             <div className="mb-4 inline-flex items-center gap-1 rounded-lg border border-border/70 bg-card p-1">
                 <button
                     type="button"
@@ -1379,12 +1413,12 @@ export default function AllFiles() {
             {activeTab === 'library' ? (
                 <>
             {/* Unified command bar */}
-            <div className="surface-card relative z-[180] mb-4 overflow-visible">
+            <div className="surface-card relative layer-dropdown mb-4 overflow-visible">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-4 py-3">
                 <div className="flex items-center gap-2">
                     <button
                         onClick={clearPathPrefix}
-                        className={`text-lg font-semibold hover:text-primary transition-colors ${!pathPrefix ? 'text-foreground' : 'text-muted-foreground'}`}
+                        className={`page-title appearance-none border-0 bg-transparent p-0 hover:text-primary transition-colors ${!pathPrefix ? 'text-foreground' : 'text-muted-foreground'}`}
                     >
                         {t('allFiles.fileLibrary')}
                     </button>
@@ -1398,7 +1432,7 @@ export default function AllFiles() {
                                     setPathPrefix(seg.path);
                                     setPage(1);
                                 }}
-                                className={`text-lg font-semibold hover:text-primary transition-colors ${pathPrefix === seg.path ? 'text-foreground' : 'text-muted-foreground'}`}
+                                className={`page-title hover:text-primary transition-colors ${pathPrefix === seg.path ? 'text-foreground' : 'text-muted-foreground'}`}
                             >
                                 {seg.label}
                             </button>
@@ -1439,7 +1473,7 @@ export default function AllFiles() {
                             {t('allFiles.columnsTitle')}
                         </button>
                         {columnsMenuOpen && (
-                            <div className="absolute right-0 top-full mt-2 w-56 bg-popover border rounded-md shadow-lg p-2 z-[260] space-y-1">
+                            <div className="menu-popover absolute right-0 top-full mt-2 w-56 p-2 layer-popover space-y-1">
                                 {orderedColumns.map((column) => (
                                     <label key={column.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent cursor-pointer text-sm">
                                         <input
@@ -1464,7 +1498,7 @@ export default function AllFiles() {
                         )}
                     </div>
                     {(isComicsLibraryActive || isImagesLibraryActive || isBooksLibraryActive) && (
-                        <div className="relative z-[230]" ref={analyzeLibraryMenuRef}>
+                        <div className="relative layer-dropdown" ref={analyzeLibraryMenuRef}>
                             <button
                                 onClick={() => setAnalyzeLibraryMenuOpen((prev) => !prev)}
                                 disabled={mapLibraryLoading}
@@ -1476,7 +1510,7 @@ export default function AllFiles() {
                                 <ChevronDown size={14} className={`transition-transform ${analyzeLibraryMenuOpen ? 'rotate-180' : ''}`} />
                             </button>
                             {analyzeLibraryMenuOpen && (
-                                <div className="absolute right-0 top-full mt-2 w-52 bg-popover border rounded-md shadow-lg py-1 z-[280]">
+                                <div className="menu-popover absolute right-0 top-full mt-2 w-52 py-1 layer-popover">
                                     {isComicsLibraryActive && (
                                         <button
                                             onClick={executeMapLibraryComics}
@@ -1570,7 +1604,7 @@ export default function AllFiles() {
                         </button>
 
                         {metadataMenuOpen && (
-                            <div className="absolute top-full left-0 w-52 pt-1 z-[90]">
+                            <div className="absolute top-full left-0 w-52 pt-1 layer-dropdown">
                                 <div className="bg-popover border rounded-md shadow-md py-1">
                                     <button
                                         onClick={() => {
@@ -1681,10 +1715,10 @@ export default function AllFiles() {
 
             {/* Path Prefix Breadcrumb */}
             {pathPrefix && (
-                <div className="mb-4 rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-2 flex items-center gap-2 text-sm">
-                    <FolderOpen size={16} className="text-blue-500" />
+                <div className="mb-4 flex items-center gap-2 rounded-sm border border-border/90 bg-muted/20 px-4 py-2 text-sm">
+                    <FolderOpen size={16} className="text-primary" />
                     <span className="text-muted-foreground">{t('allFiles.showingFilesIn')}</span>
-                    <span className="font-medium text-blue-700">{pathPrefix}</span>
+                    <span className="font-medium text-foreground">{pathPrefix}</span>
                     <button onClick={clearPathPrefix} className="ml-auto flex items-center gap-1 text-muted-foreground hover:text-foreground text-xs">
                         <X size={14} /> {t('allFiles.clear')}
                     </button>
@@ -1769,7 +1803,7 @@ export default function AllFiles() {
                                                         className="hover:scale-110 transition-transform"
                                                         title={t('allFiles.showFolderContents')}
                                                     >
-                                                        <Folder className="text-blue-500 fill-blue-500/20" size={20} />
+                                                        <Folder className="text-primary fill-primary/15" size={20} />
                                                     </button>
                                                 ) : (
                                                     <File className="text-gray-400" size={20} />

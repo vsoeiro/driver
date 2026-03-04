@@ -58,6 +58,8 @@ router = APIRouter(prefix="/jobs", tags=["Jobs"])
 COMIC_EXTENSIONS = {"cbz", "zip", "cbw", "pdf", "epub", "cbr", "rar", "cb7", "7z", "cbt", "tar"}
 BOOK_EXTENSIONS = {"pdf", "epub"}
 IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff", "tif", "heic", "avif"}
+AUTO_COMIC_EXTENSIONS = COMIC_EXTENSIONS - {"pdf"}
+AUTO_BOOK_EXTENSIONS = BOOK_EXTENSIONS - {"pdf"}
 
 
 def _map_domain_error_to_http(exc: DomainError) -> None:
@@ -69,6 +71,19 @@ def _map_domain_error_to_http(exc: DomainError) -> None:
 def _is_comic_item_already_mapped(
     values: dict | None, attr_ids: dict[str, str]
 ) -> bool:
+    values = values or {}
+    check_fields = ("cover_item_id", "cover_account_id", "page_count", "file_format")
+    for field_key in check_fields:
+        attr_id = attr_ids.get(field_key)
+        if not attr_id:
+            continue
+        value = values.get(attr_id)
+        if value is not None and value != "":
+            return True
+    return False
+
+
+def _is_book_item_already_mapped(values: dict | None, attr_ids: dict[str, str]) -> bool:
     values = values or {}
     check_fields = ("cover_item_id", "cover_account_id", "page_count", "file_format")
     for field_key in check_fields:
@@ -164,6 +179,55 @@ async def _filter_unmapped_image_items(
         db,
         filtered,
         category_id=category_id,
+    )
+
+
+async def _filter_unmapped_book_items(
+    db: DBSession,
+    by_account: dict[UUID, list[str]],
+) -> dict[UUID, list[str]]:
+    if not by_account:
+        return by_account
+
+    library_service = MetadataLibraryService(db)
+    try:
+        category = await library_service.ensure_active_books_category()
+    except Exception:
+        # If metadata library schema is unavailable, keep current behavior (no pre-filter).
+        return by_account
+
+    attr_ids = {
+        attr.plugin_field_key: str(attr.id)
+        for attr in category.attributes
+        if attr.plugin_field_key
+    }
+    if not attr_ids:
+        return by_account
+
+    filtered: dict[UUID, list[str]] = {}
+    for account_id, item_ids in by_account.items():
+        if not item_ids:
+            continue
+        stmt = select(ItemMetadata.item_id, ItemMetadata.values).where(
+            ItemMetadata.account_id == account_id,
+            ItemMetadata.category_id == category.id,
+            ItemMetadata.item_id.in_(item_ids),
+        )
+        rows = (await db.execute(stmt)).all()
+        already_mapped_ids = {
+            str(item_id)
+            for item_id, values in rows
+            if _is_book_item_already_mapped(values, attr_ids)
+        }
+        remaining = [
+            item_id for item_id in item_ids if str(item_id) not in already_mapped_ids
+        ]
+        if remaining:
+            filtered[account_id] = remaining
+    return await _filter_items_without_conflicting_metadata(
+        db,
+        filtered,
+        category_id=category.id,
     )
 
 
@@ -669,7 +733,7 @@ async def create_extract_library_comic_assets_job(
 
     stmt = select(Item.account_id, Item.item_id).where(
         Item.item_type == "file",
-        func.lower(func.coalesce(Item.extension, "")).in_(tuple(COMIC_EXTENSIONS)),
+        func.lower(func.coalesce(Item.extension, "")).in_(tuple(AUTO_COMIC_EXTENSIONS)),
     )
     if request.account_ids:
         stmt = stmt.where(Item.account_id.in_(request.account_ids))
@@ -731,7 +795,7 @@ async def create_map_library_books_job(
 ) -> JobMapLibraryBooksResponse:
     """Create chunked jobs that map book files into the active Books metadata library."""
     chunk_size = max(1, min(5000, int(request.chunk_size or 500)))
-    book_exts = tuple(BOOK_EXTENSIONS)
+    book_exts = tuple(AUTO_BOOK_EXTENSIONS)
 
     library_service = MetadataLibraryService(db)
     books_category = await library_service.get_active_books_category()
@@ -761,16 +825,7 @@ async def create_map_library_books_job(
     for account_id, item_id in rows:
         by_account.setdefault(account_id, []).append(item_id)
 
-    by_account = await _filter_items_without_category(
-        db,
-        by_account,
-        category_id=books_category.id,
-    )
-    by_account = await _filter_items_without_conflicting_metadata(
-        db,
-        by_account,
-        category_id=books_category.id,
-    )
+    by_account = await _filter_unmapped_book_items(db, by_account)
     total_unmapped_items = sum(len(item_ids) for item_ids in by_account.values())
     if total_unmapped_items == 0:
         return JobMapLibraryBooksResponse(

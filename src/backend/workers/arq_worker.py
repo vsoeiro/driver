@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import traceback
 from datetime import UTC, datetime
 from uuid import UUID
@@ -20,7 +21,6 @@ from backend.workers.handlers import ai as _ai_handler  # noqa: F401
 from backend.workers.handlers import books as _books_handler  # noqa: F401
 from backend.workers.handlers import comics as _comics_handler  # noqa: F401
 from backend.workers.handlers import dedupe as _dedupe_handler  # noqa: F401
-from backend.workers.handlers import images as _images_handler  # noqa: F401
 from backend.workers.handlers import metadata as _metadata_handler  # noqa: F401
 from backend.workers.handlers import move as _move_handler  # noqa: F401
 from backend.workers.handlers import rules as _rules_handler  # noqa: F401
@@ -35,6 +35,15 @@ if not logging.getLogger().handlers:
     )
 
 logger = logging.getLogger(__name__)
+
+_enable_image_handlers = str(os.getenv("WORKER_ENABLE_IMAGE_HANDLERS", "")).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+if _enable_image_handlers:
+    from backend.workers.handlers import images as _images_handler  # noqa: F401
 
 async def _fail_job_with_fresh_session(job_id: UUID, error: str) -> None:
     """Best-effort failure status update using a fresh DB session."""

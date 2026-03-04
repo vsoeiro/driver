@@ -133,6 +133,7 @@ class MetadataRuleBase(BaseModel):
     target_category_id: UUID
     target_values: dict = Field(default_factory=dict)
     apply_metadata: bool = True
+    apply_remove_metadata: bool = False
     apply_rename: bool = False
     rename_template: str | None = None
     apply_move: bool = False
@@ -157,6 +158,7 @@ class MetadataRuleUpdate(BaseModel):
     target_category_id: UUID | None = None
     target_values: dict | None = None
     apply_metadata: bool | None = None
+    apply_remove_metadata: bool | None = None
     apply_rename: bool | None = None
     rename_template: str | None = None
     apply_move: bool | None = None
@@ -182,6 +184,7 @@ class MetadataRulePreviewRequest(BaseModel):
     target_category_id: UUID
     target_values: dict = Field(default_factory=dict)
     apply_metadata: bool = True
+    apply_remove_metadata: bool = False
     apply_rename: bool = False
     rename_template: str | None = None
     apply_move: bool = False
@@ -202,6 +205,7 @@ class SeriesSummaryRow(BaseModel):
     series_name: str
     total_items: int
     owned_volumes: list[int] = Field(default_factory=list)
+    owned_issues_count: int = 0
     issues_by_volume: dict[str, list[int]] = Field(default_factory=dict)
     max_volumes: int = 0
     max_issues: int = 0
@@ -231,6 +235,7 @@ class MetadataFormLayout(BaseModel):
     category_id: UUID
     columns: int = Field(default=12, ge=1, le=24)
     row_height: int = Field(default=1, ge=1, le=4)
+    hide_read_only_fields: bool = False
     items: list[MetadataFormLayoutItem] = Field(default_factory=list)
     ordered_attribute_ids: list[UUID] = Field(default_factory=list)
     half_width_attribute_ids: list[UUID] = Field(default_factory=list)
@@ -239,6 +244,7 @@ class MetadataFormLayout(BaseModel):
 class MetadataFormLayoutUpdate(BaseModel):
     columns: int = Field(default=12, ge=1, le=24)
     row_height: int = Field(default=1, ge=1, le=4)
+    hide_read_only_fields: bool = False
     items: list[MetadataFormLayoutItem] = Field(default_factory=list)
     ordered_attribute_ids: list[UUID] = Field(default_factory=list)
     half_width_attribute_ids: list[UUID] = Field(default_factory=list)

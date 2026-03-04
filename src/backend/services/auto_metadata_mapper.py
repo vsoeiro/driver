@@ -40,8 +40,11 @@ IMAGE_EXTENSIONS = {
     "heic",
     "avif",
 }
+# Auto mapping should not include PDF for books/comics.
+AUTO_COMIC_EXTENSIONS = COMIC_EXTENSIONS - {"pdf"}
+AUTO_BOOK_EXTENSIONS = BOOK_EXTENSIONS - {"pdf"}
 # Ambiguous extensions are resolved as BOOKS to keep deterministic routing.
-COMIC_ONLY_EXTENSIONS = COMIC_EXTENSIONS - BOOK_EXTENSIONS
+AUTO_COMIC_ONLY_EXTENSIONS = AUTO_COMIC_EXTENSIONS - AUTO_BOOK_EXTENSIONS
 
 
 @dataclass(slots=True)
@@ -86,9 +89,9 @@ async def enqueue_auto_mapping_jobs(
             continue
         if ext in IMAGE_EXTENSIONS:
             by_type["analyze_image_assets"].append(str(candidate.item_id))
-        elif ext in BOOK_EXTENSIONS:
+        elif ext in AUTO_BOOK_EXTENSIONS:
             by_type["extract_book_assets"].append(str(candidate.item_id))
-        elif ext in COMIC_ONLY_EXTENSIONS:
+        elif ext in AUTO_COMIC_ONLY_EXTENSIONS:
             by_type["extract_comic_assets"].append(str(candidate.item_id))
 
     library_service = MetadataLibraryService(session)
@@ -142,4 +145,3 @@ async def enqueue_auto_mapping_jobs(
         "job_ids": job_ids,
         "items_by_type": items_by_type,
     }
-

@@ -17,6 +17,8 @@ class MetadataLibraryFieldSpec:
 
 BOOKS_LIBRARY_FIELDS: list[MetadataLibraryFieldSpec] = [
     MetadataLibraryFieldSpec("title", "Title", "text"),
+    MetadataLibraryFieldSpec("series", "Series", "text"),
+    MetadataLibraryFieldSpec("volume", "Volume", "number"),
     MetadataLibraryFieldSpec("subtitle", "Subtitle", "text"),
     MetadataLibraryFieldSpec("author", "Author", "text"),
     MetadataLibraryFieldSpec("publisher", "Publisher", "text"),

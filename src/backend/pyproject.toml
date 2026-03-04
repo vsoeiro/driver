@@ -27,13 +27,15 @@ dependencies = [
     "langchain-ollama>=0.3.4",
     "langchain-openai>=0.3.28",
     "langgraph>=0.6.6",
-    "ultralytics>=8.3.0",
-    "open-clip-torch>=2.26.1",
-    "rapidocr-onnxruntime>=1.4.4",
     "exifread>=3.0.0",
 ]
 
 [project.optional-dependencies]
+ai-vision = [
+    "ultralytics>=8.3.0",
+    "open-clip-torch>=2.26.1",
+    "rapidocr-onnxruntime>=1.4.4",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",

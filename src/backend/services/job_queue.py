@@ -18,7 +18,7 @@ DEFAULT_QUEUE_ALIAS_SUFFIXES: dict[str, str] = {
     "metadata": "",
     "rules": "",
     "comics": "heavy",
-    "vision": "heavy",
+    "vision": "vision",
 }
 
 

@@ -644,6 +644,8 @@ class MetadataQueryService:
                 "series_name": (row.series_name or "").strip() or "Unknown",
                 "total_items": int(row.total_items or 0),
                 "owned_volumes": set(),
+                "owned_issue_pairs": set(),
+                "unscoped_issues": set(),
                 "issues_by_volume": {},
                 "max_volumes_candidates": [],
                 "max_issues_candidates": [],
@@ -665,33 +667,56 @@ class MetadataQueryService:
                 if parsed_volume:
                     by_key[row.series_key]["owned_volumes"].add(parsed_volume)
 
-        if volume_attr_id and issue_attr_id:
-            volume_expr = func.trim(ItemMetadata.values[volume_attr_id].as_string())
+        if issue_attr_id:
             issue_expr = func.trim(ItemMetadata.values[issue_attr_id].as_string())
-            issue_stmt = (
-                select(
-                    series_key_expr.label("series_key"),
-                    volume_expr.label("volume_text"),
-                    issue_expr.label("issue_text"),
+            if volume_attr_id:
+                volume_expr = func.trim(ItemMetadata.values[volume_attr_id].as_string())
+                issue_stmt = (
+                    select(
+                        series_key_expr.label("series_key"),
+                        volume_expr.label("volume_text"),
+                        issue_expr.label("issue_text"),
+                    )
+                    .select_from(ItemMetadata, Item)
+                    .where(
+                        *conditions,
+                        series_key_expr.in_(page_series_keys),
+                        issue_expr.isnot(None),
+                        issue_expr != "",
+                    )
+                    .group_by(series_key_expr, volume_expr, issue_expr)
                 )
-                .select_from(ItemMetadata, Item)
-                .where(
-                    *conditions,
-                    series_key_expr.in_(page_series_keys),
-                    volume_expr.isnot(None),
-                    volume_expr != "",
-                    issue_expr.isnot(None),
-                    issue_expr != "",
+                for row in (await self.session.execute(issue_stmt)).all():
+                    parsed_issue = _parse_positive_int(row.issue_text)
+                    if not parsed_issue:
+                        continue
+                    parsed_volume = _parse_positive_int(row.volume_text)
+                    if parsed_volume:
+                        pair = (parsed_volume, parsed_issue)
+                        by_key[row.series_key]["owned_issue_pairs"].add(pair)
+                        volume_bucket = by_key[row.series_key]["issues_by_volume"].setdefault(parsed_volume, set())
+                        volume_bucket.add(parsed_issue)
+                    else:
+                        by_key[row.series_key]["unscoped_issues"].add(parsed_issue)
+            else:
+                issue_stmt = (
+                    select(
+                        series_key_expr.label("series_key"),
+                        issue_expr.label("issue_text"),
+                    )
+                    .select_from(ItemMetadata, Item)
+                    .where(
+                        *conditions,
+                        series_key_expr.in_(page_series_keys),
+                        issue_expr.isnot(None),
+                        issue_expr != "",
+                    )
+                    .group_by(series_key_expr, issue_expr)
                 )
-                .group_by(series_key_expr, volume_expr, issue_expr)
-            )
-            for row in (await self.session.execute(issue_stmt)).all():
-                parsed_volume = _parse_positive_int(row.volume_text)
-                parsed_issue = _parse_positive_int(row.issue_text)
-                if not parsed_volume or not parsed_issue:
-                    continue
-                volume_bucket = by_key[row.series_key]["issues_by_volume"].setdefault(parsed_volume, set())
-                volume_bucket.add(parsed_issue)
+                for row in (await self.session.execute(issue_stmt)).all():
+                    parsed_issue = _parse_positive_int(row.issue_text)
+                    if parsed_issue:
+                        by_key[row.series_key]["unscoped_issues"].add(parsed_issue)
 
         if max_volumes_attr_id:
             max_volumes_expr = func.trim(ItemMetadata.values[max_volumes_attr_id].as_string())
@@ -771,11 +796,13 @@ class MetadataQueryService:
                 str(volume): sorted(issue_set)
                 for volume, issue_set in row["issues_by_volume"].items()
             }
+            owned_issues_count = len(row["owned_issue_pairs"]) + len(row["unscoped_issues"])
             rows.append(
                 {
                     "series_name": row["series_name"],
                     "total_items": row["total_items"],
                     "owned_volumes": owned_volumes,
+                    "owned_issues_count": owned_issues_count,
                     "issues_by_volume": issues_by_volume,
                     "max_volumes": max_volumes,
                     "max_issues": max_issues,

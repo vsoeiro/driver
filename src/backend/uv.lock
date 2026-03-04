@@ -550,7 +550,6 @@ dependencies = [
     { name = "langchain-openai" },
     { name = "langgraph" },
     { name = "msal" },
-    { name = "open-clip-torch" },
     { name = "pillow" },
     { name = "py7zr" },
     { name = "pydantic-settings" },
@@ -558,14 +557,17 @@ dependencies = [
     { name = "pypdf" },
     { name = "python-dotenv" },
     { name = "python-multipart" },
-    { name = "rapidocr-onnxruntime" },
     { name = "rarfile" },
     { name = "sqlalchemy" },
-    { name = "ultralytics" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.optional-dependencies]
+ai-vision = [
+    { name = "open-clip-torch" },
+    { name = "rapidocr-onnxruntime" },
+    { name = "ultralytics" },
+]
 dev = [
     { name = "httpx" },
     { name = "pytest" },
@@ -588,7 +590,7 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=0.3.28" },
     { name = "langgraph", specifier = ">=0.6.6" },
     { name = "msal", specifier = ">=1.31.0" },
-    { name = "open-clip-torch", specifier = ">=2.26.1" },
+    { name = "open-clip-torch", marker = "extra == 'ai-vision'", specifier = ">=2.26.1" },
     { name = "pillow", specifier = ">=11.1.0" },
     { name = "py7zr", specifier = ">=0.22.0" },
     { name = "pydantic-settings", specifier = ">=2.7.0" },
@@ -598,13 +600,13 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "python-multipart", specifier = ">=0.0.22" },
-    { name = "rapidocr-onnxruntime", specifier = ">=1.4.4" },
+    { name = "rapidocr-onnxruntime", marker = "extra == 'ai-vision'", specifier = ">=1.4.4" },
     { name = "rarfile", specifier = ">=4.2" },
     { name = "sqlalchemy", specifier = ">=2.0.0" },
-    { name = "ultralytics", specifier = ">=8.3.0" },
+    { name = "ultralytics", marker = "extra == 'ai-vision'", specifier = ">=8.3.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["ai-vision", "dev"]
 
 [[package]]
 name = "exifread"

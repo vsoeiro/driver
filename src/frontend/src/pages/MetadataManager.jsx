@@ -28,6 +28,7 @@ import RemoveMetadataModal from '../components/RemoveMetadataModal';
 import MetadataModal from '../components/MetadataModal';
 import MoveModal from '../components/MoveModal';
 import MetadataLayoutBuilderModal from '../components/MetadataLayoutBuilderModal';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { formatDateOnly, formatDateTime } from '../utils/dateTime';
 
@@ -215,7 +216,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
         };
 
         return (
-            <div className="relative z-[220]">
+            <div className="relative layer-dropdown">
                 <button
                     onClick={() => setIsOpen(!isOpen)}
                     className={`flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium ${isOpen ? 'bg-accent text-accent-foreground' : 'hover:bg-accent'}`}
@@ -224,7 +225,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                 </button>
 
                 {isOpen && (
-                    <div className="absolute right-0 top-full mt-2 w-80 bg-popover border rounded-md shadow-lg p-4 z-[260] space-y-4 max-h-[70vh] overflow-y-auto">
+                    <div className="menu-popover absolute right-0 top-full mt-2 w-80 p-4 layer-popover space-y-4 max-h-[70vh] overflow-y-auto">
                         <div>
                             <label className="block text-sm font-medium mb-1">{t('allFiles.account')}</label>
                             <select
@@ -721,11 +722,11 @@ const CategoryItemsTable = ({ category, onBack }) => {
         unknown: t('metadataManager.status.unknown'),
     };
     const statusClass = {
-        ongoing: 'bg-blue-100 text-blue-700',
-        completed: 'bg-emerald-100 text-emerald-700',
-        hiatus: 'bg-amber-100 text-amber-700',
-        cancelled: 'bg-rose-100 text-rose-700',
-        unknown: 'bg-zinc-100 text-zinc-700',
+        ongoing: 'status-badge-info',
+        completed: 'status-badge-success',
+        hiatus: 'status-badge-warning',
+        cancelled: 'status-badge-danger',
+        unknown: 'status-badge',
     };
 
     const tableColumnsStorageKey = `${METADATA_TABLE_COLUMNS_STORAGE_PREFIX}:${category.id}`;
@@ -1180,7 +1181,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
     return (
         <>
             {/* Unified command bar */}
-            <div className="surface-card relative z-[180] mb-4 overflow-visible">
+            <div className="surface-card relative layer-dropdown mb-4 overflow-visible">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-4 py-3">
                 <div className="flex items-center gap-3">
                     <button
@@ -1243,17 +1244,18 @@ const CategoryItemsTable = ({ category, onBack }) => {
                             </option>
                         ))}
                     </select>
-                    <select
-                        className="input-shell px-2 py-1.5 text-sm"
-                        value={sort.order}
-                        onChange={(e) => {
-                            setSort((prev) => ({ ...prev, order: e.target.value }));
+                    <button
+                        type="button"
+                        className="input-shell px-2 py-1.5 text-sm inline-flex items-center justify-center"
+                        onClick={() => {
+                            setSort((prev) => ({ ...prev, order: prev.order === 'asc' ? 'desc' : 'asc' }));
                             setPage(1);
                         }}
+                        title={t('fileBrowser.sortOrder')}
+                        aria-label={t('fileBrowser.sortOrder')}
                     >
-                        <option value="desc">{t('similarFiles.desc')}</option>
-                        <option value="asc">{t('similarFiles.asc')}</option>
-                    </select>
+                        {sort.order === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
+                    </button>
                     <div className="relative">
                         <Search className="absolute left-2 top-1.5 text-muted-foreground" size={16} />
                         <input
@@ -1275,7 +1277,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                         currentFilters={filters}
                     />
                     {viewMode === 'table' && (
-                        <div className="relative z-[230]" ref={columnsMenuRef}>
+                        <div className="relative layer-dropdown" ref={columnsMenuRef}>
                             <button
                                 onClick={() => setColumnsMenuOpen((prev) => !prev)}
                                 className="flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium hover:bg-accent"
@@ -1284,7 +1286,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                 {t('allFiles.columnsTitle')}
                             </button>
                             {columnsMenuOpen && (
-                                <div className="absolute right-0 top-full mt-2 w-60 bg-popover border rounded-md shadow-lg p-2 z-[280] space-y-1 max-h-72 overflow-auto">
+                                <div className="menu-popover absolute right-0 top-full mt-2 w-60 p-2 layer-popover space-y-1 max-h-72 overflow-auto">
                                     {orderedTableColumns.map((column) => (
                                         <label key={column.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent cursor-pointer text-sm">
                                             <input
@@ -1348,7 +1350,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                             <ChevronDown size={14} className={`transition-transform ${metadataMenuOpen ? 'rotate-180' : ''}`} />
                         </button>
                         {metadataMenuOpen && (
-                            <div className="absolute top-full left-0 w-52 pt-1 z-[90]">
+                            <div className="absolute top-full left-0 w-52 pt-1 layer-dropdown">
                                 <div className="bg-popover border rounded-md shadow-md py-1">
                                     <button
                                         onClick={() => {
@@ -1447,6 +1449,12 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                     const ownedVolumes = Array.isArray(seriesRow.owned_volumes) ? seriesRow.owned_volumes : [];
                                     const ownedVolumesSet = new Set(ownedVolumes);
                                     const issuesByVolume = seriesRow.issues_by_volume || {};
+                                    const ownedIssuesCount = Number.isFinite(Number(seriesRow.owned_issues_count))
+                                        ? Math.max(0, Number(seriesRow.owned_issues_count))
+                                        : Object.values(issuesByVolume).reduce((sum, issueList) => {
+                                            if (!Array.isArray(issueList)) return sum;
+                                            return sum + issueList.length;
+                                        }, 0);
 
                                     return (
                                         <div key={seriesRow.series_name} className="surface-card p-4">
@@ -1457,10 +1465,11 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                         {t('metadataManager.seriesTrackerSummary', {
                                                             items: seriesRow.total_items,
                                                             volumes: ownedVolumes.length,
+                                                            issues: ownedIssuesCount,
                                                         })}
                                                     </p>
                                                 </div>
-                                                <div className={`px-2 py-1 rounded text-xs font-medium ${statusClass[statusKey]}`}>
+                                                <div className={`status-badge ${statusClass[statusKey]}`}>
                                                     {statusLabel[statusKey]}
                                                 </div>
                                             </div>
@@ -1487,7 +1496,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                                             volume: volumeNo,
                                                                             status: owned ? t('metadataManager.owned') : t('metadataManager.missing'),
                                                                         })}
-                                                                        className={`h-4 w-3 rounded-sm border ${owned ? 'bg-blue-500 border-blue-500' : 'bg-white border-zinc-300'}`}
+                                                                        className={`h-4 w-3 rounded-sm border ${owned ? 'bg-primary border-primary' : 'bg-white border-zinc-300'}`}
                                                                     />
                                                                 );
                                                             })}
@@ -1524,7 +1533,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                                                             issue: issueNo,
                                                                                             status: owned ? t('metadataManager.owned') : t('metadataManager.missing'),
                                                                                         })}
-                                                                                        className={`h-3 w-2 rounded-sm border ${owned ? 'bg-blue-500 border-blue-500' : 'bg-white border-zinc-300'}`}
+                                                                                        className={`h-3 w-2 rounded-sm border ${owned ? 'bg-primary border-primary' : 'bg-white border-zinc-300'}`}
                                                                                     />
                                                                                 );
                                                                             })}
@@ -1676,9 +1685,9 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                     </div>
                                                     <div className="flex justify-center text-muted-foreground">
                                                         {isFolder ? (
-                                                            <Folder className="text-blue-500 fill-blue-500/20" size={20} />
+                                                            <Folder className="text-primary fill-primary/15" size={20} />
                                                         ) : (
-                                                            <File className="text-gray-400" size={20} />
+                                                            <File className="text-muted-foreground" size={20} />
                                                         )}
                                                     </div>
                                                     {visibleTableColumns.map((column) => (
@@ -1845,6 +1854,7 @@ export default function MetadataManager() {
     const [editAttrRequired, setEditAttrRequired] = useState(false);
     const [editAttrOptions, setEditAttrOptions] = useState('');
     const [editingAttribute, setEditingAttribute] = useState(false);
+    const [deleteAttributeTarget, setDeleteAttributeTarget] = useState(null);
     const [deleteCategoryTarget, setDeleteCategoryTarget] = useState(null);
     const [deletingCategory, setDeletingCategory] = useState(false);
     const [layoutBuilderOpen, setLayoutBuilderOpen] = useState(false);
@@ -1985,13 +1995,19 @@ export default function MetadataManager() {
             showToast(t('metadataManager.libraryManagedAttributeDeleteError'), 'error');
             return;
         }
-        if (!window.confirm(t('metadataManager.deleteAttributeConfirm'))) return;
+        setDeleteAttributeTarget(attr);
+    };
+
+    const confirmDeleteAttribute = async () => {
+        if (!deleteAttributeTarget) return;
         try {
-            await metadataService.deleteAttribute(attr.id);
+            await metadataService.deleteAttribute(deleteAttributeTarget.id);
             showToast(t('metadataManager.attributeDeleted'), 'success');
             refetchCategories();
         } catch (error) {
             showToast(t('metadataManager.failedDeleteAttribute'), 'error');
+        } finally {
+            setDeleteAttributeTarget(null);
         }
     };
 
@@ -2046,7 +2062,7 @@ export default function MetadataManager() {
     // If viewing a specific category's items
     if (viewingCategory) {
         return (
-            <div className="app-page">
+            <div className="app-page density-compact">
                 <CategoryItemsTable
                     category={viewingCategory}
                     onBack={() => { setViewingCategory(null); refetchCategories(); }}
@@ -2056,7 +2072,7 @@ export default function MetadataManager() {
     }
 
     return (
-        <div className="app-page">
+        <div className="app-page density-compact">
             {/* Header */}
             <div className="page-header flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
@@ -2250,7 +2266,7 @@ export default function MetadataManager() {
                                                                     {attr.data_type}
                                                                 </div>
                                                                 {attr.is_required && (
-                                                                    <div className="text-xs text-amber-600 font-medium">{t('metadataManager.required')}</div>
+                                                                    <div className="status-badge status-badge-warning">{t('metadataManager.required')}</div>
                                                                 )}
                                                                 {attr.data_type === 'select' && attr.options?.options && (
                                                                     <div className="text-xs text-muted-foreground">
@@ -2537,6 +2553,15 @@ export default function MetadataManager() {
                 onSaved={async () => {
                     await refetchCategories();
                 }}
+            />
+            <ConfirmDialog
+                isOpen={!!deleteAttributeTarget}
+                onCancel={() => setDeleteAttributeTarget(null)}
+                onConfirm={confirmDeleteAttribute}
+                title={t('allFiles.delete')}
+                description={t('metadataManager.deleteAttributeConfirm')}
+                confirmLabel={t('allFiles.delete')}
+                tone="danger"
             />
         </div>
     );

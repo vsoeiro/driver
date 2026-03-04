@@ -45,6 +45,15 @@
   "providerPicker": {
     "title": "Link Account"
   },
+  "folderPicker": {
+    "title": "Select Target Folder",
+    "account": "Account",
+    "folder": "Folder",
+    "goUp": "Go up",
+    "root": "Root",
+    "noFolders": "No folders found",
+    "useFolder": "Use this folder"
+  },
   "modal": {
     "close": "Close modal"
   },
@@ -206,6 +215,12 @@
     "failedRemove": "Failed to remove job",
     "cancelRequested": "Cancellation requested",
     "failedCancel": "Failed to cancel job",
+    "bulkStopRequested": "Stop requested for {{count}} job(s)",
+    "bulkStopPartial": "Stop requested for {{success}} of {{total}} job(s)",
+    "bulkStopFailed": "Failed to stop selected jobs",
+    "bulkDeleteSuccess": "Deleted {{count}} job(s)",
+    "bulkDeletePartial": "Deleted {{success}} of {{total}} job(s)",
+    "bulkDeleteFailed": "Failed to delete selected jobs",
     "reprocessQueued": "Reprocess queued ({{id}})",
     "failedReprocess": "Failed to reprocess job",
     "allTime": "All time",
@@ -237,6 +252,13 @@
     "viewDetails": "View Details",
     "reprocess": "Reprocess job",
     "deleteHistory": "Delete from history",
+    "selectedCount": "{{count}} selected",
+    "selectAllOnPage": "Select all on page",
+    "clearSelection": "Clear selection",
+    "stopSelected": "Stop selected",
+    "stopSelectedBlocked": "All selected jobs must allow stopping",
+    "deleteSelected": "Delete selected",
+    "deleteSelectedBlocked": "Only finalized jobs can be deleted",
     "detailsTitle": "Job Details",
     "retry": "Retry: {{current}}/{{max}}",
     "nextRetry": "Next retry: {{value}}",
@@ -409,6 +431,23 @@
       "path": "Path"
     }
   },
+  "batchMetadata": {
+    "title": "Edit metadata ({{count}} selected)",
+    "category": "Category",
+    "selectCategory": "Select category",
+    "select": "Select...",
+    "tagsPlaceholder": "tag1, tag2, tag3",
+    "mappedReadOnly": "Mapped from library (read-only)",
+    "applyRecursive": "Apply recursively to folders",
+    "saveChanges": "Save changes",
+    "saved": "Metadata updated",
+    "recursiveJobsCreated": "Created {{count}} recursive metadata job(s)",
+    "failed": "Failed to update metadata",
+    "section": "Section",
+    "coverPreview": "Cover preview",
+    "cover": "Cover",
+    "noCover": "No cover available"
+  },
   "similarFiles": {
     "asc": "Ascending",
     "desc": "Descending",
@@ -548,7 +587,7 @@
     "noItemsInCategory": "No items found in this category",
     "noItemsInCategoryHelp": "Try adjusting filters or search terms.",
     "seriesTrackerNeedsSeries": "Series tracker requires a mapped series field.",
-    "seriesTrackerSummary": "{{items}} item(s) | owned volumes: {{volumes}}",
+    "seriesTrackerSummary": "{{items}} item(s) | owned volumes: {{volumes}} | issues: {{issues}}",
     "volumes": "Volumes",
     "maxWithCount": "max {{count}}",
     "maxNotSet": "max not set",
@@ -652,6 +691,7 @@
     "category": "Category",
     "gridColumns": "Grid columns",
     "columns": "{{count}} columns",
+    "hideReadOnlyFields": "Hide read-only fields in modal",
     "addSection": "Add section",
     "reset": "Reset",
     "saveLayout": "Save layout",
@@ -731,6 +771,7 @@
     "description": "Description",
     "actions": "Actions",
     "applyMetadataValues": "Apply metadata values",
+    "removeMetadata": "Remove metadata",
     "renameItem": "Rename item",
     "moveItem": "Move item",
     "placeholdersHelp": "You can use placeholders like {{name}}, {{ext}}, {{date}} in templates.",

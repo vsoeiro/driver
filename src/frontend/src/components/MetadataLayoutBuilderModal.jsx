@@ -170,6 +170,7 @@ export default function MetadataLayoutBuilderModal({
                 map[String(layout.category_id)] = {
                     columns: layout.columns,
                     row_height: layout.row_height,
+                    hide_read_only_fields: !!layout.hide_read_only_fields,
                     items: (layout.items || []).map((item, index) => ({
                         item_type: String(item.item_type || (item.attribute_id ? 'attribute' : 'section')),
                         item_id: String(item.item_id || (item.attribute_id ? String(item.attribute_id) : `section_${index + 1}`)),
@@ -316,6 +317,16 @@ export default function MetadataLayoutBuilderModal({
         });
     };
 
+    const handleHideReadOnlyChange = (checked) => {
+        setLayoutDraft((prev) => {
+            if (!prev) return prev;
+            return {
+                ...prev,
+                hide_read_only_fields: !!checked,
+            };
+        });
+    };
+
     const handleSectionTitleChange = (itemKey, title) => {
         setLayoutDraft((prev) => {
             if (!prev) return prev;
@@ -346,6 +357,7 @@ export default function MetadataLayoutBuilderModal({
                 [String(saved.category_id)]: {
                     columns: saved.columns,
                     row_height: saved.row_height,
+                    hide_read_only_fields: !!saved.hide_read_only_fields,
                     items: (saved.items || []).map((item, index) => ({
                         item_type: String(item.item_type || (item.attribute_id ? 'attribute' : 'section')),
                         item_id: String(item.item_id || (item.attribute_id ? String(item.attribute_id) : `section_${index + 1}`)),
@@ -397,7 +409,7 @@ export default function MetadataLayoutBuilderModal({
                 </div>
             ) : (
                 <div className="space-y-4">
-                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_auto_auto_auto] items-end">
+                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_auto_auto_auto_auto] items-end">
                         <div>
                             <label className="block text-sm font-medium mb-1">{t('layoutBuilder.category')}</label>
                             <select
@@ -428,6 +440,17 @@ export default function MetadataLayoutBuilderModal({
                                 ))}
                             </select>
                         </div>
+
+                        <label className="inline-flex items-center gap-2 text-sm px-3 py-2 border rounded-md">
+                            <input
+                                type="checkbox"
+                                className="rounded border-gray-300"
+                                checked={!!layoutDraft?.hide_read_only_fields}
+                                disabled={!layoutDraft || saving}
+                                onChange={(event) => handleHideReadOnlyChange(event.target.checked)}
+                            />
+                            <span>{t('layoutBuilder.hideReadOnlyFields')}</span>
+                        </label>
 
                         <button
                             type="button"

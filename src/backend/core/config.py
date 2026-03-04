@@ -76,6 +76,10 @@ class Settings(BaseSettings):
         default="http://localhost:8000/api/v1/auth/dropbox/callback",
         alias="DROPBOX_REDIRECT_URI",
     )
+    frontend_oauth_success_url: str = Field(
+        default="http://localhost:5173/accounts",
+        alias="FRONTEND_OAUTH_SUCCESS_URL",
+    )
 
     host: str = "0.0.0.0"
     port: int = 8000

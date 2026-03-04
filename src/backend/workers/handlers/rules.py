@@ -261,14 +261,18 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
                     session,
                     account_id=item.account_id,
                     item_id=item.item_id,
-                    category_id=rule.target_category_id,
-                    values=normalized_rule_values
-                    if rule.apply_metadata
-                    else (current_metadata.values if current_metadata else {}),
+                    category_id=(
+                        rule.target_category_id if rule.apply_metadata else None
+                    ),
+                    values=(
+                        normalized_rule_values
+                        if rule.apply_metadata
+                        else None
+                    ),
                     batch_id=batch_id,
                     job_id=progress.job_id,
                 )
-                if rule.apply_metadata
+                if (rule.apply_metadata or rule.apply_remove_metadata)
                 else {"changed": False}
             )
 

@@ -2,10 +2,11 @@
 
 import logging
 import secrets
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 
 from backend.api.dependencies import DBSession
@@ -135,7 +136,7 @@ async def google_callback(
         expires_at=token_result.expires_at,
     )
 
-    success_response = _success_html_response()
+    success_response = _success_redirect_response(settings.frontend_oauth_success_url)
     success_response.delete_cookie("oauth_google_state", path="/")
     return success_response
 
@@ -203,7 +204,7 @@ async def dropbox_callback(
         expires_at=token_result.expires_at,
     )
 
-    success_response = _success_html_response()
+    success_response = _success_redirect_response(settings.frontend_oauth_success_url)
     success_response.delete_cookie("oauth_dropbox_state", path="/")
     return success_response
 
@@ -215,6 +216,7 @@ async def microsoft_login(request: Request) -> RedirectResponse:
     Redirects the user directly to Microsoft login page.
     """
     auth_service = get_microsoft_auth_service()
+    settings = get_settings()
     settings = get_settings()
 
     flow = auth_service.get_auth_flow(settings.redirect_uri)
@@ -320,7 +322,7 @@ async def microsoft_callback(
         expires_at=token_result.expires_at,
     )
 
-    success_response = _success_html_response()
+    success_response = _success_redirect_response(settings.frontend_oauth_success_url)
     success_response.delete_cookie("oauth_flow", path="/")
     return success_response
 
@@ -387,56 +389,12 @@ async def _fetch_dropbox_profile(access_token: str) -> dict:
         return {}
 
 
-def _success_html_response() -> HTMLResponse:
-    html_content = """
-    <!DOCTYPE html>
-    <html>
-        <head>
-            <title>Account Linked Successful</title>
-            <style>
-                body {
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    justify-content: center;
-                    height: 100vh;
-                    margin: 0;
-                    background-color: #f0f2f5;
-                }
-                .container {
-                    background: white;
-                    padding: 2rem;
-                    border-radius: 8px;
-                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-                    text-align: center;
-                    max-width: 600px;
-                    width: 90%;
-                }
-                h1 { color: #2ecc71; margin-bottom: 1rem; }
-                p { color: #555; margin-bottom: 1.5rem; }
-                .btn {
-                    display: inline-block;
-                    padding: 0.8rem 1.5rem;
-                    background-color: #3498db;
-                    color: white;
-                    text-decoration: none;
-                    border-radius: 4px;
-                    font-weight: bold;
-                    transition: background-color 0.2s;
-                }
-                .btn:hover { background-color: #2980b9; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1>Account Linked Successfully!</h1>
-                <p>Use the account list API to get your Account ID.</p>
-                <div class="actions">
-                    <a href="/docs" class="btn">Go to Swagger UI</a>
-                </div>
-            </div>
-        </body>
-    </html>
-    """
-    return HTMLResponse(content=html_content, status_code=200)
+def _success_redirect_response(url: str) -> RedirectResponse:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        logger.warning(
+            "Invalid FRONTEND_OAUTH_SUCCESS_URL=%s; falling back to http://localhost:5173/accounts",
+            url,
+        )
+        url = "http://localhost:5173/accounts"
+    return RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)

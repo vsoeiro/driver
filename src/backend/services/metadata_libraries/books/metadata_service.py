@@ -22,7 +22,7 @@ from backend.services.metadata_libraries.comics.metadata_service import (
 )
 from backend.services.metadata_libraries.service import MetadataLibraryService
 from backend.services.metadata_libraries.settings import (
-    ComicsRuntimeSettings,
+    CoverRuntimeSettings,
     MetadataLibrarySettingsService,
 )
 from backend.services.metadata_versioning import apply_metadata_change
@@ -129,7 +129,7 @@ class BookMetadataService:
         attr_ids = await library_service.books_attribute_id_map()
         cover_settings = await MetadataLibrarySettingsService(
             self.session
-        ).get_comics_runtime_settings()
+        ).get_books_runtime_settings()
 
         token_manager = TokenManager(self.session)
         target_account = account
@@ -223,7 +223,7 @@ class BookMetadataService:
         cover_folder_id: str,
         category_id: UUID,
         attr_ids: dict[str, str],
-        cover_settings: ComicsRuntimeSettings,
+        cover_settings: CoverRuntimeSettings,
         job_id: UUID | None,
         batch_id: UUID | None,
     ) -> bool:

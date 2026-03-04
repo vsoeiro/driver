@@ -226,6 +226,21 @@ def _clamp(value: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(value, maximum))
 
 
+def _to_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return default
+
+
 def _region_is_free(occupied: set[tuple[int, int]], x: int, y: int, w: int) -> bool:
     for col in range(x, x + w):
         if (col, y) in occupied:
@@ -385,6 +400,7 @@ def _normalize_layout_payload(
     source = raw_layout or {}
     columns = _clamp(_to_int(source.get("columns"), 12), 1, 24)
     row_height = _clamp(_to_int(source.get("row_height"), 1), 1, 4)
+    hide_read_only_fields = _to_bool(source.get("hide_read_only_fields"), False)
 
     items = _parse_layout_items(source.get("items"), columns)
     if not items:
@@ -510,6 +526,7 @@ def _normalize_layout_payload(
     return {
         "columns": columns,
         "row_height": row_height,
+        "hide_read_only_fields": hide_read_only_fields,
         "items": normalized_items,
         "ordered_attribute_ids": ordered_ids,
         "half_width_attribute_ids": half_ids,
@@ -561,6 +578,7 @@ def _to_form_layout_response(
         category_id=category_id,
         columns=int(normalized["columns"]),
         row_height=int(normalized["row_height"]),
+        hide_read_only_fields=bool(normalized.get("hide_read_only_fields", False)),
         items=items_payload,
         ordered_attribute_ids=ordered_ids,
         half_width_attribute_ids=half_ids,
@@ -745,6 +763,9 @@ async def upsert_metadata_form_layout(
     layouts[str(category_id)] = {
         "columns": normalized["columns"],
         "row_height": normalized["row_height"],
+        "hide_read_only_fields": bool(
+            normalized.get("hide_read_only_fields", False)
+        ),
         "items": normalized["items"],
         "ordered_attribute_ids": normalized["ordered_attribute_ids"],
         "half_width_attribute_ids": normalized["half_width_attribute_ids"],

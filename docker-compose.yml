@@ -2,9 +2,11 @@ services:
   backend:
     image: onedrive-cbr-backend:local
     build:
-      context: .
-      dockerfile: src/backend/Dockerfile
-    container_name: onedrive-cbr-backend
+      context: ./src
+      dockerfile: backend/Dockerfile
+      args:
+        UV_SYNC_ARGS: ""
+    container_name: driver-backend
     env_file:
       - .env
     environment:
@@ -28,7 +30,7 @@ services:
 
   worker-light:
     image: onedrive-cbr-backend:local
-    container_name: onedrive-cbr-worker-light
+    container_name: driver-worker-light
     env_file:
       - .env
     environment:
@@ -48,7 +50,7 @@ services:
 
   worker-default:
     image: onedrive-cbr-backend:local
-    container_name: onedrive-cbr-worker-default
+    container_name: driver-worker-default
     env_file:
       - .env
     environment:
@@ -68,7 +70,7 @@ services:
 
   worker-heavy:
     image: onedrive-cbr-backend:local
-    container_name: onedrive-cbr-worker-heavy
+    container_name: driver-worker-heavy
     env_file:
       - .env
     environment:
@@ -76,6 +78,32 @@ services:
       COMIC_RAR_TOOLS_DIR: /app/.tools
       WORKER_QUEUE_NAME: driver:jobs:heavy
       WORKER_CONCURRENCY: 1
+      DB_POOL_SIZE: 4
+      DB_MAX_OVERFLOW: 2
+    command: uv run --no-sync arq backend.workers.arq_worker.WorkerSettings
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - upload_tmp:/tmp/onedrive_uploads
+    restart: unless-stopped
+
+  worker-vision:
+    image: onedrive-cbr-backend-vision:local
+    build:
+      context: ./src
+      dockerfile: backend/Dockerfile
+      args:
+        UV_SYNC_ARGS: "--extra ai-vision"
+    container_name: driver-worker-vision
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      COMIC_RAR_TOOLS_DIR: /app/.tools
+      WORKER_QUEUE_NAME: driver:jobs:vision
+      WORKER_CONCURRENCY: 1
+      WORKER_ENABLE_IMAGE_HANDLERS: "true"
       DB_POOL_SIZE: 4
       DB_MAX_OVERFLOW: 2
     command: uv run --no-sync arq backend.workers.arq_worker.WorkerSettings
@@ -102,7 +130,7 @@ services:
     build:
       context: ./src/frontend
       dockerfile: Dockerfile
-    container_name: onedrive-cbr-frontend
+    container_name: driver-frontend
     depends_on:
       - backend
     ports:

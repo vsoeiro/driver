@@ -63,7 +63,7 @@ function PluginField({ field, onChange, onOpenFolderPicker, accountLabelById, t 
                 value={typeof field.value === 'string' ? field.value : JSON.stringify(field.value ?? '')}
                 onChange={(e) => onChange(field.key, e.target.value)}
             />
-            <p className="text-xs text-amber-600">
+            <p className="text-xs text-muted-foreground">
                 {t('adminSettings.pluginField.unsupported', { inputType: field.input_type })}
             </p>
         </div>

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { jobsService } from '../services/jobs';
 
-export function useUpload(accountId, folderId, onSuccess) {
+export function useUpload(accountId, folderId, onSuccess, onError) {
     const [uploading, setUploading] = useState(false);
     const [progress, setProgress] = useState(0);
 
@@ -43,9 +43,7 @@ export function useUpload(accountId, folderId, onSuccess) {
             setProgress(0);
         }
 
-        if (failed > 0) {
-            alert(`${failed} file(s) failed to upload.`);
-        }
+        if (failed > 0 && onError) onError(failed);
     };
 
     return { upload, uploading, progress };

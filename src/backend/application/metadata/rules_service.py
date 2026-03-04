@@ -60,6 +60,7 @@ class MetadataRulesService:
 
         effective_payload = {
             "apply_metadata": db_rule.apply_metadata,
+            "apply_remove_metadata": db_rule.apply_remove_metadata,
             "apply_rename": db_rule.apply_rename,
             "rename_template": db_rule.rename_template,
             "apply_move": db_rule.apply_move,
@@ -82,6 +83,12 @@ class MetadataRulesService:
         await self._session.commit()
 
     async def validate_rule_configuration(self, payload: dict) -> None:
+        if payload.get("apply_metadata", True) and payload.get("apply_remove_metadata"):
+            raise HTTPException(
+                status_code=400,
+                detail="apply_metadata and apply_remove_metadata cannot both be true",
+            )
+
         if payload.get("apply_rename") and not (payload.get("rename_template") or "").strip():
             raise HTTPException(
                 status_code=400,
@@ -98,6 +105,7 @@ class MetadataRulesService:
 
         if (
             not payload.get("apply_metadata", True)
+            and not payload.get("apply_remove_metadata")
             and not payload.get("apply_rename")
             and not payload.get("apply_move")
         ):

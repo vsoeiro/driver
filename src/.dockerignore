@@ -1,0 +1,27 @@
+# Backend virtual environments and caches
+backend/.venv
+backend/.pytest_cache
+backend/.ruff_cache
+backend/__pycache__
+backend/**/*.pyc
+backend/**/*.pyo
+backend/**/*.pyd
+backend/.mypy_cache
+backend/.coverage
+
+# Frontend build artifacts (not needed for backend images)
+frontend/node_modules
+frontend/dist
+
+# VCS and editor files
+.git
+.gitignore
+.vscode
+.idea
+
+# Local/runtime files
+.env
+*.db
+*.sqlite
+tmp
+tmp/**

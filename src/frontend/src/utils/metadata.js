@@ -271,6 +271,7 @@ export function normalizeFormLayoutForCategory(category, layout) {
     const attributes = Array.isArray(category?.attributes) ? category.attributes : [];
     const columns = clamp(toInt(layout?.columns, 12), 1, 24);
     const row_height = clamp(toInt(layout?.row_height, 1), 1, 4);
+    const hide_read_only_fields = !!layout?.hide_read_only_fields;
     const validIds = new Set(attributes.map((attr) => String(attr.id)));
     const defaultOrder = sortAttributesForCategory(category).map((attr) => String(attr.id));
 
@@ -380,6 +381,7 @@ export function normalizeFormLayoutForCategory(category, layout) {
     return {
         columns,
         row_height,
+        hide_read_only_fields,
         items: normalizedItems,
         ordered_attribute_ids,
         half_width_attribute_ids,
@@ -444,6 +446,7 @@ export function resolveLayoutItemsForRender(items, columnsInput = 12) {
 export function formLayoutToPayload(layout) {
     const columns = clamp(toInt(layout?.columns, 12), 1, 24);
     const row_height = clamp(toInt(layout?.row_height, 1), 1, 4);
+    const hide_read_only_fields = !!layout?.hide_read_only_fields;
     const items = Array.isArray(layout?.items)
         ? layout.items
             .map((item, index) => {
@@ -489,6 +492,7 @@ export function formLayoutToPayload(layout) {
     return {
         columns,
         row_height,
+        hide_read_only_fields,
         items,
         ordered_attribute_ids,
         half_width_attribute_ids,

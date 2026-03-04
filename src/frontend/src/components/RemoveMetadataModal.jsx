@@ -78,7 +78,7 @@ const RemoveMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showTo
                         )}
 
                         {folders.length > 0 && (
-                            <p className="text-sm text-amber-600 font-medium">
+                            <p className="status-badge status-badge-warning text-sm">
                                 {t('removeMetadata.recursiveWarning', { count: folders.length })}
                             </p>
                         )}

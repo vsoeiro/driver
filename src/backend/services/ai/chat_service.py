@@ -663,6 +663,18 @@ class AIChatService:
             total = int(result.get("total") or 0)
             return f"Encontrei {total} arquivo(s) para esse filtro."
 
+        successful_name_counts = [
+            trace for trace in traces
+            if trace.tool_name == "items.count_by_name" and trace.status == "success"
+        ]
+        if successful_name_counts:
+            result = successful_name_counts[-1].result_summary or {}
+            total = int(result.get("total") or 0)
+            query = str(result.get("query") or "").strip()
+            if query:
+                return f"Encontrei {total} arquivo(s) com o nome contendo '{query}'."
+            return f"Encontrei {total} arquivo(s) para esse filtro."
+
         last = traces[-1]
         if last.tool_name == "accounts.resolve" and last.status == "success":
             result = last.result_summary or {}

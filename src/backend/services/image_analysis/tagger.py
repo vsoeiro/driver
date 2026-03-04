@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Sequence
 
-import torch
 from PIL import Image
 
 DEFAULT_TAG_CANDIDATES: tuple[str, ...] = (
@@ -33,10 +32,12 @@ class CLIPTagger:
         self._model = None
         self._preprocess = None
         self._tokenizer = None
+        self._torch = None
 
     def _ensure_model(self):
         if self._model is not None:
             return self._model, self._preprocess, self._tokenizer
+        import torch  # type: ignore[import-not-found]
         import open_clip  # type: ignore[import-not-found]
 
         model, _, preprocess = open_clip.create_model_and_transforms(
@@ -48,6 +49,7 @@ class CLIPTagger:
         self._model = model
         self._preprocess = preprocess
         self._tokenizer = tokenizer
+        self._torch = torch
         return self._model, self._preprocess, self._tokenizer
 
     def tags(
@@ -59,6 +61,9 @@ class CLIPTagger:
         limit: int = 6,
     ) -> list[str]:
         model, preprocess, tokenizer = self._ensure_model()
+        torch = self._torch
+        if torch is None:
+            return []
         if not candidates:
             return []
 

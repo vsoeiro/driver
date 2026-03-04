@@ -10,6 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.models import ItemMetadata
 
+_MAX_QUERY_ARGS = 32767
+_ARGS_PER_ACCOUNT_ITEM_PAIR = 2
+_MAX_PAIRS_PER_BATCH = 10000
+
 
 class ItemMetadataRepository:
     """Read helpers for item metadata used by routes and workers."""
@@ -39,10 +43,23 @@ class ItemMetadataRepository:
     ) -> dict[tuple[UUID, str], ItemMetadata]:
         if not pairs:
             return {}
-        conditions = [
-            (ItemMetadata.account_id == account_id) & (ItemMetadata.item_id == item_id)
-            for account_id, item_id in pairs
-        ]
-        stmt = select(ItemMetadata).where(or_(*conditions))
-        rows = (await self._session.execute(stmt)).scalars().all()
-        return {(row.account_id, row.item_id): row for row in rows}
+
+        max_pairs_per_batch = min(
+            _MAX_PAIRS_PER_BATCH,
+            _MAX_QUERY_ARGS // _ARGS_PER_ACCOUNT_ITEM_PAIR,
+        )
+        result: dict[tuple[UUID, str], ItemMetadata] = {}
+
+        for idx in range(0, len(pairs), max_pairs_per_batch):
+            batch = pairs[idx : idx + max_pairs_per_batch]
+            conditions = [
+                (ItemMetadata.account_id == account_id)
+                & (ItemMetadata.item_id == item_id)
+                for account_id, item_id in batch
+            ]
+            stmt = select(ItemMetadata).where(or_(*conditions))
+            rows = (await self._session.execute(stmt)).scalars().all()
+            for row in rows:
+                result[(row.account_id, row.item_id)] = row
+
+        return result

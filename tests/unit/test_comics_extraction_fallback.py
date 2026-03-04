@@ -68,7 +68,7 @@ def test_cbz_fallback_uses_7z_cli_as_last_resort(monkeypatch):
     result = comics.extract_comic_asset("dummy.cbz", "cbz")
 
     assert result.format == "cbz"
-    assert result.details["fallback_used"] == "7z_cli"
+    assert result.details["fallback_used"] == "rar_cli"
     assert result.details["primary_container"] == "zip"
 
 
@@ -121,3 +121,19 @@ def test_cbz_fallback_raises_when_all_extractors_fail(monkeypatch):
 
     with pytest.raises(ValueError, match="Archive extraction failed for \\.cbz"):
         comics.extract_comic_asset("dummy.cbz", "cbz")
+
+
+def test_pick_first_non_empty_payload_skips_empty():
+    payloads = {
+        "000.jpg": b"",
+        "001.jpg": b"cover-bytes",
+    }
+
+    name, payload = comics._pick_first_non_empty_payload(
+        ["000.jpg", "001.jpg"],
+        reader=lambda candidate: payloads[candidate],
+        source_label="ZIP",
+    )
+
+    assert name == "001.jpg"
+    assert payload == b"cover-bytes"

@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertCircle, CheckSquare, ChevronLeft, ChevronRight, Copy, Loader2, RefreshCcw, Square, Trash2 } from 'lucide-react';
+import { AlertCircle, ArrowDown, ArrowUp, CheckSquare, ChevronLeft, ChevronRight, Copy, Loader2, RefreshCcw, Square, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { itemsService } from '../services/items';
 import { driveService } from '../services/drive';
 import { jobsService } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
 import Modal from './Modal';
+import ConfirmDialog from './ConfirmDialog';
 
 function formatSize(bytes) {
     const value = Number(bytes) || 0;
@@ -31,6 +32,7 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
     const [removeDuplicatesModalOpen, setRemoveDuplicatesModalOpen] = useState(false);
     const [preferredKeepAccountId, setPreferredKeepAccountId] = useState('');
     const [creatingRemoveDuplicatesJob, setCreatingRemoveDuplicatesJob] = useState(false);
+    const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
     const extensions = useMemo(
         () => extensionsInput.split(',').map((part) => part.trim()).filter(Boolean),
         [extensionsInput]
@@ -133,8 +135,19 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
             return;
         }
 
-        const confirmed = window.confirm(t('similarFiles.confirmDelete', { count: selectedItems.length }));
-        if (!confirmed) return;
+        setConfirmDeleteOpen(true);
+    };
+
+    const confirmDeleteSelected = async () => {
+        const selectedItems = [];
+        selectedKeys.forEach((key) => {
+            const item = visibleItemsByKey.get(key);
+            if (item) selectedItems.push(item);
+        });
+        if (selectedItems.length === 0) {
+            setConfirmDeleteOpen(false);
+            return;
+        }
 
         const byAccount = new Map();
         selectedItems.forEach((item) => {
@@ -158,6 +171,8 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
             await refetch();
         } catch (error) {
             showToast(`${t('similarFiles.failedDelete')}: ${error.message}`, 'error');
+        } finally {
+            setConfirmDeleteOpen(false);
         }
     };
 
@@ -194,20 +209,20 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
 
     return (
         <div className="flex flex-col gap-4">
-            <div className="page-header z-[80] flex flex-wrap items-center justify-between gap-3">
+            <div className="page-header layer-dropdown flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
-                    <div className="text-lg font-semibold">{t('similarFiles.title')}</div>
+                    <h2 className="page-title">{t('similarFiles.title')}</h2>
                     <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-0.5 rounded-full">
                         {t('similarFiles.groups', { count: totalGroups })}
                     </span>
                     <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-0.5 rounded-full">
                         {t('similarFiles.files', { count: totalItems })}
                     </span>
-                    <span className="text-xs font-normal bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                    <span className="status-badge status-badge-success">
                         {t('similarFiles.potentialSavings', { value: formatSize(totalPotentialSavings) })}
                     </span>
                     {collapsedRecords > 0 && (
-                        <span className="text-xs text-muted-foreground font-normal bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                        <span className="status-badge status-badge-warning">
                             {t('similarFiles.collapsed', { count: collapsedRecords })}
                         </span>
                     )}
@@ -236,17 +251,18 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                         <option value="size">{t('similarFiles.sortSize')}</option>
                         <option value="name">{t('similarFiles.sortName')}</option>
                     </select>
-                    <select
-                        className="input-shell px-2 py-1.5 text-sm"
-                        value={sortOrder}
-                        onChange={(event) => {
+                    <button
+                        type="button"
+                        className="input-shell px-2 py-1.5 text-sm inline-flex items-center justify-center"
+                        onClick={() => {
                             setPage(1);
-                            setSortOrder(event.target.value);
+                            setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
                         }}
+                        title={t('fileBrowser.sortOrder')}
+                        aria-label={t('fileBrowser.sortOrder')}
                     >
-                        <option value="desc">{t('similarFiles.desc')}</option>
-                        <option value="asc">{t('similarFiles.asc')}</option>
-                    </select>
+                        {sortOrder === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
+                    </button>
                     <select
                         className="input-shell px-2 py-1.5 text-sm"
                         value={accountId}
@@ -272,11 +288,7 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                             setExtensionsInput(event.target.value);
                         }}
                     />
-                    <button
-                        type="button"
-                        onClick={() => refetch()}
-                        className="flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium hover:bg-accent"
-                    >
+                    <button type="button" onClick={() => refetch()} className="btn-minimal">
                         <RefreshCcw size={14} className={isFetching ? 'animate-spin' : ''} />
                         {t('similarFiles.refresh')}
                     </button>
@@ -300,7 +312,7 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                 <button
                     type="button"
                     onClick={handleOpenRemoveDuplicatesModal}
-                    className="inline-flex items-center gap-2 rounded-md border border-destructive/30 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10"
+                    className="btn-minimal-danger text-xs"
                 >
                     <Trash2 size={13} />
                     {t('similarFiles.removeDuplicatesJob')}
@@ -309,7 +321,7 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                     type="button"
                     onClick={handleDeleteSelected}
                     disabled={selectedVisibleCount === 0}
-                    className="inline-flex items-center gap-2 rounded-md border border-destructive/30 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                    className="btn-minimal-danger text-xs disabled:opacity-50"
                 >
                     <Trash2 size={13} />
                     {t('similarFiles.deleteSelected')}
@@ -384,6 +396,15 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                     </div>
                 </div>
             </Modal>
+            <ConfirmDialog
+                isOpen={confirmDeleteOpen}
+                onCancel={() => setConfirmDeleteOpen(false)}
+                onConfirm={confirmDeleteSelected}
+                title={t('similarFiles.deleteSelected')}
+                description={t('similarFiles.confirmDelete', { count: selectedVisibleCount })}
+                confirmLabel={t('similarFiles.deleteSelected')}
+                tone="danger"
+            />
 
             {isLoading ? (
                 <div className="flex justify-center p-12">
@@ -424,25 +445,25 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                                 </div>
                                 <div className="flex items-center gap-2">
                                     {group.priority_level === 'low' && (
-                                        <span className="text-xs rounded-full px-2 py-1 bg-amber-100 text-amber-800">
+                                        <span className="status-badge status-badge-warning">
                                             {t('similarFiles.lowPriority')}
                                         </span>
                                     )}
                                     {group.has_same_account_matches && (
-                                        <span className="text-xs rounded-full px-2 py-1 bg-blue-100 text-blue-700">{t('similarFiles.sameAccount')}</span>
+                                        <span className="status-badge status-badge-info">{t('similarFiles.sameAccount')}</span>
                                     )}
                                     {group.has_cross_account_matches && (
-                                        <span className="text-xs rounded-full px-2 py-1 bg-emerald-100 text-emerald-700">{t('similarFiles.crossAccount')}</span>
+                                        <span className="status-badge status-badge-success">{t('similarFiles.crossAccount')}</span>
                                     )}
                                 </div>
                             </div>
                             {group.priority_level === 'low' && group.low_priority_reasons?.length > 0 && (
-                                <div className="px-3 py-2 text-xs text-amber-800 bg-amber-50 border-b border-amber-200">
+                                <div className="status-badge status-badge-warning m-3 mt-2 border-b-0 px-3 py-2 text-xs">
                                     {t('similarFiles.lowPriorityReasons')}: {group.low_priority_reasons.join(', ')}
                                 </div>
                             )}
-                            <div className="overflow-x-auto">
-                                <table className="w-full table-fixed text-sm">
+                            <div className="clarity-datagrid-shell">
+                                <table className="clarity-datagrid table-fixed">
                                     <colgroup>
                                         <col className="w-10" />
                                         <col className="w-72" />
@@ -451,8 +472,8 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                                         <col />
                                     </colgroup>
                                     <thead>
-                                        <tr className="text-xs uppercase tracking-wider text-muted-foreground bg-muted/40">
-                                            <th className="text-left p-2">
+                                        <tr>
+                                            <th>
                                                 <button type="button" onClick={toggleSelectAllVisible} className="inline-flex items-center">
                                                     {allVisibleSelected ? (
                                                         <CheckSquare size={14} />
@@ -463,30 +484,30 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
                                                     )}
                                                 </button>
                                             </th>
-                                            <th className="text-left p-2 align-middle">{t('similarFiles.account')}</th>
-                                            <th className="text-left p-2 align-middle">{t('similarFiles.extension')}</th>
-                                            <th className="text-left p-2 align-middle">{t('similarFiles.size')}</th>
-                                            <th className="text-left p-2 align-middle">{t('similarFiles.path')}</th>
+                                            <th>{t('similarFiles.account')}</th>
+                                            <th>{t('similarFiles.extension')}</th>
+                                            <th>{t('similarFiles.size')}</th>
+                                            <th>{t('similarFiles.path')}</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-border/60">
+                                    <tbody>
                                         {group.items.map((item) => {
                                             const rowKey = `${item.account_id}:${item.item_id}`;
                                             const isSelected = selectedKeys.has(rowKey);
                                             const account = accounts.find((acc) => acc.id === item.account_id);
                                             return (
                                                 <tr key={`${group.name}-${item.account_id}-${item.item_id}`}>
-                                                    <td className="p-2 align-middle">
+                                                    <td>
                                                         <button type="button" onClick={() => toggleSelectOne(item)} className="inline-flex items-center">
                                                             {isSelected ? <CheckSquare size={14} /> : <Square size={14} />}
                                                         </button>
                                                     </td>
-                                                    <td className="p-2 align-middle text-muted-foreground truncate">
+                                                    <td className="text-muted-foreground truncate">
                                                         {account?.email || account?.display_name || item.account_id}
                                                     </td>
-                                                    <td className="p-2 align-middle">{item.extension || '-'}</td>
-                                                    <td className="p-2 align-middle">{formatSize(item.size)}</td>
-                                                    <td className="p-2 align-middle text-muted-foreground truncate" title={item.path || '-'}>
+                                                    <td>{item.extension || '-'}</td>
+                                                    <td>{formatSize(item.size)}</td>
+                                                    <td className="text-muted-foreground truncate" title={item.path || '-'}>
                                                         {item.path || '-'}
                                                     </td>
                                                 </tr>

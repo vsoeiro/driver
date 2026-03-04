@@ -10,7 +10,7 @@ const { getDownloadUrl } = driveService;
 const { batchDeleteMetadata } = metadataService;
 import {
     Folder, File, Download, Trash2,
-    UploadCloud, FolderPlus, Loader2, ArrowRightLeft, Database, XCircle, CheckSquare, Square, Search, X, ChevronDown, BookOpen, RefreshCw, ChevronLeft, ChevronRight, Image as ImageIcon
+    UploadCloud, FolderPlus, Loader2, ArrowRightLeft, Database, XCircle, CheckSquare, Square, Search, X, ChevronDown, BookOpen, RefreshCw, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, Image as ImageIcon
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import MoveModal from '../components/MoveModal';
@@ -27,6 +27,7 @@ const IMAGE_ANALYZABLE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp
 
 export default function FileBrowser() {
     const { t, i18n } = useTranslation();
+    const { showToast } = useToast();
     const { accountId, folderId } = useParams();
     const {
         files,
@@ -45,7 +46,12 @@ export default function FileBrowser() {
         goToPrevPage,
         resetPagination,
     } = useDrive(accountId, folderId);
-    const { upload, uploading, progress: uploadProgress } = useUpload(accountId, folderId, refresh);
+    const { upload, uploading, progress: uploadProgress } = useUpload(
+        accountId,
+        folderId,
+        refresh,
+        (failed) => showToast(t('allFiles.uploadFailedCount', { count: failed }), 'error'),
+    );
 
     // Listen for job completion to auto-refresh
     React.useEffect(() => {
@@ -88,7 +94,6 @@ export default function FileBrowser() {
     const [isImagesLibraryActive, setIsImagesLibraryActive] = useState(false);
     const [isBooksLibraryActive, setIsBooksLibraryActive] = useState(false);
     const [imagePreviewItem, setImagePreviewItem] = useState(null);
-    const { showToast } = useToast();
 
     // Reset selection on folder change
     React.useEffect(() => {
@@ -211,7 +216,7 @@ export default function FileBrowser() {
             setSelectedItems(new Set());
             setDeleteModal({ isOpen: false });
         } catch (e) {
-            alert(e.message);
+            showToast(e.message, 'error');
         } finally {
             setActionLoading(false);
         }
@@ -225,7 +230,7 @@ export default function FileBrowser() {
             setRemoveMetadataModal(false);
             refresh();
         } catch (e) {
-            alert(e.message);
+            showToast(e.message, 'error');
         } finally {
             setActionLoading(false);
         }
@@ -297,7 +302,7 @@ export default function FileBrowser() {
             setCreateFolderModal(false);
             setNewFolderName('');
         } catch (e) {
-            alert(e.message);
+            showToast(e.message, 'error');
         } finally {
             setActionLoading(false);
         }
@@ -427,7 +432,7 @@ export default function FileBrowser() {
     }, [selectedItems, sortedFiles]);
 
     return (
-        <div className="app-page">
+        <div className="app-page density-compact">
             {/* Unified command bar */}
             <div className="surface-card mb-4 overflow-hidden">
             <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-4 py-3">
@@ -517,45 +522,48 @@ export default function FileBrowser() {
                 </div>
             </header>
 
-            <div className="px-4 py-2 flex items-center justify-between gap-2 text-sm">
-                <div className="flex items-center w-full max-w-sm relative">
-                    <Search className="absolute left-2 text-muted-foreground" size={16} />
-                    <input
-                        type="text"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        onKeyDown={handleSearchSubmit}
-                        placeholder={t('fileBrowser.searchFiles')}
-                        className="input-shell pl-8 pr-8 py-1.5 text-sm w-full"
-                    />
-                    {searchTerm && (
-                        <button onClick={clearSearch} className="absolute right-2 text-muted-foreground hover:text-foreground">
-                            <X size={14} />
+            <div className="px-4 py-2 flex items-center gap-3 text-sm">
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <div className="flex items-center w-full max-w-sm relative">
+                        <Search className="absolute left-2 text-muted-foreground" size={16} />
+                        <input
+                            type="text"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            onKeyDown={handleSearchSubmit}
+                            placeholder={t('fileBrowser.searchFiles')}
+                            className="input-shell pl-8 pr-8 py-1.5 text-sm w-full"
+                        />
+                        {searchTerm && (
+                            <button onClick={clearSearch} className="absolute right-2 text-muted-foreground hover:text-foreground">
+                                <X size={14} />
+                            </button>
+                        )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <select
+                            value={sortBy}
+                            onChange={(e) => setSortBy(e.target.value)}
+                            className="border rounded-md p-1.5 text-xs bg-background"
+                            title={t('fileBrowser.orderBy')}
+                        >
+                            <option value="name">{t('fileBrowser.sort.name')}</option>
+                            <option value="modified_at">{t('fileBrowser.sort.modified')}</option>
+                            <option value="size">{t('fileBrowser.sort.size')}</option>
+                        </select>
+                        <button
+                            type="button"
+                            className="p-1.5 text-xs border rounded-md hover:bg-accent"
+                            onClick={() => setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
+                            title={t('fileBrowser.sortOrder')}
+                            aria-label={t('fileBrowser.sortOrder')}
+                        >
+                            {sortOrder === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
                         </button>
-                    )}
-                </div>
-                <div className="flex items-center gap-2">
-                    <select
-                        value={sortBy}
-                        onChange={(e) => setSortBy(e.target.value)}
-                        className="border rounded-md p-1.5 text-xs bg-background"
-                        title={t('fileBrowser.orderBy')}
-                    >
-                        <option value="name">{t('fileBrowser.sort.name')}</option>
-                        <option value="modified_at">{t('fileBrowser.sort.modified')}</option>
-                        <option value="size">{t('fileBrowser.sort.size')}</option>
-                    </select>
-                    <button
-                        type="button"
-                        className="px-2 py-1.5 text-xs border rounded-md hover:bg-accent"
-                        onClick={() => setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
-                        title={t('fileBrowser.sortOrder')}
-                    >
-                        {sortOrder === 'asc' ? t('fileBrowser.asc') : t('fileBrowser.desc')}
-                    </button>
+                    </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 ml-auto">
                     <div className="h-4 w-px bg-border mx-2" />
                     <span className="font-medium mr-2 whitespace-nowrap w-24 text-right tabular-nums">{t('similarFiles.selected', { count: selectedItems.size })}</span>
 
@@ -596,7 +604,7 @@ export default function FileBrowser() {
                         </button>
 
                         {metadataMenuOpen && (
-                            <div className="absolute top-full left-0 w-48 pt-1 z-[90]">
+                            <div className="absolute top-full left-0 w-48 pt-1 layer-dropdown">
                                 <div className="bg-popover border rounded-md shadow-md py-1">
                                     <button
                                         onClick={() => {
@@ -665,7 +673,7 @@ export default function FileBrowser() {
                     <button
                         onClick={() => setDeleteModal({ isOpen: true })}
                         disabled={selectedItems.size === 0}
-                        className="p-2 hover:bg-destructive/10 text-destructive rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="btn-minimal-danger px-2 py-2 disabled:cursor-not-allowed"
                         title={t('fileBrowser.delete')}
                     >
                         <Trash2 size={16} /> <span className="hidden sm:inline">{t('fileBrowser.delete')}</span>
@@ -681,7 +689,7 @@ export default function FileBrowser() {
                         <Loader2 className="animate-spin text-primary" size={32} />
                     </div>
                 ) : error ? (
-                    <div className="text-red-500 p-4 border border-red-200 rounded-md bg-red-50">
+                    <div className="status-badge status-badge-danger block p-4">
                         Error: {error}
                     </div>
                 ) : files.length === 0 ? (
@@ -727,7 +735,7 @@ export default function FileBrowser() {
                                         </div>
 
                                         <div className="text-muted-foreground flex justify-center">
-                                            {isFolder ? <Folder className="text-blue-500 fill-blue-500/20" size={20} /> : <File className="text-gray-400" size={20} />}
+                                            {isFolder ? <Folder className="text-primary fill-primary/15" size={20} /> : <File className="text-muted-foreground" size={20} />}
                                         </div>
 
                                         <div className="min-w-0 truncate font-medium">

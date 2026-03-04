@@ -25,18 +25,16 @@ export default function Dashboard() {
     }, []);
 
     return (
-        <div className="container mx-auto p-6 max-w-5xl">
-            <header className="flex justify-between items-center mb-8">
-                <h1 className="text-3xl font-bold tracking-tight">{t('dashboard.title')}</h1>
-                <div className="flex items-center gap-2">
-                    <button
-                        onClick={() => setPickerOpen(true)}
-                        className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md hover:bg-primary/90 transition-colors"
-                    >
-                        <Plus size={20} />
-                        {t('dashboard.linkAccount')}
-                    </button>
-                </div>
+        <div className="app-page mx-auto w-full max-w-6xl">
+            <header className="page-header flex items-center justify-between">
+                <h1 className="page-title">{t('dashboard.title')}</h1>
+                <button
+                    onClick={() => setPickerOpen(true)}
+                    className="btn-minimal-primary"
+                >
+                    <Plus size={18} />
+                    {t('dashboard.linkAccount')}
+                </button>
             </header>
 
             {loading ? (
@@ -44,30 +42,30 @@ export default function Dashboard() {
                     <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
                 </div>
             ) : accounts.length === 0 ? (
-                <div className="text-center p-12 border border-dashed rounded-lg bg-muted/50">
+                <div className="empty-state">
                     <HardDrive className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
                     <h3 className="text-lg font-medium">{t('dashboard.noAccounts')}</h3>
                     <p className="text-muted-foreground mb-6">{t('dashboard.noAccountsHelp')}</p>
                     <button
                         onClick={() => setPickerOpen(true)}
-                        className="bg-primary text-primary-foreground px-4 py-2 rounded-md hover:bg-primary/90"
+                        className="btn-minimal-primary"
                     >
                         {t('dashboard.linkAccount')}
                     </button>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                     {accounts.map(acc => (
                         <Link
                             to={`/drive/${acc.id}`}
                             key={acc.id}
-                            className="group block border rounded-xl p-6 hover:shadow-lg transition-all bg-card hover:border-primary/50"
+                            className="group block rounded-sm border border-border/90 bg-card p-5 transition-colors hover:bg-muted/25"
                         >
                             <div className="flex items-start justify-between mb-4">
-                                <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400">
+                                <div className="status-badge status-badge-info p-2">
                                     <ProviderIcon provider={acc.provider} className="w-6 h-6" />
                                 </div>
-                                <span className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 text-xs font-medium px-2.5 py-0.5 rounded-full">
+                                <span className="status-badge status-badge-success">
                                     {t('dashboard.active')}
                                 </span>
                             </div>
@@ -75,7 +73,7 @@ export default function Dashboard() {
                             <h3 className="font-semibold text-lg mb-1">{acc.display_name}</h3>
                             <p className="text-sm text-muted-foreground mb-4 truncate">{acc.email}</p>
 
-                            <div className="flex items-center justify-between text-xs text-muted-foreground mt-4 pt-4 border-t">
+                            <div className="mt-4 flex items-center justify-between border-t pt-4 text-xs text-muted-foreground">
                                 <div className="flex items-center gap-1">
                                     <Calendar size={12} />
                                     {formatDateOnly(acc.created_at, i18n.language)}

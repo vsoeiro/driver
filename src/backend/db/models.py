@@ -591,6 +591,7 @@ class MetadataRule(Base):
     )
     target_values: Mapped[dict] = mapped_column(JSON, default={})
     apply_metadata: Mapped[bool] = mapped_column(Boolean, default=True)
+    apply_remove_metadata: Mapped[bool] = mapped_column(Boolean, default=False)
     apply_rename: Mapped[bool] = mapped_column(Boolean, default=False)
     rename_template: Mapped[str | None] = mapped_column(String(500), nullable=True)
     apply_move: Mapped[bool] = mapped_column(Boolean, default=False)

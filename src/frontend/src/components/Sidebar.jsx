@@ -92,10 +92,10 @@ export default function Sidebar() {
                                 const activeByDrive = to === '/accounts' && location.pathname.startsWith('/drive/');
                                 const isLinkActive = isActive || activeByDrive;
                                 return `
-                                    group flex items-center rounded-md border px-2.5 py-1.5 text-sm font-medium transition-all
+                                    group flex items-center rounded-sm border px-2.5 py-1.5 text-sm font-medium transition-all
                                     gap-2
                                     ${isLinkActive
-                                        ? 'border-primary/35 bg-primary/12 text-primary'
+                                        ? 'border-primary/35 bg-primary/10 text-primary'
                                         : 'border-transparent text-muted-foreground hover:bg-accent/70 hover:text-foreground'
                                     }
                                 `;
@@ -108,7 +108,7 @@ export default function Sidebar() {
                 </nav>
                 {showQuotaCard && (
                     <div className="mt-auto border-t border-border px-2 pt-3">
-                        <div className="rounded-md border border-border bg-background px-3 py-2.5">
+                        <div className="rounded-sm border border-border bg-background px-3 py-2.5">
                             <div className="mb-2 inline-flex items-center gap-2 text-xs font-medium text-muted-foreground">
                                 <Gauge size={12} />
                                 <span>{t('sidebar.quota')}</span>
@@ -120,9 +120,9 @@ export default function Sidebar() {
                             ) : (
                                 <>
                                     <div className="mb-1 text-xs font-semibold">{t('sidebar.quotaUsed', { percent: usedPercent })}</div>
-                                    <div className="mb-2 h-1.5 overflow-hidden rounded-md bg-muted">
+                                    <div className="mb-2 h-1.5 overflow-hidden rounded-sm bg-muted">
                                         <div
-                                            className="h-full rounded-md bg-primary transition-[width] duration-300"
+                                            className="h-full rounded-sm bg-primary transition-[width] duration-300"
                                             style={{ width: `${usedPercent}%` }}
                                         />
                                     </div>
