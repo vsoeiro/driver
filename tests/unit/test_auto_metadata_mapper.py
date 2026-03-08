@@ -82,3 +82,49 @@ async def test_enqueue_auto_mapping_jobs_pdf_only_creates_no_jobs(monkeypatch):
     assert summary["items_by_type"] == {}
     assert summary["total_jobs"] == 0
     assert summary["job_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_enqueue_auto_mapping_jobs_builds_distinct_dedupe_keys_per_item_chunk(monkeypatch):
+    dedupe_keys: list[str | None] = []
+
+    async def fake_enqueue_job_command(session, *, job_type, payload, dedupe_key=None):  # noqa: ARG001
+        dedupe_keys.append(dedupe_key)
+        return SimpleNamespace(id=uuid4())
+
+    class _FakeLibraryService:
+        def __init__(self, session):  # noqa: ARG002
+            pass
+
+        async def get_active_comics_category(self):
+            return object()
+
+        async def get_active_books_category(self):
+            return None
+
+        async def get_active_images_category(self):
+            return None
+
+    monkeypatch.setattr(amm, "enqueue_job_command", fake_enqueue_job_command)
+    monkeypatch.setattr(amm, "MetadataLibraryService", _FakeLibraryService)
+    account_id = uuid4()
+
+    await amm.enqueue_auto_mapping_jobs(
+        session=object(),
+        account_id=account_id,
+        candidates=[amm.AutoMapCandidate(item_id="cbz-1", name="one.cbz", extension="cbz")],
+        source="upload_file",
+        chunk_size=100,
+    )
+    await amm.enqueue_auto_mapping_jobs(
+        session=object(),
+        account_id=account_id,
+        candidates=[amm.AutoMapCandidate(item_id="cbz-2", name="two.cbz", extension="cbz")],
+        source="upload_file",
+        chunk_size=100,
+    )
+
+    assert len(dedupe_keys) == 2
+    assert dedupe_keys[0] is not None
+    assert dedupe_keys[1] is not None
+    assert dedupe_keys[0] != dedupe_keys[1]

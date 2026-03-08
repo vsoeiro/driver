@@ -58,6 +58,19 @@ SUPPORTED_COMIC_EXTENSIONS = {
     "tar",
 }
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
+NON_COMIC_EXTRACTION_MARKERS = (
+    "archive has no image pages",
+    "no image pages",
+    "extracted only empty cover files",
+    "epub has no cover image",
+    "epub missing",
+    "epub container has no rootfile",
+    "epub opf manifest not found",
+    "cannot open the file as archive",
+    "is not rar archive",
+    "not a rar archive",
+    "not a rar file",
+)
 
 
 @dataclass(slots=True)
@@ -523,6 +536,13 @@ def _pick_first_non_empty_payload(
         if payload:
             return candidate_name, payload
     raise ValueError(f"{source_label} extracted only empty cover files")
+
+
+def _is_non_comic_extraction_error(error_text: str) -> bool:
+    normalized = (error_text or "").strip().lower()
+    if not normalized:
+        return False
+    return any(marker in normalized for marker in NON_COMIC_EXTRACTION_MARKERS)
 
 
 def _extract_from_epub(local_path: str) -> ComicExtractionResult:
@@ -1231,15 +1251,8 @@ class ComicMetadataService:
             return True
         except ValueError as exc:
             # Non-comic/unsupported content inside accepted container types should be skipped.
-            non_comic_markers = (
-                "archive has no image pages",
-                "epub has no cover image",
-                "epub missing",
-                "epub container has no rootfile",
-                "epub opf manifest not found",
-            )
             error_text = str(exc).lower()
-            if any(marker in error_text for marker in non_comic_markers):
+            if _is_non_comic_extraction_error(error_text):
                 logger.info(
                     "Skipping non-comic item account=%s item=%s name=%s reason=%s",
                     source_account_id,

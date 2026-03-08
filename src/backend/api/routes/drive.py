@@ -6,6 +6,7 @@ This module provides endpoints for navigating and accessing OneDrive files.
 import logging
 import mimetypes
 import os
+import tempfile
 import uuid
 import zipfile
 import asyncio
@@ -22,7 +23,7 @@ from backend.api.dependencies import (
     LinkedAccountDep,
 )
 from backend.application.drive.transfer_service import DriveTransferService
-from backend.common.upload_policy import MAX_SIMPLE_UPLOAD_SIZE
+from backend.common.upload_policy import MAX_RESUMABLE_UPLOAD_CHUNK_SIZE, MAX_SIMPLE_UPLOAD_SIZE
 from backend.core.exceptions import DriveOrganizerError
 from backend.db.models import Item, ItemMetadata, LinkedAccount
 from backend.schemas.drive import (
@@ -52,6 +53,7 @@ from backend.services.providers.factory import build_drive_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/drive")
+MAX_ZIP_DOWNLOAD_ITEMS = 100
 
 
 def _sanitize_zip_name(name: str) -> str:
@@ -278,6 +280,11 @@ async def download_zip(
         raise HTTPException(
             status_code=400, detail="No files selected for ZIP download"
         )
+    if len(request.item_ids) > MAX_ZIP_DOWNLOAD_ITEMS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"ZIP download supports at most {MAX_ZIP_DOWNLOAD_ITEMS} items per request.",
+        )
 
     # Create a temporary directory to store files
     temp_dir = tempfile.mkdtemp()
@@ -462,7 +469,10 @@ async def upload_file(
         raise
     except Exception as e:
         logger.exception("Upload failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Upload failed. Check server logs for details.",
+        )
 
 
 @router.post(
@@ -498,13 +508,30 @@ async def upload_chunk(
     file: UploadFile = File(...),
 ) -> dict:
     """Upload a chunk to an existing upload session."""
+    if start_byte < 0 or end_byte < start_byte:
+        raise HTTPException(status_code=400, detail="Invalid byte range")
+    if total_size <= 0:
+        raise HTTPException(status_code=400, detail="Invalid total_size")
+    if end_byte >= total_size:
+        raise HTTPException(status_code=400, detail="end_byte must be less than total_size")
+
     chunk = await file.read()
+    expected_chunk_size = (end_byte - start_byte) + 1
+    if expected_chunk_size != len(chunk):
+        raise HTTPException(status_code=400, detail="Chunk size does not match byte range")
+    if len(chunk) > MAX_RESUMABLE_UPLOAD_CHUNK_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Chunk too large. Max chunk size is {MAX_RESUMABLE_UPLOAD_CHUNK_SIZE // (1024 * 1024)}MB.",
+        )
+
     result = await graph_client.upload_chunk(
         upload_url,
         chunk,
         start_byte,
         end_byte,
         total_size,
+        account=account,
     )
     item_id = result.get("id") if isinstance(result, dict) else None
     if item_id:

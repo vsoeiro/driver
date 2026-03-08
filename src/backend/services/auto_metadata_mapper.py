@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import Iterable
 from uuid import UUID
 
@@ -65,6 +67,28 @@ def _normalize_extension(*, extension: str | None, name: str | None) -> str:
     return raw_name.rsplit(".", 1)[-1].strip().lower()
 
 
+def _build_auto_map_dedupe_key(
+    *,
+    source: str,
+    account_id: UUID,
+    job_type: str,
+    item_ids: list[str],
+) -> str:
+    canonical_payload = json.dumps(
+        {
+            "account_id": str(account_id),
+            "job_type": str(job_type),
+            "source": str(source),
+            "item_ids": sorted({str(item_id) for item_id in item_ids}),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+    digest = sha256(canonical_payload.encode("utf-8")).hexdigest()
+    return f"auto-map:{digest}"
+
+
 async def enqueue_auto_mapping_jobs(
     session: AsyncSession,
     *,
@@ -112,9 +136,12 @@ async def enqueue_auto_mapping_jobs(
             continue
         if job_type not in active_types:
             continue
-        items_by_type[job_type] = len(item_ids)
-        for i in range(0, len(item_ids), safe_chunk_size):
-            chunk = item_ids[i : i + safe_chunk_size]
+        deduped_item_ids = list(dict.fromkeys(str(item_id) for item_id in item_ids))
+        if not deduped_item_ids:
+            continue
+        items_by_type[job_type] = len(deduped_item_ids)
+        for i in range(0, len(deduped_item_ids), safe_chunk_size):
+            chunk = deduped_item_ids[i : i + safe_chunk_size]
             payload: dict[str, object] = {
                 "account_id": str(account_id),
                 "item_ids": chunk,
@@ -126,7 +153,12 @@ async def enqueue_auto_mapping_jobs(
                 session,
                 job_type=job_type,
                 payload=payload,
-                dedupe_key=f"auto-map:{source}:{account_id}:{job_type}:{i}",
+                dedupe_key=_build_auto_map_dedupe_key(
+                    source=source,
+                    account_id=account_id,
+                    job_type=job_type,
+                    item_ids=chunk,
+                ),
             )
             total_jobs += 1
             job_ids.append(str(job.id))

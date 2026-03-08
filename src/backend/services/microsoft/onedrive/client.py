@@ -861,6 +861,8 @@ class GraphClient(OAuthHTTPClientBase):
         start_byte: int,
         end_byte: int,
         total_size: int,
+        *,
+        account: LinkedAccount | None = None,
     ) -> dict:
         """Upload a chunk to an upload session.
 
@@ -882,6 +884,7 @@ class GraphClient(OAuthHTTPClientBase):
         dict
             Upload progress or completed item.
         """
+        _ = account
         client = await self._get_http_client(timeout=GRAPH_TIMEOUT)
         response = await client.put(
             upload_url,

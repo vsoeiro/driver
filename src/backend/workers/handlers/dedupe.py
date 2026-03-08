@@ -30,6 +30,7 @@ LOW_PRIORITY_PATH_MARKERS = (
     "/.objects/",
     "/__covers__/",
 )
+MAX_DEDUPE_SCAN_ROWS = 200_000
 
 
 def _normalize_text(value: str | None) -> str:
@@ -105,7 +106,12 @@ async def remove_duplicate_files_handler(payload: dict, session: AsyncSession) -
     ).where(Item.item_type == "file")
     if account_id:
         stmt = stmt.where(Item.account_id == account_id)
-    rows = (await session.execute(stmt)).all()
+    rows = (await session.execute(stmt.limit(MAX_DEDUPE_SCAN_ROWS + 1))).all()
+    if len(rows) > MAX_DEDUPE_SCAN_ROWS:
+        raise ValueError(
+            f"Duplicate removal exceeded scan limit ({MAX_DEDUPE_SCAN_ROWS} files). "
+            "Narrow scope by account or extensions and retry."
+        )
 
     dedupe_map: dict[tuple[str, str, str, int, str], dict[str, Any]] = {}
     for row in rows:

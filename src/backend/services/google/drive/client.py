@@ -473,7 +473,10 @@ class GoogleDriveClient(OAuthHTTPClientBase):
         start_byte: int,
         end_byte: int,
         total_size: int,
+        *,
+        account: LinkedAccount | None = None,
     ) -> dict:
+        _ = account
         client = await self._get_http_client(timeout=GOOGLE_TIMEOUT)
         try:
             response = await client.put(

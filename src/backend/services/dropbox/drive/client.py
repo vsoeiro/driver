@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import base64
-import json
 import logging
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import httpx
 
@@ -23,27 +23,55 @@ logger = logging.getLogger(__name__)
 DROPBOX_API_BASE_URL = "https://api.dropboxapi.com/2"
 DROPBOX_CONTENT_BASE_URL = "https://content.dropboxapi.com/2"
 DROPBOX_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
+DROPBOX_UPLOAD_SESSION_TTL = timedelta(hours=4)
+_DROPBOX_UPLOAD_SESSIONS: dict[str, dict[str, Any]] = {}
 
 
-def _session_payload_to_url(payload: dict[str, Any]) -> str:
-    encoded = base64.urlsafe_b64encode(
-        json.dumps(payload, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
-    ).decode("utf-8")
-    return f"dropbox-session://{encoded}"
+def _extract_session_key(upload_url: str) -> str:
+    if not upload_url.startswith("dropbox-session://"):
+        raise DriveOrganizerError("Invalid Dropbox upload session URL", status_code=400)
+    key = upload_url.split("dropbox-session://", 1)[1].strip()
+    if not key:
+        raise DriveOrganizerError("Invalid Dropbox upload session URL", status_code=400)
+    return key
+
+
+def _prune_expired_sessions() -> None:
+    now = datetime.now(UTC)
+    stale_keys = [
+        key
+        for key, payload in _DROPBOX_UPLOAD_SESSIONS.items()
+        if not isinstance(payload, dict)
+        or not isinstance(payload.get("expires_at"), datetime)
+        or payload["expires_at"] <= now
+    ]
+    for key in stale_keys:
+        _DROPBOX_UPLOAD_SESSIONS.pop(key, None)
+
+
+def _session_payload_to_url(payload: dict[str, Any]) -> tuple[str, datetime]:
+    _prune_expired_sessions()
+    expires_at = datetime.now(UTC) + DROPBOX_UPLOAD_SESSION_TTL
+    key = uuid4().hex
+    _DROPBOX_UPLOAD_SESSIONS[key] = {**payload, "expires_at": expires_at}
+    return f"dropbox-session://{key}", expires_at
 
 
 def _session_payload_from_url(upload_url: str) -> dict[str, Any]:
-    if not upload_url.startswith("dropbox-session://"):
-        raise DriveOrganizerError("Invalid Dropbox upload session URL", status_code=400)
-    encoded = upload_url.split("dropbox-session://", 1)[1]
-    try:
-        raw = base64.urlsafe_b64decode(encoded.encode("utf-8"))
-        payload = json.loads(raw.decode("utf-8"))
-    except Exception as exc:
-        raise DriveOrganizerError("Malformed Dropbox upload session payload", status_code=400) from exc
+    _prune_expired_sessions()
+    key = _extract_session_key(upload_url)
+    payload = _DROPBOX_UPLOAD_SESSIONS.get(key)
     if not isinstance(payload, dict):
-        raise DriveOrganizerError("Malformed Dropbox upload session payload", status_code=400)
+        raise DriveOrganizerError("Invalid or expired Dropbox upload session", status_code=400)
     return payload
+
+
+def _clear_session_payload(upload_url: str) -> None:
+    try:
+        key = _extract_session_key(upload_url)
+    except DriveOrganizerError:
+        return
+    _DROPBOX_UPLOAD_SESSIONS.pop(key, None)
 
 
 class DropboxDriveClient(OAuthHTTPClientBase):
@@ -440,17 +468,17 @@ class DropboxDriveClient(OAuthHTTPClientBase):
         if not session_id:
             raise DriveOrganizerError("Dropbox did not return upload session id", status_code=502)
 
-        access_token = await self._token_manager.get_valid_access_token(account)
         payload = {
             "provider": "dropbox",
             "session_id": session_id,
-            "access_token": access_token,
             "commit_path": commit_path,
             "autorename": conflict_behavior != "fail",
+            "account_id": str(account.id),
         }
+        upload_url, expires_at = _session_payload_to_url(payload)
         return {
-            "upload_url": _session_payload_to_url(payload),
-            "expiration": datetime.now(UTC) + timedelta(hours=4),
+            "upload_url": upload_url,
+            "expiration": expires_at,
         }
 
     async def upload_chunk(
@@ -460,16 +488,21 @@ class DropboxDriveClient(OAuthHTTPClientBase):
         start_byte: int,
         end_byte: int,
         total_size: int,
+        *,
+        account: LinkedAccount | None = None,
     ) -> dict:
         payload = _session_payload_from_url(upload_url)
         if payload.get("provider") != "dropbox":
             raise DriveOrganizerError("Invalid Dropbox upload session payload", status_code=400)
         session_id = payload.get("session_id")
-        access_token = payload.get("access_token")
         commit_path = payload.get("commit_path")
-        if not session_id or not access_token or not commit_path:
+        session_account_id = str(payload.get("account_id") or "").strip()
+        if not session_id or not commit_path or not session_account_id:
             raise DriveOrganizerError("Invalid Dropbox upload session payload", status_code=400)
+        if account is None or str(account.id) != session_account_id:
+            raise DriveOrganizerError("Upload session does not match account", status_code=403)
 
+        access_token = await self._token_manager.get_valid_access_token(account)
         headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/octet-stream"}
         client = await self._get_http_client(timeout=DROPBOX_TIMEOUT)
         cursor = {"session_id": session_id, "offset": start_byte}
@@ -525,6 +558,7 @@ class DropboxDriveClient(OAuthHTTPClientBase):
             raise DriveOrganizerError(f"Dropbox chunk upload failed: {message}", status_code=response.status_code)
 
         if response.status_code == 200 and response.content:
+            _clear_session_payload(upload_url)
             return response.json()
         return {"next_expected_ranges": [f"{end_byte + 1}-"]}
 
@@ -657,4 +691,3 @@ class DropboxDriveClient(OAuthHTTPClientBase):
 async def close_dropbox_drive_http_client() -> None:
     """Close shared Dropbox HTTP client used across request scopes."""
     await DropboxDriveClient.close_http_client()
-

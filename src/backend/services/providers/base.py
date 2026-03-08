@@ -56,6 +56,8 @@ class DriveProviderClient(Protocol):
         start_byte: int,
         end_byte: int,
         total_size: int,
+        *,
+        account: LinkedAccount | None = None,
     ) -> dict: ...
     async def create_folder(
         self,

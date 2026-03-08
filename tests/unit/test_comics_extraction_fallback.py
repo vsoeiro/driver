@@ -137,3 +137,14 @@ def test_pick_first_non_empty_payload_skips_empty():
 
     assert name == "001.jpg"
     assert payload == b"cover-bytes"
+
+
+def test_non_comic_extraction_error_recognizes_invalid_archive_messages():
+    assert comics._is_non_comic_extraction_error(
+        "RAR CLI extraction failed across available tools: 7za: code=2 stderr=ERROR: file.rar Cannot open the file as archive"
+    )
+    assert comics._is_non_comic_extraction_error("unrar: no image pages (stderr=)")
+
+
+def test_non_comic_extraction_error_ignores_unrelated_errors():
+    assert not comics._is_non_comic_extraction_error("Network timeout while downloading source file")

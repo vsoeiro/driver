@@ -153,6 +153,7 @@ class DriveTransferService:
                 offset,
                 end,
                 file_size,
+                account=account,
             )
             if isinstance(upload_result, dict) and upload_result.get("id"):
                 uploaded_item_id = str(upload_result["id"])

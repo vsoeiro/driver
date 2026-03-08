@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 import shutil
@@ -22,6 +23,7 @@ _SUSPICIOUS_TOOL_NAMES = {
     "unrarw32.exe",
     "unrardll.exe",
 }
+MAX_TOOL_DOWNLOAD_BYTES = 64 * 1024 * 1024
 
 
 def _candidate_tools(tools_dir: Path) -> list[Path]:
@@ -73,13 +75,32 @@ def _try_tool_setup(rarfile_module, tool_path: Path | None = None) -> bool:
 
 
 def _download_tool(download_url: str, tools_dir: Path) -> Path | None:
+    if not _is_safe_download_url(download_url):
+        logger.warning("Rejected insecure RAR tool download URL: %s", download_url)
+        return None
+
     parsed = urlparse(download_url)
     file_name = Path(parsed.path).name or "rar_tool.bin"
     target = tools_dir / file_name
     try:
-        response = httpx.get(download_url, timeout=60.0, follow_redirects=True)
-        response.raise_for_status()
-        target.write_bytes(response.content)
+        downloaded = 0
+        with httpx.stream("GET", download_url, timeout=60.0, follow_redirects=True) as response:
+            response.raise_for_status()
+            final_url = str(response.url)
+            if not _is_safe_download_url(final_url):
+                logger.warning("Rejected redirected RAR tool URL: %s", final_url)
+                return None
+            with target.open("wb") as handle:
+                for chunk in response.iter_bytes():
+                    if not chunk:
+                        continue
+                    downloaded += len(chunk)
+                    if downloaded > MAX_TOOL_DOWNLOAD_BYTES:
+                        raise ValueError(
+                            f"RAR tool download exceeds {MAX_TOOL_DOWNLOAD_BYTES // (1024 * 1024)}MB limit"
+                        )
+                    handle.write(chunk)
+
         if os.name != "nt":
             target.chmod(0o755)
         if not _is_cli_safe_tool(target):
@@ -87,8 +108,38 @@ def _download_tool(download_url: str, tools_dir: Path) -> Path | None:
             return None
         return target
     except Exception as exc:
+        try:
+            target.unlink(missing_ok=True)
+        except Exception:
+            pass
         logger.warning("Failed to download RAR tool from %s: %s", download_url, exc)
         return None
+
+
+def _is_safe_download_url(download_url: str) -> bool:
+    parsed = urlparse(download_url)
+    if parsed.scheme.lower() != "https":
+        return False
+    hostname = (parsed.hostname or "").strip().lower()
+    if not hostname:
+        return False
+    if hostname in {"localhost", "127.0.0.1", "::1"}:
+        return False
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            return False
+    except ValueError:
+        # Not an IP literal; keep host-based URL.
+        pass
+    return True
 
 
 def _find_system_candidates() -> list[Path]:
