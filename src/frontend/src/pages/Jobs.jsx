@@ -16,6 +16,7 @@ const DATE_RANGE_MS = {
     '30d': 30 * 24 * 60 * 60 * 1000,
     '90d': 90 * 24 * 60 * 60 * 1000,
 };
+const LIVE_JOB_STATUSES = new Set(['PENDING', 'RUNNING', 'RETRY_SCHEDULED', 'CANCEL_REQUESTED']);
 
 export default function Jobs() {
     const { t, i18n } = useTranslation();
@@ -89,6 +90,8 @@ export default function Jobs() {
     const loading = isLoading;
     const refreshing = isFetching && !isLoading;
     const hasNextPage = jobs.length === PAGE_SIZE;
+    const autoRefreshEnabled = page === 1 && (statusFilter === 'ALL' || LIVE_JOB_STATUSES.has(statusFilter));
+    const autoRefreshIntervalMs = autoRefreshEnabled ? 10000 : 0;
 
     useEffect(() => {
         if (error) {
@@ -98,8 +101,8 @@ export default function Jobs() {
 
     usePolling({
         callback: () => refetch(),
-        intervalMs: 10000,
-        enabled: true,
+        intervalMs: autoRefreshIntervalMs,
+        enabled: autoRefreshEnabled,
         pauseWhenHidden: true,
         runImmediately: false,
     });
@@ -345,29 +348,65 @@ export default function Jobs() {
     };
 
     const pickMetricNumber = (source, keys) => {
-        if (!source || typeof source !== 'object') return 0;
+        if (!source || typeof source !== 'object') return null;
         for (const key of keys) {
             const value = source[key];
             if (typeof value === 'number' && Number.isFinite(value)) {
-                return Math.trunc(value);
+                return Math.max(0, Math.trunc(value));
             }
         }
-        return 0;
+        return null;
     };
 
     const getMetricSummary = (job) => {
         const metrics = job?.metrics && typeof job.metrics === 'object' ? job.metrics : {};
         const result = job?.result && typeof job.result === 'object' ? job.result : {};
-        const success = pickMetricNumber(metrics, ['success', 'mapped', 'updated', 'changed']) || pickMetricNumber(result, ['success', 'mapped', 'updated', 'changed']);
-        const failed = pickMetricNumber(metrics, ['failed', 'errors']) || pickMetricNumber(result, ['failed', 'errors']);
-        const skipped = pickMetricNumber(metrics, ['skipped', 'unchanged']) || pickMetricNumber(result, ['skipped', 'unchanged']);
-        const explicitTotal = pickMetricNumber(metrics, ['total']) || pickMetricNumber(result, ['total']);
-        const derivedTotal = success + failed + skipped;
+        const success = pickMetricNumber(metrics, ['success', 'mapped', 'updated', 'changed', 'deleted']) ?? pickMetricNumber(result, ['success', 'mapped', 'updated', 'changed', 'deleted']) ?? 0;
+        const failed = pickMetricNumber(metrics, ['failed', 'errors']) ?? pickMetricNumber(result, ['failed', 'errors']) ?? 0;
+        const skipped = pickMetricNumber(metrics, ['skipped', 'unchanged']) ?? pickMetricNumber(result, ['skipped', 'unchanged']) ?? 0;
+        const explicitTotal = pickMetricNumber(metrics, ['total']) ?? pickMetricNumber(result, ['total']);
         return {
-            total: explicitTotal > 0 ? explicitTotal : derivedTotal,
+            total: explicitTotal,
             success,
             failed,
             skipped,
+        };
+    };
+
+    const getJobProgressSummary = (job) => {
+        const metricSummary = getMetricSummary(job);
+        const rawProgressPercent = Number.isFinite(Number(job?.progress_percent))
+            ? Math.trunc(Number(job.progress_percent))
+            : 0;
+        const normalizedProgressPercent = Math.max(0, Math.min(100, rawProgressPercent));
+        const progressTotal = Number.isFinite(Number(job?.progress_total))
+            ? Math.max(0, Math.trunc(Number(job.progress_total)))
+            : null;
+        const totalItems = progressTotal ?? metricSummary.total;
+        const hasKnownTotal = totalItems !== null;
+        const processedItems = Math.max(0, metricSummary.success + metricSummary.failed + metricSummary.skipped);
+        const processedDisplay = hasKnownTotal && totalItems > 0
+            ? Math.min(processedItems, totalItems)
+            : processedItems;
+        const breakdownTotal = hasKnownTotal && totalItems > 0 ? totalItems : processedItems;
+        const breakdownDenominator = breakdownTotal > 0 ? breakdownTotal : 1;
+        const successWidth = (Math.max(0, metricSummary.success) / breakdownDenominator) * 100;
+        const failedWidth = (Math.max(0, metricSummary.failed) / breakdownDenominator) * 100;
+        const skippedWidth = (Math.max(0, metricSummary.skipped) / breakdownDenominator) * 100;
+        const completionPercent = hasKnownTotal && totalItems > 0
+            ? Math.min(100, Math.round((processedDisplay / totalItems) * 100))
+            : normalizedProgressPercent;
+        return {
+            metricSummary,
+            totalItems,
+            hasKnownTotal,
+            processedDisplay,
+            breakdownTotal,
+            successWidth,
+            failedWidth,
+            skippedWidth,
+            normalizedProgressPercent,
+            completionPercent,
         };
     };
 
@@ -449,89 +488,92 @@ export default function Jobs() {
         return null;
     };
 
-    const selectedMetricSummary = selectedJob ? getMetricSummary(selectedJob) : null;
+    const selectedProgressSummary = selectedJob ? getJobProgressSummary(selectedJob) : null;
+    const selectedMetricSummary = selectedProgressSummary ? selectedProgressSummary.metricSummary : null;
     const selectedErrorText = selectedJob ? getJobErrorText(selectedJob, attempts) : null;
     const selectedErrorItems = selectedJob ? normalizeErrorItems(selectedJob) : [];
     const selectedErrorItemsTruncated = selectedJob ? getErrorItemsTruncated(selectedJob) : 0;
 
     return (
-        <div className="app-page density-compact">
-            <div className="page-header flex flex-wrap items-start justify-between gap-3">
-                <div>
-                    <h1 className="page-title">{t('jobs.title')}</h1>
-                    <p className="page-subtitle">{t('jobs.subtitle')}</p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                    <select
-                        className="input-shell px-2 py-1.5 text-sm"
-                        value={statusFilter}
-                        onChange={(event) => {
-                            const nextStatus = event.target.value;
-                            setStatusFilter(nextStatus);
-                            setPage(1);
-                        }}
-                    >
-                        <option value="ALL">{t('jobs.allStatus')}</option>
-                        <option value="PENDING">{t('jobStatus.PENDING')}</option>
-                        <option value="RUNNING">{t('jobStatus.RUNNING')}</option>
-                        <option value="RETRY_SCHEDULED">{t('jobStatus.RETRY_SCHEDULED')}</option>
-                        <option value="COMPLETED">{t('jobStatus.COMPLETED')}</option>
-                        <option value="FAILED">{t('jobStatus.FAILED')}</option>
-                        <option value="DEAD_LETTER">{t('jobStatus.DEAD_LETTER')}</option>
-                        <option value="CANCELLED">{t('jobStatus.CANCELLED')}</option>
-                    </select>
-                    <select
-                        className="input-shell px-2 py-1.5 text-sm"
-                        value={typeFilter}
-                        onChange={(event) => {
-                            const nextType = event.target.value;
-                            setTypeFilter(nextType);
-                            setPage(1);
-                        }}
-                    >
-                        {JOB_TYPE_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                    </select>
-                    <select
-                        className="input-shell px-2 py-1.5 text-sm"
-                        value={dateRangeFilter}
-                        onChange={(event) => {
-                            const nextRange = event.target.value;
-                            setDateRangeFilter(nextRange);
-                            setPage(1);
-                        }}
-                    >
-                        {DATE_RANGE_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                    </select>
-                    <span className="status-chip">{t('jobs.page', { page })}</span>
-                    <div className="flex gap-1">
-                        <button
-                            onClick={goToPreviousPage}
-                            disabled={page <= 1 || loading}
-                            className="ghost-icon-button p-1 disabled:opacity-50"
-                            title={t('jobs.previousPage')}
+        <div className="app-page">
+            <div className="page-header">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                        <h1 className="page-title">{t('jobs.title')}</h1>
+                        <p className="page-subtitle">{t('jobs.subtitle')}</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <select
+                            className="input-shell px-2 py-1.5 text-sm"
+                            value={statusFilter}
+                            onChange={(event) => {
+                                const nextStatus = event.target.value;
+                                setStatusFilter(nextStatus);
+                                setPage(1);
+                            }}
                         >
-                            <ChevronLeft size={16} />
-                        </button>
-                        <button
-                            onClick={goToNextPage}
-                            disabled={!hasNextPage || loading}
-                            className="ghost-icon-button p-1 disabled:opacity-50"
-                            title={t('jobs.nextPage')}
+                            <option value="ALL">{t('jobs.allStatus')}</option>
+                            <option value="PENDING">{t('jobStatus.PENDING')}</option>
+                            <option value="RUNNING">{t('jobStatus.RUNNING')}</option>
+                            <option value="RETRY_SCHEDULED">{t('jobStatus.RETRY_SCHEDULED')}</option>
+                            <option value="COMPLETED">{t('jobStatus.COMPLETED')}</option>
+                            <option value="FAILED">{t('jobStatus.FAILED')}</option>
+                            <option value="DEAD_LETTER">{t('jobStatus.DEAD_LETTER')}</option>
+                            <option value="CANCELLED">{t('jobStatus.CANCELLED')}</option>
+                        </select>
+                        <select
+                            className="input-shell px-2 py-1.5 text-sm"
+                            value={typeFilter}
+                            onChange={(event) => {
+                                const nextType = event.target.value;
+                                setTypeFilter(nextType);
+                                setPage(1);
+                            }}
                         >
-                            <ChevronRight size={16} />
+                            {JOB_TYPE_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                        </select>
+                        <select
+                            className="input-shell px-2 py-1.5 text-sm"
+                            value={dateRangeFilter}
+                            onChange={(event) => {
+                                const nextRange = event.target.value;
+                                setDateRangeFilter(nextRange);
+                                setPage(1);
+                            }}
+                        >
+                            {DATE_RANGE_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                        </select>
+                        <span className="status-chip">{t('jobs.page', { page })}</span>
+                        <div className="flex gap-1">
+                            <button
+                                onClick={goToPreviousPage}
+                                disabled={page <= 1 || loading}
+                                className="ghost-icon-button p-1 disabled:opacity-50"
+                                title={t('jobs.previousPage')}
+                            >
+                                <ChevronLeft size={16} />
+                            </button>
+                            <button
+                                onClick={goToNextPage}
+                                disabled={!hasNextPage || loading}
+                                className="ghost-icon-button p-1 disabled:opacity-50"
+                                title={t('jobs.nextPage')}
+                            >
+                                <ChevronRight size={16} />
+                            </button>
+                        </div>
+                        <button
+                            onClick={() => refetch()}
+                            className="btn-refresh px-2.5"
+                            title={t('jobs.refresh')}
+                        >
+                            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
                         </button>
                     </div>
-                    <button
-                        onClick={() => refetch()}
-                        className="btn-refresh px-2.5"
-                        title={t('jobs.refresh')}
-                    >
-                        <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-                    </button>
                 </div>
             </div>
 
@@ -608,18 +650,17 @@ export default function Jobs() {
                                     ? ((completed - started) / 1000).toFixed(1) + 's'
                                     : '-';
                                 const finishedAt = job.completed_at || job.dead_lettered_at || null;
-                                const progressPercent = job.progress_percent ?? 0;
-                                const metricSummary = getMetricSummary(job);
-                                const normalizedProgressPercent = Math.max(0, Math.min(100, progressPercent));
-                                const processedItems = metricSummary.success + metricSummary.failed + metricSummary.skipped;
-                                const breakdownTotal = metricSummary.total > 0 ? metricSummary.total : processedItems;
-                                const breakdownDenominator = breakdownTotal > 0 ? breakdownTotal : 1;
-                                const successWidth = (Math.max(0, metricSummary.success) / breakdownDenominator) * 100;
-                                const failedWidth = (Math.max(0, metricSummary.failed) / breakdownDenominator) * 100;
-                                const skippedWidth = (Math.max(0, metricSummary.skipped) / breakdownDenominator) * 100;
-                                const completionPercent = breakdownTotal > 0
-                                    ? Math.round((processedItems / breakdownTotal) * 100)
-                                    : normalizedProgressPercent;
+                                const {
+                                    metricSummary,
+                                    totalItems,
+                                    hasKnownTotal,
+                                    breakdownTotal,
+                                    successWidth,
+                                    failedWidth,
+                                    skippedWidth,
+                                    normalizedProgressPercent,
+                                    completionPercent,
+                                } = getJobProgressSummary(job);
                                 const isQueued = ['PENDING', 'RETRY_SCHEDULED'].includes(job.status);
                                 const etaText = isQueued
                                     ? `~${formatDuration(job.estimated_wait_seconds)} (${job.queue_position ? `#${job.queue_position}` : '-'})`
@@ -697,6 +738,9 @@ export default function Jobs() {
                                                 </span>
                                                 <span className="rounded bg-amber-400/15 px-1.5 py-0.5 text-amber-700">
                                                     {t('jobs.skipped')}: {metricSummary.skipped}
+                                                </span>
+                                                <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
+                                                    {t('jobs.total')}: {hasKnownTotal ? totalItems : '-'}
                                                 </span>
                                                 <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
                                                     {completionPercent}%
@@ -804,11 +848,13 @@ export default function Jobs() {
                             <div className="h-2 w-full bg-muted rounded-sm overflow-hidden">
                                 <div
                                     className={`h-full ${selectedJob.status === 'FAILED' || selectedJob.status === 'DEAD_LETTER' ? 'bg-destructive' : 'bg-primary'}`}
-                                    style={{ width: `${Math.max(0, Math.min(100, selectedJob.progress_percent ?? 0))}%` }}
+                                    style={{ width: `${selectedProgressSummary?.completionPercent ?? 0}%` }}
                                 />
                             </div>
-                            <div className="text-xs text-muted-foreground">
-                                {selectedJob.progress_percent ?? 0}%
+                            <div className="text-xs text-muted-foreground tabular-nums">
+                                {selectedProgressSummary?.hasKnownTotal && selectedProgressSummary.totalItems > 0
+                                    ? `${selectedProgressSummary.processedDisplay}/${selectedProgressSummary.totalItems} (${selectedProgressSummary.completionPercent}%)`
+                                    : `${selectedProgressSummary?.completionPercent ?? 0}%`}
                             </div>
                             <div className="text-xs text-muted-foreground">
                                 {t('jobs.retry', { current: selectedJob.retry_count, max: selectedJob.max_retries })}
@@ -836,7 +882,7 @@ export default function Jobs() {
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-2">
                                     <div className="rounded border bg-muted/30 px-2 py-1 text-xs">
                                         <div className="text-muted-foreground">{t('jobs.total')}</div>
-                                        <div className="font-semibold tabular-nums">{selectedMetricSummary.total}</div>
+                                        <div className="font-semibold tabular-nums">{selectedProgressSummary?.hasKnownTotal ? selectedProgressSummary.totalItems : '-'}</div>
                                     </div>
                                     <div className="status-badge status-badge-success rounded-sm px-2 py-1 text-xs">
                                         <div>{t('jobs.success')}</div>

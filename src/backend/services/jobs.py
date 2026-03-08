@@ -630,9 +630,6 @@ class JobService:
         metrics: dict | None = None,
     ) -> Job:
         """Persist job progress and metrics."""
-        if await self.is_cancel_requested(job_id):
-            raise JobCancelledError("Job cancellation was requested")
-
         current = max(0, current)
         progress_percent = 0
         if total is not None and total > 0:
@@ -648,12 +645,20 @@ class JobService:
 
         stmt = (
             update(Job)
-            .where(Job.id == job_id)
+            .where(
+                Job.id == job_id,
+                ~Job.status.in_(("CANCEL_REQUESTED", JobStatus.CANCELLED.value)),
+            )
             .values(**values)
             .returning(Job)
         )
         result = await self.session.execute(stmt)
-        job = result.scalar_one()
+        job = result.scalar_one_or_none()
+        if job is None:
+            status = await self.session.scalar(select(Job.status).where(Job.id == job_id))
+            if status in {"CANCEL_REQUESTED", JobStatus.CANCELLED.value}:
+                raise JobCancelledError("Job cancellation was requested")
+            raise NotFoundError(f"Job {job_id} not found")
         await self.session.commit()
         return job
 

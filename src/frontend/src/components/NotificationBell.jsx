@@ -6,6 +6,9 @@ import { settingsService } from '../services/settings';
 import { jobsService } from '../services/jobs';
 
 const DISMISSED_STORAGE_KEY = 'driver-notifications-dismissed-v1';
+const OPEN_POLL_INTERVAL_MS = 30000;
+const IDLE_POLL_INTERVAL_MS = 120000;
+const NOTIFICATIONS_STALE_MS = 60000;
 
 function loadDismissedIds() {
     try {
@@ -57,6 +60,7 @@ export default function NotificationBell() {
     const [open, setOpen] = useState(false);
     const [dismissedIds, setDismissedIds] = useState(() => loadDismissedIds());
     const wrapperRef = useRef(null);
+    const pollIntervalMs = open ? OPEN_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
 
     useEffect(() => {
         const onClickOutside = (event) => {
@@ -71,9 +75,9 @@ export default function NotificationBell() {
     const alertsQuery = useQuery({
         queryKey: ['notifications', 'observability'],
         queryFn: () => settingsService.getObservabilitySnapshot({ period: '24h', forceRefresh: false }),
-        refetchInterval: 30000,
-        refetchIntervalInBackground: true,
-        staleTime: 15000,
+        refetchInterval: pollIntervalMs,
+        refetchIntervalInBackground: false,
+        staleTime: NOTIFICATIONS_STALE_MS,
     });
 
     const jobsQuery = useQuery({
@@ -88,10 +92,16 @@ export default function NotificationBell() {
                 { includeEstimates: false },
             );
         },
-        refetchInterval: 30000,
-        refetchIntervalInBackground: true,
-        staleTime: 15000,
+        refetchInterval: pollIntervalMs,
+        refetchIntervalInBackground: false,
+        staleTime: NOTIFICATIONS_STALE_MS,
     });
+
+    useEffect(() => {
+        if (!open) return;
+        void alertsQuery.refetch();
+        void jobsQuery.refetch();
+    }, [open]);
 
     const notifications = useMemo(() => {
         const alerts = (alertsQuery.data?.recent_alerts || []).map((alert) => ({

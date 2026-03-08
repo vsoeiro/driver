@@ -6,7 +6,7 @@ import pytest
 
 from backend.db.models import Job, JobAttempt
 from backend.domain.errors import ValidationError
-from backend.services.jobs import JobService
+from backend.services.jobs import JobCancelledError, JobService
 
 
 @pytest.mark.asyncio
@@ -188,3 +188,34 @@ async def test_get_job_attempts_returns_rows():
 
     assert len(rows) == 1
     assert rows[0].job_id == job_id
+
+
+@pytest.mark.asyncio
+async def test_update_job_progress_avoids_extra_status_read_on_success():
+    session = AsyncMock()
+    result = MagicMock()
+    job = Job(id=uuid4(), type="sync_items", status="RUNNING")
+    result.scalar_one_or_none.return_value = job
+    session.execute.return_value = result
+
+    service = JobService(session)
+    updated = await service.update_job_progress(job.id, current=5, total=10)
+
+    assert updated is job
+    session.scalar.assert_not_awaited()
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_job_progress_raises_cancelled_when_job_was_cancelled():
+    session = AsyncMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None
+    session.execute.return_value = result
+    session.scalar.return_value = "CANCELLED"
+    job_id = uuid4()
+
+    service = JobService(session)
+
+    with pytest.raises(JobCancelledError):
+        await service.update_job_progress(job_id, current=1, total=10)

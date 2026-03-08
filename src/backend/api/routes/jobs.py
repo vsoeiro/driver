@@ -4,6 +4,7 @@ This module provides endpoints for creating and managing background jobs.
 """
 
 from datetime import datetime
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import (
@@ -60,6 +61,7 @@ BOOK_EXTENSIONS = {"pdf", "epub"}
 IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff", "tif", "heic", "avif"}
 AUTO_COMIC_EXTENSIONS = COMIC_EXTENSIONS - {"pdf"}
 AUTO_BOOK_EXTENSIONS = BOOK_EXTENSIONS - {"pdf"}
+MAX_LIBRARY_SCAN_ROWS = 200_000
 
 
 def _map_domain_error_to_http(exc: DomainError) -> None:
@@ -68,7 +70,7 @@ def _map_domain_error_to_http(exc: DomainError) -> None:
     raise HTTPException(status_code=400, detail=exc.message) from exc
 
 
-def _is_comic_item_already_mapped(
+def _is_item_already_mapped(
     values: dict | None, attr_ids: dict[str, str]
 ) -> bool:
     values = values or {}
@@ -83,21 +85,39 @@ def _is_comic_item_already_mapped(
     return False
 
 
+def _is_comic_item_already_mapped(values: dict | None, attr_ids: dict[str, str]) -> bool:
+    return _is_item_already_mapped(values, attr_ids)
+
+
 def _is_book_item_already_mapped(values: dict | None, attr_ids: dict[str, str]) -> bool:
-    values = values or {}
-    check_fields = ("cover_item_id", "cover_account_id", "page_count", "file_format")
-    for field_key in check_fields:
-        attr_id = attr_ids.get(field_key)
-        if not attr_id:
-            continue
-        value = values.get(attr_id)
-        if value is not None and value != "":
-            return True
-    return False
+    return _is_item_already_mapped(values, attr_ids)
 
 
 def _is_image_item_already_analyzed(status: str | None) -> bool:
     return (status or "").strip().lower() == "completed"
+
+
+def _sanitize_upload_filename(filename: str | None) -> str:
+    safe_name = Path(str(filename or "upload.bin")).name.strip()
+    return safe_name or "upload.bin"
+
+
+async def _fetch_rows_with_limit(
+    db: DBSession,
+    stmt,
+    *,
+    operation_name: str,
+) -> list:
+    rows = (await db.execute(stmt.limit(MAX_LIBRARY_SCAN_ROWS + 1))).all()
+    if len(rows) > MAX_LIBRARY_SCAN_ROWS:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"{operation_name} exceeded scan limit ({MAX_LIBRARY_SCAN_ROWS} indexed items). "
+                "Narrow account scope or run in smaller batches."
+            ),
+        )
+    return rows
 
 
 async def _filter_unmapped_comic_items(
@@ -135,7 +155,7 @@ async def _filter_unmapped_comic_items(
         already_mapped_ids = {
             str(item_id)
             for item_id, values in rows
-            if _is_comic_item_already_mapped(values, attr_ids)
+            if _is_item_already_mapped(values, attr_ids)
         }
         remaining = [
             item_id for item_id in item_ids if str(item_id) not in already_mapped_ids
@@ -217,7 +237,7 @@ async def _filter_unmapped_book_items(
         already_mapped_ids = {
             str(item_id)
             for item_id, values in rows
-            if _is_book_item_already_mapped(values, attr_ids)
+            if _is_item_already_mapped(values, attr_ids)
         }
         remaining = [
             item_id for item_id in item_ids if str(item_id) not in already_mapped_ids
@@ -406,7 +426,8 @@ async def create_upload_job(
     os.makedirs(temp_dir, exist_ok=True)
 
     # Save file to temp
-    temp_filename = f"{uuid4()}_{file.filename}"
+    safe_filename = _sanitize_upload_filename(file.filename)
+    temp_filename = f"{uuid4()}_{safe_filename}"
     temp_path = os.path.join(temp_dir, temp_filename)
 
     def _persist_upload_temp_file() -> None:
@@ -419,7 +440,7 @@ async def create_upload_job(
     payload = {
         "account_id": account_id,
         "folder_id": folder_id,
-        "filename": file.filename,
+        "filename": safe_filename,
         "temp_path": temp_path,
     }
     try:
@@ -645,7 +666,11 @@ async def create_analyze_library_image_assets_job(
     if request.account_ids:
         stmt = stmt.where(Item.account_id.in_(request.account_ids))
 
-    rows = (await db.execute(stmt)).all()
+    rows = await _fetch_rows_with_limit(
+        db,
+        stmt,
+        operation_name="Library-wide image analysis",
+    )
     if not rows:
         return JobAnalyzeLibraryImageAssetsResponse(
             total_items=0,
@@ -738,7 +763,11 @@ async def create_extract_library_comic_assets_job(
     if request.account_ids:
         stmt = stmt.where(Item.account_id.in_(request.account_ids))
 
-    rows = (await db.execute(stmt)).all()
+    rows = await _fetch_rows_with_limit(
+        db,
+        stmt,
+        operation_name="Library-wide comic extraction",
+    )
     if not rows:
         return JobExtractLibraryComicAssetsResponse(
             total_items=0,
@@ -812,7 +841,11 @@ async def create_map_library_books_job(
     if request.account_ids:
         stmt = stmt.where(Item.account_id.in_(request.account_ids))
 
-    rows = (await db.execute(stmt)).all()
+    rows = await _fetch_rows_with_limit(
+        db,
+        stmt,
+        operation_name="Library-wide books mapping",
+    )
     if not rows:
         return JobMapLibraryBooksResponse(
             total_items=0,

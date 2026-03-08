@@ -6,12 +6,26 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.jobs import JobService
 
 logger = logging.getLogger(__name__)
+
+
+def _is_best_effort_progress_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(
+        marker in message
+        for marker in (
+            "database is locked",
+            "maxclientsinsessionmode",
+            "max clients reached",
+            "too many clients",
+            "remaining connection slots are reserved",
+        )
+    )
 
 
 @dataclass
@@ -70,10 +84,8 @@ class JobProgressReporter:
                     metrics=self.metrics,
                 )
                 self._last_flushed_current = self.current
-        except OperationalError as exc:
-            # SQLite can lock during long-running writer transactions.
-            # Progress is best-effort; we should not fail the job on this.
-            if "database is locked" in str(exc).lower():
-                logger.warning("Skipping progress update for job %s due to sqlite lock", self.job_id)
+        except (OperationalError, DBAPIError) as exc:
+            if _is_best_effort_progress_error(exc):
+                logger.warning("Skipping progress update for job %s due to transient DB pressure", self.job_id)
                 return
             raise
