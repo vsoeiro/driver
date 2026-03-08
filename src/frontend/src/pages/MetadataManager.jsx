@@ -39,6 +39,14 @@ const BASE_SORT_OPTIONS = [
     { value: 'size', key: 'size' },
     { value: 'created_at', key: 'created' },
 ];
+const NUMERIC_SORT_PLUGIN_FIELD_KEYS = new Set([
+    'volume',
+    'issue_number',
+    'max_volumes',
+    'max_issues',
+    'page_count',
+    'classification_confidence',
+]);
 const METADATA_TABLE_COLUMNS_STORAGE_PREFIX = 'driver-metadata-table-columns-v1';
 const HEX_COLOR_TAG_RE = /^#(?:[A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$/;
 
@@ -122,7 +130,9 @@ const CategoryItemsTable = ({ category, onBack }) => {
                 value: `metadata:${attr.id}`,
                 label: t('metadataManager.orderByAttr', { name: attr.name }),
                 attributeId: attr.id,
-                dataType: attr.data_type,
+                dataType: (attr.data_type === 'number' || NUMERIC_SORT_PLUGIN_FIELD_KEYS.has(attr.plugin_field_key))
+                    ? 'number'
+                    : attr.data_type,
             })),
         [category.attributes, t]
     );
@@ -1449,6 +1459,23 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                     const ownedVolumes = Array.isArray(seriesRow.owned_volumes) ? seriesRow.owned_volumes : [];
                                     const ownedVolumesSet = new Set(ownedVolumes);
                                     const issuesByVolume = seriesRow.issues_by_volume || {};
+                                    const duplicateItemsCount = Number.isFinite(Number(seriesRow.duplicate_items_count))
+                                        ? Math.max(0, Number(seriesRow.duplicate_items_count))
+                                        : 0;
+                                    const duplicateIssueEntries = Array.isArray(seriesRow.duplicate_issue_entries)
+                                        ? seriesRow.duplicate_issue_entries
+                                            .filter((entry) => entry && Number.isFinite(Number(entry.issue)))
+                                            .map((entry) => ({
+                                                volume: Number.isFinite(Number(entry.volume)) ? Number(entry.volume) : null,
+                                                issue: Number(entry.issue),
+                                                copies: Number.isFinite(Number(entry.copies)) ? Math.max(1, Number(entry.copies)) : null,
+                                            }))
+                                        : [];
+                                    const duplicateIssueKeySet = new Set(
+                                        duplicateIssueEntries
+                                            .filter((entry) => entry.volume !== null)
+                                            .map((entry) => `${entry.volume}:${entry.issue}`)
+                                    );
                                     const ownedIssuesCount = Number.isFinite(Number(seriesRow.owned_issues_count))
                                         ? Math.max(0, Number(seriesRow.owned_issues_count))
                                         : Object.values(issuesByVolume).reduce((sum, issueList) => {
@@ -1469,8 +1496,15 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                         })}
                                                     </p>
                                                 </div>
-                                                <div className={`status-badge ${statusClass[statusKey]}`}>
-                                                    {statusLabel[statusKey]}
+                                                <div className="flex items-center gap-2">
+                                                    {duplicateItemsCount > 0 && (
+                                                        <div className="status-badge status-badge-danger">
+                                                            {t('metadataManager.duplicatesBadge', { count: duplicateItemsCount })}
+                                                        </div>
+                                                    )}
+                                                    <div className={`status-badge ${statusClass[statusKey]}`}>
+                                                        {statusLabel[statusKey]}
+                                                    </div>
                                                 </div>
                                             </div>
 
@@ -1525,15 +1559,18 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                                             {Array.from({ length: shownIssues }, (_, idx) => {
                                                                                 const issueNo = idx + 1;
                                                                                 const owned = issues.has(issueNo);
+                                                                                const duplicated = duplicateIssueKeySet.has(`${volumeNo}:${issueNo}`);
                                                                                 return (
                                                                                     <div
                                                                                         key={`${seriesRow.series_name}-vol-${volumeNo}-issue-${issueNo}`}
                                                                                         title={t('metadataManager.volumeIssueTitle', {
                                                                                             volume: volumeNo,
                                                                                             issue: issueNo,
-                                                                                            status: owned ? t('metadataManager.owned') : t('metadataManager.missing'),
+                                                                                            status: owned ? (duplicated ? `${t('metadataManager.owned')} ${t('metadataManager.duplicateIssueAlert')}` : t('metadataManager.owned')) : t('metadataManager.missing'),
                                                                                         })}
-                                                                                        className={`h-3 w-2 rounded-sm border ${owned ? 'bg-primary border-primary' : 'bg-white border-zinc-300'}`}
+                                                                                        className={`h-3 w-2 rounded-sm border ${owned
+                                                                                            ? (duplicated ? 'bg-red-500 border-red-500' : 'bg-primary border-primary')
+                                                                                            : 'bg-white border-zinc-300'}`}
                                                                                     />
                                                                                 );
                                                                             })}
@@ -1569,6 +1606,14 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                         || (libraryView?.gallery?.useItemAsCover ? item.name : null);
                                     const title = baseLabel;
                                     const pageCount = pageCountAttr ? item.metadata?.values?.[pageCountAttr.id] : null;
+                                    const volumeValue = volumeAttr ? item.metadata?.values?.[volumeAttr.id] : null;
+                                    const issueNumberValue = issueNumberAttr ? item.metadata?.values?.[issueNumberAttr.id] : null;
+                                    const volumeText = volumeValue !== null && volumeValue !== undefined && String(volumeValue).trim() !== ''
+                                        ? String(volumeValue).trim()
+                                        : null;
+                                    const issueText = issueNumberValue !== null && issueNumberValue !== undefined && String(issueNumberValue).trim() !== ''
+                                        ? String(issueNumberValue).trim()
+                                        : null;
                                     const isImageGallery = Boolean(libraryView?.gallery?.useItemAsCover);
                                     const classificationLabel = attributes.find((attr) => attr.plugin_field_key === 'classification_label');
                                     const classificationConfidence = attributes.find((attr) => attr.plugin_field_key === 'classification_confidence');
@@ -1607,6 +1652,20 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                 ) : (
                                                     <div className="text-[11px] text-muted-foreground truncate" title={item.name}>
                                                         {item.name}
+                                                    </div>
+                                                )}
+                                                {!isImageGallery && (volumeText || issueText) && (
+                                                    <div className="flex items-center gap-1 pt-0.5">
+                                                        {volumeText && (
+                                                            <span className="status-badge status-badge-info !px-1.5 !py-0 text-[10px]">
+                                                                {`V${volumeText}`}
+                                                            </span>
+                                                        )}
+                                                        {issueText && (
+                                                            <span className="status-badge !px-1.5 !py-0 text-[10px]">
+                                                                {`#${issueText}`}
+                                                            </span>
+                                                        )}
                                                     </div>
                                                 )}
                                                 {!isImageGallery && pageCount !== null && pageCount !== undefined && pageCount !== '' && (
@@ -2062,7 +2121,7 @@ export default function MetadataManager() {
     // If viewing a specific category's items
     if (viewingCategory) {
         return (
-            <div className="app-page density-compact">
+            <div className="app-page">
                 <CategoryItemsTable
                     category={viewingCategory}
                     onBack={() => { setViewingCategory(null); refetchCategories(); }}
@@ -2072,59 +2131,61 @@ export default function MetadataManager() {
     }
 
     return (
-        <div className="app-page density-compact">
+        <div className="app-page">
             {/* Header */}
-            <div className="page-header flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                    <h1 className="page-title">{t('metadataManager.title')}</h1>
-                    <span className="status-chip">
-                        {activeView === 'metadata'
-                            ? t('metadataManager.categoriesCount', { count: categories.length })
-                            : t('metadataManager.librariesCount', { count: knownLibraries.length })}
-                    </span>
-                    <div className="inline-flex items-center gap-1 rounded-lg border border-border/70 p-1 bg-muted/35">
-                        <button
-                            type="button"
-                            onClick={() => setActiveView('metadata')}
-                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                                activeView === 'metadata'
-                                    ? 'bg-primary text-primary-foreground'
-                                    : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                            }`}
-                        >
-                            {t('metadataManager.metadataTab')}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setActiveView('libraries')}
-                            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                                activeView === 'libraries'
-                                    ? 'bg-primary text-primary-foreground'
-                                    : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                            }`}
-                        >
-                            {t('metadataManager.librariesTab')}
-                        </button>
+            <div className="page-header">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                        <h1 className="page-title">{t('metadataManager.title')}</h1>
+                        <span className="status-chip">
+                            {activeView === 'metadata'
+                                ? t('metadataManager.categoriesCount', { count: categories.length })
+                                : t('metadataManager.librariesCount', { count: knownLibraries.length })}
+                        </span>
+                        <div className="inline-flex items-center gap-1 rounded-lg border border-border/70 p-1 bg-muted/35">
+                            <button
+                                type="button"
+                                onClick={() => setActiveView('metadata')}
+                                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                                    activeView === 'metadata'
+                                        ? 'bg-primary text-primary-foreground'
+                                        : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                                }`}
+                            >
+                                {t('metadataManager.metadataTab')}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setActiveView('libraries')}
+                                className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                                    activeView === 'libraries'
+                                        ? 'bg-primary text-primary-foreground'
+                                        : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                                }`}
+                            >
+                                {t('metadataManager.librariesTab')}
+                            </button>
+                        </div>
                     </div>
-                </div>
-                <div className="flex items-center gap-2">
-                    {activeView === 'metadata' && (
-                        <>
-                            <button
-                                onClick={() => setLayoutBuilderOpen(true)}
-                                disabled={categories.length === 0}
-                                className="btn-refresh disabled:opacity-40"
-                            >
-                                {t('metadataManager.formLayout')}
-                            </button>
-                            <button
-                                onClick={() => setCreateModalOpen(true)}
-                                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-lg shadow-primary/20 transition-transform hover:-translate-y-[1px] hover:bg-primary/92"
-                            >
-                                <Plus size={16} /> {t('metadataManager.newCategory')}
-                            </button>
-                        </>
-                    )}
+                    <div className="flex items-center gap-2">
+                        {activeView === 'metadata' && (
+                            <>
+                                <button
+                                    onClick={() => setLayoutBuilderOpen(true)}
+                                    disabled={categories.length === 0}
+                                    className="btn-refresh disabled:opacity-40"
+                                >
+                                    {t('metadataManager.formLayout')}
+                                </button>
+                                <button
+                                    onClick={() => setCreateModalOpen(true)}
+                                    className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-lg shadow-primary/20 transition-transform hover:-translate-y-[1px] hover:bg-primary/92"
+                                >
+                                    <Plus size={16} /> {t('metadataManager.newCategory')}
+                                </button>
+                            </>
+                        )}
+                    </div>
                 </div>
             </div>
 

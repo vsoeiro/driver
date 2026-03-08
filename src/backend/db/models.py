@@ -602,6 +602,7 @@ class MetadataRule(Base):
     )
     destination_folder_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     destination_path_template: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    metadata_filters: Mapped[list] = mapped_column(JSON, default=list)
     include_folders: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

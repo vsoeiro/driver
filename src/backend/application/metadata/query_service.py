@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.common.metadata_filters import build_metadata_filter_conditions
+from backend.core.exceptions import DriveOrganizerError
 from backend.db.models import Item, ItemMetadata, MetadataCategory
 from backend.domain.errors import NotFoundError
 from backend.schemas.items import ItemListResponse, SimilarItemsReportResponse
@@ -59,6 +60,7 @@ LOW_PRIORITY_PATH_MARKERS = (
     "/.objects/",
     "/__covers__/",
 )
+MAX_SIMILAR_ITEMS_SCAN_ROWS = 200_000
 
 
 def _is_low_priority_path(path: str | None) -> tuple[bool, str | None]:
@@ -105,8 +107,16 @@ class MetadataQueryService:
             if _normalize_text(ext).lstrip(".")
         }
 
-        result = await self.session.execute(stmt)
+        result = await self.session.execute(stmt.limit(MAX_SIMILAR_ITEMS_SCAN_ROWS + 1))
         rows = result.all()
+        if len(rows) > MAX_SIMILAR_ITEMS_SCAN_ROWS:
+            raise DriveOrganizerError(
+                (
+                    f"Similar items report exceeded scan limit ({MAX_SIMILAR_ITEMS_SCAN_ROWS} files). "
+                    "Filter by account or extensions to reduce scope."
+                ),
+                status_code=413,
+            )
 
         with_extension_groups: dict[tuple[str, int, str], list[dict[str, Any]]] = defaultdict(list)
         without_extension_groups: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
@@ -647,6 +657,8 @@ class MetadataQueryService:
                 "owned_issue_pairs": set(),
                 "unscoped_issues": set(),
                 "issues_by_volume": {},
+                "duplicate_items_count": 0,
+                "duplicate_issue_entries": [],
                 "max_volumes_candidates": [],
                 "max_issues_candidates": [],
                 "status_votes": {},
@@ -676,6 +688,7 @@ class MetadataQueryService:
                         series_key_expr.label("series_key"),
                         volume_expr.label("volume_text"),
                         issue_expr.label("issue_text"),
+                        func.count(ItemMetadata.id).label("issue_count"),
                     )
                     .select_from(ItemMetadata, Item)
                     .where(
@@ -690,6 +703,7 @@ class MetadataQueryService:
                     parsed_issue = _parse_positive_int(row.issue_text)
                     if not parsed_issue:
                         continue
+                    issue_count = int(row.issue_count or 0)
                     parsed_volume = _parse_positive_int(row.volume_text)
                     if parsed_volume:
                         pair = (parsed_volume, parsed_issue)
@@ -698,11 +712,23 @@ class MetadataQueryService:
                         volume_bucket.add(parsed_issue)
                     else:
                         by_key[row.series_key]["unscoped_issues"].add(parsed_issue)
+                    duplicate_count = max(0, issue_count - 1)
+                    if duplicate_count > 0:
+                        by_key[row.series_key]["duplicate_items_count"] += duplicate_count
+                        by_key[row.series_key]["duplicate_issue_entries"].append(
+                            {
+                                "volume": parsed_volume,
+                                "issue": parsed_issue,
+                                "copies": issue_count,
+                                "duplicates": duplicate_count,
+                            }
+                        )
             else:
                 issue_stmt = (
                     select(
                         series_key_expr.label("series_key"),
                         issue_expr.label("issue_text"),
+                        func.count(ItemMetadata.id).label("issue_count"),
                     )
                     .select_from(ItemMetadata, Item)
                     .where(
@@ -715,8 +741,21 @@ class MetadataQueryService:
                 )
                 for row in (await self.session.execute(issue_stmt)).all():
                     parsed_issue = _parse_positive_int(row.issue_text)
-                    if parsed_issue:
-                        by_key[row.series_key]["unscoped_issues"].add(parsed_issue)
+                    if not parsed_issue:
+                        continue
+                    issue_count = int(row.issue_count or 0)
+                    by_key[row.series_key]["unscoped_issues"].add(parsed_issue)
+                    duplicate_count = max(0, issue_count - 1)
+                    if duplicate_count > 0:
+                        by_key[row.series_key]["duplicate_items_count"] += duplicate_count
+                        by_key[row.series_key]["duplicate_issue_entries"].append(
+                            {
+                                "volume": None,
+                                "issue": parsed_issue,
+                                "copies": issue_count,
+                                "duplicates": duplicate_count,
+                            }
+                        )
 
         if max_volumes_attr_id:
             max_volumes_expr = func.trim(ItemMetadata.values[max_volumes_attr_id].as_string())
@@ -797,6 +836,14 @@ class MetadataQueryService:
                 for volume, issue_set in row["issues_by_volume"].items()
             }
             owned_issues_count = len(row["owned_issue_pairs"]) + len(row["unscoped_issues"])
+            duplicate_issue_entries = sorted(
+                row["duplicate_issue_entries"],
+                key=lambda entry: (
+                    0 if entry.get("volume") is not None else 1,
+                    entry.get("volume") if entry.get("volume") is not None else 0,
+                    entry.get("issue") or 0,
+                ),
+            )
             rows.append(
                 {
                     "series_name": row["series_name"],
@@ -804,6 +851,8 @@ class MetadataQueryService:
                     "owned_volumes": owned_volumes,
                     "owned_issues_count": owned_issues_count,
                     "issues_by_volume": issues_by_volume,
+                    "duplicate_items_count": int(row["duplicate_items_count"] or 0),
+                    "duplicate_issue_entries": duplicate_issue_entries,
                     "max_volumes": max_volumes,
                     "max_issues": max_issues,
                     "series_status": series_status,

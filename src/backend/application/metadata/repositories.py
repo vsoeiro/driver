@@ -5,14 +5,15 @@ from __future__ import annotations
 from collections.abc import Sequence
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.models import ItemMetadata
 
 _MAX_QUERY_ARGS = 32767
 _ARGS_PER_ACCOUNT_ITEM_PAIR = 2
-_MAX_PAIRS_PER_BATCH = 10000
+# Larger tuple-IN batches started tripping asyncpg/Postgres stack depth limits.
+_MAX_PAIRS_PER_BATCH = 2000
 
 
 class ItemMetadataRepository:
@@ -52,12 +53,9 @@ class ItemMetadataRepository:
 
         for idx in range(0, len(pairs), max_pairs_per_batch):
             batch = pairs[idx : idx + max_pairs_per_batch]
-            conditions = [
-                (ItemMetadata.account_id == account_id)
-                & (ItemMetadata.item_id == item_id)
-                for account_id, item_id in batch
-            ]
-            stmt = select(ItemMetadata).where(or_(*conditions))
+            stmt = select(ItemMetadata).where(
+                tuple_(ItemMetadata.account_id, ItemMetadata.item_id).in_(list(batch))
+            )
             rows = (await self._session.execute(stmt)).scalars().all()
             for row in rows:
                 result[(row.account_id, row.item_id)] = row

@@ -257,3 +257,142 @@ async def test_series_summary_query_counts_issues_without_volume():
             assert batman.issues_by_volume == {}
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_series_summary_query_reports_duplicate_issues():
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    try:
+        async with session_factory() as session:
+            now = datetime.now(UTC)
+            account = LinkedAccount(
+                id=uuid4(),
+                provider="microsoft",
+                provider_account_id="provider-account-3",
+                email="user3@example.com",
+                display_name="User 3",
+                access_token_encrypted="enc",
+                refresh_token_encrypted="enc",
+                token_expires_at=now,
+                is_active=True,
+            )
+            category = MetadataCategory(name="Series Category", is_active=True)
+            session.add_all([account, category])
+            await session.flush()
+
+            attrs: dict[str, MetadataAttribute] = {}
+            for key, name in [
+                ("series", "Series"),
+                ("volume", "Volume"),
+                ("issue_number", "Issue Number"),
+            ]:
+                attr = MetadataAttribute(
+                    category_id=category.id,
+                    name=name,
+                    data_type="text",
+                    plugin_field_key=key,
+                )
+                attrs[key] = attr
+                session.add(attr)
+            await session.flush()
+
+            for idx in range(1, 5):
+                item_name = f"Dupes-{idx}.cbz"
+                session.add(
+                    Item(
+                        account_id=account.id,
+                        item_id=f"item-dupe-{idx}",
+                        parent_id="root",
+                        name=item_name,
+                        path=f"/Comics/{item_name}",
+                        item_type="file",
+                        extension="cbz",
+                        size=100 * idx,
+                        created_at=now,
+                        modified_at=now,
+                    )
+                )
+            await session.flush()
+
+            session.add_all(
+                [
+                    ItemMetadata(
+                        account_id=account.id,
+                        item_id="item-dupe-1",
+                        category_id=category.id,
+                        values={
+                            str(attrs["series"].id): "Monster Squad",
+                            str(attrs["volume"].id): "1",
+                            str(attrs["issue_number"].id): "1",
+                        },
+                    ),
+                    ItemMetadata(
+                        account_id=account.id,
+                        item_id="item-dupe-2",
+                        category_id=category.id,
+                        values={
+                            str(attrs["series"].id): "Monster Squad",
+                            str(attrs["volume"].id): "1",
+                            str(attrs["issue_number"].id): "1",
+                        },
+                    ),
+                    ItemMetadata(
+                        account_id=account.id,
+                        item_id="item-dupe-3",
+                        category_id=category.id,
+                        values={
+                            str(attrs["series"].id): "Monster Squad",
+                            str(attrs["volume"].id): "1",
+                            str(attrs["issue_number"].id): "2",
+                        },
+                    ),
+                    ItemMetadata(
+                        account_id=account.id,
+                        item_id="item-dupe-4",
+                        category_id=category.id,
+                        values={
+                            str(attrs["series"].id): "Monster Squad",
+                            str(attrs["volume"].id): "1",
+                            str(attrs["issue_number"].id): "2",
+                        },
+                    ),
+                ]
+            )
+            await session.commit()
+
+            service = SeriesQueryService(session)
+            summary = await service.get_category_series_summary(
+                category_id=category.id,
+                page=1,
+                page_size=10,
+                sort_by="series",
+                sort_order="asc",
+                q=None,
+                search_fields="both",
+                account_id=account.id,
+                item_type="file",
+                metadata_filters=None,
+            )
+
+            assert summary.total == 1
+            assert len(summary.rows) == 1
+            row = summary.rows[0]
+            assert row.series_name == "Monster Squad"
+            assert row.total_items == 4
+            assert row.owned_issues_count == 2
+            assert row.duplicate_items_count == 2
+            assert row.duplicate_issue_entries == [
+                {"volume": 1, "issue": 1, "copies": 2, "duplicates": 1},
+                {"volume": 1, "issue": 2, "copies": 2, "duplicates": 1},
+            ]
+    finally:
+        await engine.dispose()

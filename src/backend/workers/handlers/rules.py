@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.application.metadata.repositories import ItemMetadataRepository
+from backend.application.metadata.rule_filters import item_matches_rule_filters
 from backend.application.drive.transfer_service import DriveTransferService
 from backend.common.error_items import ErrorItemsCollector
 from backend.db.models import (
@@ -37,7 +38,11 @@ from backend.workers.job_progress import JobProgressReporter
 logger = logging.getLogger(__name__)
 ERROR_ITEMS_LIMIT = 50
 
-TOKEN_PATTERN = re.compile(r"\[([^\[\]]+)\]")
+TOKEN_PATTERN_BRACKETS = re.compile(r"\[([^\[\]]+)\]")
+TOKEN_PATTERN_BRACES = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
+TOKEN_PATTERN_IF_OPEN = re.compile(r"\{\{\s*#if\s+([^{}]+?)\s*\}\}")
+TOKEN_PATTERN_ELSE = re.compile(r"\{\{\s*else\s*\}\}")
+TOKEN_PATTERN_IF_CLOSE = re.compile(r"\{\{\s*/if\s*\}\}")
 
 
 def _build_rule_item_query(rule: MetadataRule):
@@ -70,17 +75,131 @@ def _sanitize_path_segment(value: str) -> str:
     return _sanitize_name(value).replace("/", " ").replace("\\", " ").strip()
 
 
+def _append_extension_if_needed(name: str, *, item: Item) -> str:
+    if item.item_type != "file" or "." in name or not item.extension:
+        return name
+    return f"{name}.{item.extension}"
+
+
+def _is_template_value_truthy(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    normalized = str(value).strip().lower()
+    return normalized not in {"", "0", "false", "no", "off", "none", "null"}
+
+
+def _lookup_template_value(token: str, context: dict[str, str]) -> str:
+    return context.get(_normalize_token(token), "")
+
+
+def _render_template_section(
+    template: str,
+    context: dict[str, str],
+    *,
+    start: int = 0,
+    stop_on_control: bool = False,
+) -> tuple[str, int, str | None]:
+    parts: list[str] = []
+    idx = start
+
+    while idx < len(template):
+        if stop_on_control:
+            else_match = TOKEN_PATTERN_ELSE.match(template, idx)
+            if else_match:
+                return "".join(parts), else_match.end(), "else"
+
+            if_close_match = TOKEN_PATTERN_IF_CLOSE.match(template, idx)
+            if if_close_match:
+                return "".join(parts), if_close_match.end(), "endif"
+
+        if_open_match = TOKEN_PATTERN_IF_OPEN.match(template, idx)
+        if if_open_match:
+            token_name = if_open_match.group(1)
+            truthy_branch, next_idx, stop_tag = _render_template_section(
+                template,
+                context,
+                start=if_open_match.end(),
+                stop_on_control=True,
+            )
+            falsy_branch = ""
+            if stop_tag == "else":
+                falsy_branch, next_idx, stop_tag = _render_template_section(
+                    template,
+                    context,
+                    start=next_idx,
+                    stop_on_control=True,
+                )
+            if stop_tag != "endif":
+                raise ValueError("Unclosed conditional block in template")
+
+            value = _lookup_template_value(token_name, context)
+            parts.append(truthy_branch if _is_template_value_truthy(value) else falsy_branch)
+            idx = next_idx
+            continue
+
+        braces_match = TOKEN_PATTERN_BRACES.match(template, idx)
+        if braces_match:
+            parts.append(_lookup_template_value(braces_match.group(1), context))
+            idx = braces_match.end()
+            continue
+
+        brackets_match = TOKEN_PATTERN_BRACKETS.match(template, idx)
+        if brackets_match:
+            parts.append(_lookup_template_value(brackets_match.group(1), context))
+            idx = brackets_match.end()
+            continue
+
+        parts.append(template[idx])
+        idx += 1
+
+    return "".join(parts), idx, None
+
+
 def _render_template(template: str | None, context: dict[str, str]) -> str:
     if not template:
         return ""
 
-    def _replace(match: re.Match[str]) -> str:
-        token = _normalize_token(match.group(1))
-        return context.get(token, "")
-
-    rendered = TOKEN_PATTERN.sub(_replace, template)
+    rendered, _, _ = _render_template_section(template, context)
     rendered = re.sub(r"\s{2,}", " ", rendered).strip()
     return rendered
+
+
+def _split_destination_template(
+    *,
+    template: str | None,
+    context: dict[str, str],
+    item: Item,
+) -> tuple[list[str], str | None]:
+    rendered = _render_template(template, context).strip()
+    if not rendered:
+        return [], None
+
+    has_trailing_separator = rendered.endswith("/") or rendered.endswith("\\")
+    normalized = rendered.strip("/\\")
+    if not normalized:
+        return [], None
+
+    segments = [segment for segment in re.split(r"[\\/]+", normalized) if segment]
+    if not segments:
+        return [], None
+
+    if has_trailing_separator:
+        return [segment for segment in (_sanitize_path_segment(value) for value in segments) if segment], None
+
+    folder_segments = [
+        segment
+        for segment in (_sanitize_path_segment(value) for value in segments[:-1])
+        if segment
+    ]
+    final_name = _sanitize_name(segments[-1])
+    if not final_name:
+        return folder_segments, None
+
+    return folder_segments, _append_extension_if_needed(final_name, item=item)
 
 
 def _build_placeholder_context(
@@ -126,12 +245,12 @@ async def _find_or_create_folder(
     account: LinkedAccount,
     parent_id: str,
     folder_name: str,
-) -> str:
+) -> tuple[str, Any | None]:
     listing = await client.list_folder_items(account, parent_id)
     while True:
         for child in listing.items:
             if child.item_type == "folder" and child.name == folder_name:
-                return child.id
+                return child.id, None
         if not listing.next_link:
             break
         listing = await client.list_items_by_next_link(account, listing.next_link)
@@ -139,43 +258,84 @@ async def _find_or_create_folder(
     created = await client.create_folder(
         account, folder_name, parent_id=parent_id, conflict_behavior="rename"
     )
-    return created.id
+    return created.id, created
 
 
-async def _resolve_destination_folder_id(
+async def _index_provider_item(
     *,
+    session: AsyncSession,
+    client,
+    account: LinkedAccount,
+    item_id: str,
+    item_data: Any | None = None,
+) -> None:
+    if not item_id or item_id == "root":
+        return
+    current_item = item_data or await client.get_item_metadata(account, item_id)
+    breadcrumb = await client.get_item_path(account, item_id)
+    await upsert_item_record(
+        session,
+        account_id=account.id,
+        item_data=current_item,
+        parent_id=parent_id_from_breadcrumb(breadcrumb),
+        path=path_from_breadcrumb(breadcrumb),
+    )
+
+
+async def _resolve_destination_target(
+    *,
+    session: AsyncSession,
     client,
     account: LinkedAccount,
     base_folder_id: str,
     path_template: str,
     context: dict[str, str],
+    item: Item,
     cache: dict[tuple[str, str, str], str],
-) -> str:
+    indexed_folder_ids: set[tuple[str, str]],
+) -> tuple[str, str | None]:
     current_parent = base_folder_id or "root"
-    rendered_path = _render_template(path_template, context).strip().strip("/\\")
-    if not rendered_path:
-        return current_parent
+    folder_segments, template_name = _split_destination_template(
+        template=path_template,
+        context=context,
+        item=item,
+    )
 
-    segments = [seg for seg in re.split(r"[\\/]+", rendered_path) if seg]
-    for raw_segment in segments:
-        segment = _sanitize_path_segment(raw_segment)
-        if not segment:
-            continue
+    for segment in folder_segments:
         cache_key = (str(account.id), current_parent, segment)
         cached = cache.get(cache_key)
         if cached:
             current_parent = cached
             continue
-        next_parent = await _find_or_create_folder(
+        next_parent, created_folder = await _find_or_create_folder(
             client=client,
             account=account,
             parent_id=current_parent,
             folder_name=segment,
         )
         cache[cache_key] = next_parent
+        if created_folder is not None:
+            await _index_provider_item(
+                session=session,
+                client=client,
+                account=account,
+                item_id=created_folder.id,
+                item_data=created_folder,
+            )
+            indexed_folder_ids.add((str(account.id), created_folder.id))
         current_parent = next_parent
 
-    return current_parent
+    folder_cache_key = (str(account.id), current_parent)
+    if current_parent != "root" and folder_cache_key not in indexed_folder_ids:
+        await _index_provider_item(
+            session=session,
+            client=client,
+            account=account,
+            item_id=current_parent,
+        )
+        indexed_folder_ids.add(folder_cache_key)
+
+    return current_parent, template_name
 
 
 @register_handler("apply_metadata_rule")
@@ -202,10 +362,8 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
         pairs=[(item.account_id, item.item_id) for item in items]
     )
 
-    await progress.set_total(len(items))
-
     stats = {
-        "total": len(items),
+        "total": 0,
         "changed": 0,
         "skipped": 0,
         "errors": 0,
@@ -220,6 +378,7 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
     account_cache: dict[UUID, LinkedAccount] = {}
     client_cache: dict[UUID, Any] = {}
     folder_cache: dict[tuple[str, str, str], str] = {}
+    indexed_folder_ids: set[tuple[str, str]] = set()
 
     attr_rows = await session.execute(
         select(MetadataAttribute).where(
@@ -227,6 +386,26 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
         )
     )
     attributes_by_id = {str(attr.id): attr for attr in attr_rows.scalars().all()}
+
+    candidate_items: list[Item] = []
+    for item in items:
+        current_metadata = (
+            metadata_by_item_id.get(item.item_id)
+            if rule.account_id
+            else metadata_by_item_id.get((item.account_id, item.item_id))
+        )
+        if item_matches_rule_filters(
+            item=item,
+            metadata_row=current_metadata,
+            target_category_id=rule.target_category_id,
+            filters=rule.metadata_filters or [],
+            attributes_by_id=attributes_by_id,
+        ):
+            candidate_items.append(item)
+
+    items = candidate_items
+    stats["total"] = len(items)
+    await progress.set_total(len(items))
 
     async def _get_account(account_id: UUID) -> LinkedAccount:
         account = account_cache.get(account_id)
@@ -312,17 +491,23 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
 
                 destination_parent_id: str | None = None
                 destination_account_id = rule.destination_account_id or item.account_id
+                move_template_name: str | None = None
                 if rule.apply_move:
                     destination_account = await _get_account(destination_account_id)
                     destination_client = await _get_client(destination_account_id)
-                    destination_parent_id = await _resolve_destination_folder_id(
+                    destination_parent_id, move_template_name = await _resolve_destination_target(
+                        session=session,
                         client=destination_client,
                         account=destination_account,
                         base_folder_id=rule.destination_folder_id or "root",
                         path_template=rule.destination_path_template or "",
                         context=context,
+                        item=item,
                         cache=folder_cache,
+                        indexed_folder_ids=indexed_folder_ids,
                     )
+                    if move_template_name:
+                        new_name = move_template_name
 
                 if rule.apply_move and destination_account_id != item.account_id:
                     if item.item_type != "file":
@@ -361,15 +546,12 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
                                 updated_meta.id,
                                 name=new_name,
                             )
-                        breadcrumb = await destination_client.get_item_path(
-                            destination_account, updated_meta.id
-                        )
-                        await upsert_item_record(
-                            session,
-                            account_id=destination_account.id,
+                        await _index_provider_item(
+                            session=session,
+                            client=destination_client,
+                            account=destination_account,
+                            item_id=updated_meta.id,
                             item_data=updated_meta,
-                            parent_id=parent_id_from_breadcrumb(breadcrumb),
-                            path=path_from_breadcrumb(breadcrumb),
                         )
                         item_changed = True
                 elif rule.apply_move or rule.apply_rename:
@@ -379,7 +561,7 @@ async def apply_metadata_rule_handler(payload: dict, session: AsyncSession) -> d
                     updated_item = await source_client.update_item(
                         source_account,
                         item.item_id,
-                        name=new_name if rule.apply_rename else None,
+                        name=new_name if (rule.apply_rename or move_template_name) else None,
                         parent_id=destination_parent_id if rule.apply_move else None,
                     )
                     breadcrumb = await source_client.get_item_path(

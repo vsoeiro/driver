@@ -122,6 +122,19 @@ class ItemMetadataHistory(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class MetadataRuleFilter(BaseModel):
+    source: str = Field(default="metadata", pattern="^(metadata|path)$")
+    attribute_id: UUID | None = None
+    operator: str = Field(
+        default="equals",
+        pattern=(
+            "^(equals|not_equals|contains|not_contains|starts_with|ends_with|"
+            "gt|gte|lt|lte|is_empty|is_not_empty)$"
+        ),
+    )
+    value: str | int | float | bool | None = None
+
+
 class MetadataRuleBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=150)
     description: str | None = None
@@ -140,6 +153,7 @@ class MetadataRuleBase(BaseModel):
     destination_account_id: UUID | None = None
     destination_folder_id: str = "root"
     destination_path_template: str | None = None
+    metadata_filters: list[MetadataRuleFilter] = Field(default_factory=list)
     include_folders: bool = False
 
 
@@ -165,6 +179,7 @@ class MetadataRuleUpdate(BaseModel):
     destination_account_id: UUID | None = None
     destination_folder_id: str | None = None
     destination_path_template: str | None = None
+    metadata_filters: list[MetadataRuleFilter] | None = None
     include_folders: bool | None = None
 
 
@@ -191,6 +206,7 @@ class MetadataRulePreviewRequest(BaseModel):
     destination_account_id: UUID | None = None
     destination_folder_id: str = "root"
     destination_path_template: str | None = None
+    metadata_filters: list[MetadataRuleFilter] = Field(default_factory=list)
     limit: int = 50
 
 
@@ -207,6 +223,8 @@ class SeriesSummaryRow(BaseModel):
     owned_volumes: list[int] = Field(default_factory=list)
     owned_issues_count: int = 0
     issues_by_volume: dict[str, list[int]] = Field(default_factory=dict)
+    duplicate_items_count: int = 0
+    duplicate_issue_entries: list[dict[str, int | None]] = Field(default_factory=list)
     max_volumes: int = 0
     max_issues: int = 0
     series_status: str = "unknown"

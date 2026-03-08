@@ -56,7 +56,6 @@ export default function FileBrowser() {
     // Listen for job completion to auto-refresh
     React.useEffect(() => {
         const handleJobCompleted = () => {
-            console.log('Job completed, refreshing file list...');
             refresh();
         };
 
@@ -381,6 +380,7 @@ export default function FileBrowser() {
     const singleSelectedItem = selectedItems.size === 1
         ? files.find(f => f.id === Array.from(selectedItems)[0])
         : null;
+    const canMoveSelected = selectedItems.size === 1;
 
     const currentFolderPath = breadcrumbs.length > 0
         ? `/${breadcrumbs.map((crumb) => crumb.name).join('/')}`
@@ -578,8 +578,14 @@ export default function FileBrowser() {
                     </button>
 
                     <button
-                        onClick={() => setMoveModal({ isOpen: true })}
-                        disabled={selectedItems.size === 0}
+                        onClick={() => {
+                            if (!canMoveSelected) {
+                                showToast(t('fileBrowser.moveSingleOnly'), 'warning');
+                                return;
+                            }
+                            setMoveModal({ isOpen: true });
+                        }}
+                        disabled={!canMoveSelected}
                         className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                         title={t('fileBrowser.move')}
                     >
@@ -690,7 +696,7 @@ export default function FileBrowser() {
                     </div>
                 ) : error ? (
                     <div className="status-badge status-badge-danger block p-4">
-                        Error: {error}
+                        {t('fileBrowser.errorPrefix')}: {error}
                     </div>
                 ) : files.length === 0 ? (
                     <div className="empty-state">
@@ -880,8 +886,7 @@ export default function FileBrowser() {
             <MoveModal
                 isOpen={moveModal.isOpen}
                 onClose={() => setMoveModal({ isOpen: false })}
-                item={singleSelectedItem} // Pass single item if only one, or modal handles multiple? Modal currently handles one.
-                // TODO: Update MoveModal to handle multiple items if needed, for now might need loop or disable multi-move
+                item={singleSelectedItem}
                 sourceAccountId={accountId}
                 onSuccess={() => {
                     setMoveModal({ isOpen: false });

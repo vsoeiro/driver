@@ -1,28 +1,27 @@
 import { useState, useEffect, useCallback, Fragment } from 'react';
-import { X, FolderInput, Check, ChevronRight, Folder } from 'lucide-react';
+import { FolderInput, Check, ChevronRight, Folder, File } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getAccounts } from '../services/accounts';
 import { getFiles, getFolderFiles } from '../services/drive';
 import { createMoveJob } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
+import Modal from './Modal';
 
 export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSuccess }) {
     const { t } = useTranslation();
     const [accounts, setAccounts] = useState([]);
     const [selectedAccount, setSelectedAccount] = useState('');
-    const [currentPath, setCurrentPath] = useState([]); // [{id: 'root', name: 'Root'}]
+    const [currentPath, setCurrentPath] = useState([]);
     const [currentFolderId, setCurrentFolderId] = useState('root');
     const [folders, setFolders] = useState([]);
     const [loading, setLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
-
     const { showToast } = useToast();
 
     const loadAccounts = useCallback(async () => {
         try {
             const data = await getAccounts();
             setAccounts(data);
-            // Default to current account if available, or first account
             setSelectedAccount((current) => {
                 if (current || data.length === 0) return current;
                 return sourceAccountId || data[0].id;
@@ -35,15 +34,11 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
 
     const loadFolders = useCallback(async (accountId, folderId) => {
         setLoading(true);
-        console.log(`Loading folders for account ${accountId}, folder ${folderId}`);
         try {
             const data = folderId === 'root'
                 ? await getFiles(accountId)
                 : await getFolderFiles(accountId, folderId);
-
-            console.log('Folders loaded:', data);
-            // Show all items, but disable files in UI
-            setFolders(data.items);
+            setFolders(data.items || []);
         } catch (error) {
             console.error('Failed to load folders:', error);
             showToast(`${t('moveModal.failedLoadFolder')}: ${error.message}`, 'error');
@@ -54,27 +49,26 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
     }, [showToast, t]);
 
     useEffect(() => {
-        if (isOpen) {
-            loadAccounts();
-        }
+        if (!isOpen) return;
+        loadAccounts();
+        setCurrentPath([]);
+        setCurrentFolderId('root');
     }, [isOpen, loadAccounts]);
 
     useEffect(() => {
-        if (selectedAccount) {
-            loadFolders(selectedAccount, currentFolderId);
-        }
-    }, [selectedAccount, currentFolderId, loadFolders]);
+        if (!isOpen || !selectedAccount) return;
+        loadFolders(selectedAccount, currentFolderId);
+    }, [isOpen, selectedAccount, currentFolderId, loadFolders]);
 
     const handleMove = async () => {
         if (!selectedAccount || !item) return;
-
         setSubmitting(true);
         try {
             await createMoveJob(
                 sourceAccountId,
                 item.id,
                 selectedAccount,
-                currentFolderId
+                currentFolderId,
             );
             showToast(t('moveModal.jobStarted', { name: item.name }), 'success');
             onSuccess();
@@ -88,7 +82,6 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
     };
 
     const navigateToFolder = (folder) => {
-        console.log('Navigating to folder:', folder);
         if (!folder.id) {
             showToast(t('moveModal.missingFolderId'), 'error');
             return;
@@ -104,134 +97,136 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
         setCurrentFolderId(newPath.length > 0 ? newPath[newPath.length - 1].id : 'root');
     };
 
-    if (!isOpen) return null;
-
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
-            <div className="w-full max-w-md bg-card border text-card-foreground rounded-lg shadow-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                {/* Header */}
-                <div className="flex items-center justify-between p-4 border-b">
-                    <h3 className="text-lg font-semibold flex items-center gap-2">
-                        <FolderInput className="w-5 h-5 text-primary" />
-                        {t('moveModal.title')}
-                    </h3>
-                    <button onClick={onClose} className="p-1 hover:bg-accent rounded-md transition-colors">
-                        <X className="w-5 h-5 text-muted-foreground" />
-                    </button>
+        <Modal
+            isOpen={isOpen}
+            onClose={onClose}
+            title={(
+                <span className="inline-flex items-center gap-2">
+                    <FolderInput className="h-5 w-5 text-primary" />
+                    {t('moveModal.title')}
+                </span>
+            )}
+            maxWidthClass="max-w-md"
+        >
+            <div className="space-y-4">
+                <div className="rounded-md border bg-muted/50 p-3 text-sm">
+                    <p className="mb-1 text-muted-foreground">{t('moveModal.moving')}</p>
+                    <p className="truncate font-medium text-foreground">{item?.name || '-'}</p>
                 </div>
 
-                {/* Body */}
-                <div className="p-4 space-y-4">
-                    <div className="p-3 bg-muted/50 rounded-md border text-sm">
-                        <p className="text-muted-foreground mb-1">{t('moveModal.moving')}</p>
-                        <p className="font-medium text-foreground truncate">{item?.name}</p>
-                    </div>
+                <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">{t('moveModal.destinationAccount')}</label>
+                    <select
+                        value={selectedAccount}
+                        onChange={(event) => {
+                            setSelectedAccount(event.target.value);
+                            setCurrentFolderId('root');
+                            setCurrentPath([]);
+                        }}
+                        className="w-full rounded-md border bg-background p-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    >
+                        {accounts.map((acc) => (
+                            <option key={acc.id} value={acc.id}>
+                                {acc.display_name} ({acc.email})
+                            </option>
+                        ))}
+                    </select>
+                </div>
 
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium text-foreground">{t('moveModal.destinationAccount')}</label>
-                        <select
-                            value={selectedAccount}
-                            onChange={(e) => {
-                                setSelectedAccount(e.target.value);
-                                setCurrentFolderId('root');
-                                setCurrentPath([]);
-                            }}
-                            className="w-full p-2 bg-background border rounded-md text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                        <label className="text-sm font-medium text-foreground">{t('moveModal.destinationFolder')}</label>
+                        <button
+                            onClick={navigateUp}
+                            disabled={currentPath.length === 0}
+                            className="text-xs text-primary hover:underline disabled:opacity-50"
                         >
-                            {accounts.map(acc => (
-                                <option key={acc.id} value={acc.id}>
-                                    {acc.display_name} ({acc.email})
-                                </option>
-                            ))}
-                        </select>
+                            {t('moveModal.goUp')}
+                        </button>
                     </div>
 
-                    <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                            <label className="text-sm font-medium text-foreground">{t('moveModal.destinationFolder')}</label>
-                            <button
-                                onClick={navigateUp}
-                                disabled={currentPath.length === 0}
-                                className="text-xs text-primary hover:underline disabled:opacity-50"
+                    <div className="overflow-hidden rounded-md border">
+                        <div className="flex items-center gap-1 overflow-x-auto border-b bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                            <span
+                                onClick={() => {
+                                    setCurrentPath([]);
+                                    setCurrentFolderId('root');
+                                }}
+                                className="cursor-pointer hover:text-foreground"
                             >
-                                {t('moveModal.goUp')}
-                            </button>
+                                {t('moveModal.root')}
+                            </span>
+                            {currentPath.map((part) => (
+                                <Fragment key={part.id}>
+                                    <ChevronRight className="h-3 w-3" />
+                                    <span className="whitespace-nowrap">{part.name}</span>
+                                </Fragment>
+                            ))}
                         </div>
 
-                        <div className="border rounded-md overflow-hidden">
-                            <div className="bg-muted/50 px-3 py-2 text-xs text-muted-foreground border-b flex items-center gap-1 overflow-x-auto">
-                                <span onClick={() => { setCurrentPath([]); setCurrentFolderId('root'); }} className="cursor-pointer hover:text-foreground">{t('moveModal.root')}</span>
-                                {currentPath.map((p) => (
-                                    <Fragment key={p.id}>
-                                        <ChevronRight className="w-3 h-3" />
-                                        <span className="whitespace-nowrap">{p.name}</span>
-                                    </Fragment>
-                                ))}
-                            </div>
-
-                            <div className="h-48 overflow-y-auto bg-background p-2 space-y-1">
-                                {loading ? (
-                                    <div className="flex justify-center py-4">
-                                        <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-                                    </div>
-                                ) : folders.length === 0 ? (
-                                    <div className="text-center py-8 text-muted-foreground text-sm">
-                                        {t('moveModal.emptyFolder')}
-                                    </div>
-                                ) : (
-                                    folders.map(item => (
-                                        <button
-                                            key={item.id}
-                                            onClick={() => item.item_type === 'folder' && navigateToFolder(item)}
-                                            disabled={item.item_type !== 'folder'}
-                                            className={`w-full flex items-center gap-3 p-2 rounded-md text-left transition-colors ${item.item_type === 'folder'
-                                                ? 'hover:bg-accent cursor-pointer group'
-                                                : 'opacity-50 cursor-default'
-                                                }`}
-                                        >
-                                            {item.item_type === 'folder' ? (
-                                                <Folder className="w-4 h-4 text-primary/80 group-hover:text-primary" />
-                                            ) : (
-                                                <div className="w-4 h-4 bg-muted rounded flex items-center justify-center text-[10px] text-muted-foreground">
-                                                    DOC
-                                                </div>
-                                            )}
-                                            <span className={`text-sm truncate ${item.item_type === 'folder' ? 'text-foreground' : 'text-muted-foreground'
-                                                }`}>
-                                                {item.name}
-                                            </span>
-                                        </button>
-                                    ))
-                                )}
-                            </div>
+                        <div className="h-48 space-y-1 overflow-y-auto bg-background p-2">
+                            {loading ? (
+                                <div className="flex justify-center py-4">
+                                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                                </div>
+                            ) : folders.length === 0 ? (
+                                <div className="py-8 text-center text-sm text-muted-foreground">
+                                    {t('moveModal.emptyFolder')}
+                                </div>
+                            ) : (
+                                folders.map((entry) => (
+                                    <button
+                                        key={entry.id}
+                                        onClick={() => entry.item_type === 'folder' && navigateToFolder(entry)}
+                                        disabled={entry.item_type !== 'folder'}
+                                        className={`w-full rounded-md p-2 text-left transition-colors ${
+                                            entry.item_type === 'folder'
+                                                ? 'group flex cursor-pointer items-center gap-3 hover:bg-accent'
+                                                : 'flex cursor-default items-center gap-3 opacity-50'
+                                        }`}
+                                    >
+                                        {entry.item_type === 'folder' ? (
+                                            <Folder className="h-4 w-4 text-primary/80 group-hover:text-primary" />
+                                        ) : (
+                                            <File className="h-4 w-4 text-muted-foreground" />
+                                        )}
+                                        <span className={entry.item_type === 'folder' ? 'truncate text-sm text-foreground' : 'truncate text-sm text-muted-foreground'}>
+                                            {entry.name}
+                                        </span>
+                                        {entry.item_type !== 'folder' ? (
+                                            <span className="ml-auto text-[10px] text-muted-foreground">{t('moveModal.file')}</span>
+                                        ) : null}
+                                    </button>
+                                ))
+                            )}
                         </div>
                     </div>
                 </div>
 
-                {/* Footer */}
-                <div className="p-4 border-t flex justify-end gap-3 bg-muted/20">
+                <div className="flex justify-end gap-3 border-t bg-muted/20 pt-4">
                     <button
                         onClick={onClose}
-                        className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                        className="px-4 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
                     >
                         {t('common.cancel')}
                     </button>
                     <button
                         onClick={handleMove}
-                        disabled={submitting || !selectedAccount}
-                        className="px-4 py-2 bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium rounded-md transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={submitting || !selectedAccount || !item}
+                        className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         {submitting ? (
-                            <>{t('moveModal.processing')}</>
+                            t('moveModal.processing')
                         ) : (
                             <>
-                                <Check className="w-4 h-4" />
+                                <Check className="h-4 w-4" />
                                 {t('moveModal.moveHere')}
                             </>
                         )}
                     </button>
                 </div>
             </div>
-        </div>
+        </Modal>
     );
 }

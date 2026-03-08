@@ -6,7 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.application.metadata.repositories import ItemMetadataRepository
-from backend.db.models import Item
+from backend.application.metadata.rule_filters import item_matches_rule_filters
+from backend.db.models import Item, MetadataAttribute
 from backend.schemas.metadata import (
     MetadataRulePreviewRequest,
     MetadataRulePreviewResponse,
@@ -41,6 +42,25 @@ class RulePreviewService:
         metadata_by_pair = await self._metadata_repo.get_by_account_item_pairs(
             pairs=lookup_pairs
         )
+        attr_rows = await self._session.execute(
+            select(MetadataAttribute).where(
+                MetadataAttribute.category_id == request.target_category_id
+            )
+        )
+        attributes_by_id = {str(attr.id): attr for attr in attr_rows.scalars().all()}
+
+        filtered_items: list[Item] = []
+        for item in items:
+            current = metadata_by_pair.get((item.account_id, item.item_id))
+            if item_matches_rule_filters(
+                item=item,
+                metadata_row=current,
+                target_category_id=request.target_category_id,
+                filters=request.metadata_filters,
+                attributes_by_id=attributes_by_id,
+            ):
+                filtered_items.append(item)
+        items = filtered_items
 
         target_values = normalize_metadata_values(request.target_values)
         to_change = 0
