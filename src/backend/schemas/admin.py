@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from backend.services.cron_utils import validate_cron_expression
 
@@ -38,7 +38,8 @@ class RuntimeSettingsResponse(BaseModel):
     ai_provider_mode: str
     ai_base_url_remote: str | None = None
     ai_api_key_remote: str | None = None
-    plugin_settings: list[PluginSettingsGroupResponse] = []
+    ai_api_key_remote_configured: bool = False
+    plugin_settings: list[PluginSettingsGroupResponse] = Field(default_factory=list)
 
 
 class RuntimeSettingsUpdateRequest(BaseModel):
@@ -173,7 +174,7 @@ class ObservabilitySnapshot(BaseModel):
     cache_hit: bool = False
     cache_ttl_seconds: int = 0
     cache_expires_at: datetime | None = None
-    recent_alerts: list[ObservabilityAlert] = []
-    integration_health: list[IntegrationHealthStatus] = []
-    dead_letter_jobs: list[DeadLetterJobSummary] = []
-    provider_request_usage: list[ProviderRequestUsage] = []
+    recent_alerts: list[ObservabilityAlert] = Field(default_factory=list)
+    integration_health: list[IntegrationHealthStatus] = Field(default_factory=list)
+    dead_letter_jobs: list[DeadLetterJobSummary] = Field(default_factory=list)
+    provider_request_usage: list[ProviderRequestUsage] = Field(default_factory=list)

@@ -7,6 +7,7 @@ for PostgreSQL with asyncpg driver.
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from backend.core.config import get_settings
 
@@ -18,6 +19,8 @@ engine_kwargs = {
 
 if "sqlite" in settings.database_url:
     engine_kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
+elif settings.resolved_db_pool_mode == "null":
+    engine_kwargs["poolclass"] = NullPool
 else:
     engine_kwargs.update(
         {

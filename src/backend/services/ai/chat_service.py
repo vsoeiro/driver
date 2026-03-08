@@ -33,7 +33,7 @@ from backend.services.app_settings import AppSettingsService
 class AIChatService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
-        self.settings = get_settings()
+        self.settings = get_settings().model_copy(deep=True)
         self.policy = PolicyEngine(
             max_tool_calls=self.settings.ai_max_tool_calls_per_message,
             max_rows_scanned=self.settings.ai_max_rows_scanned,

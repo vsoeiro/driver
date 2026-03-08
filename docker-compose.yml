@@ -12,8 +12,7 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       COMIC_RAR_TOOLS_DIR: /app/.tools
-      DB_POOL_SIZE: 12
-      DB_MAX_OVERFLOW: 8
+      DB_POOL_MODE: "null"
     command: >
       sh -c "uv run --no-sync alembic upgrade head &&
              uv run --no-sync uvicorn backend.main:app --host 0.0.0.0 --port 8000"
@@ -37,9 +36,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       COMIC_RAR_TOOLS_DIR: /app/.tools
       WORKER_QUEUE_NAME: driver:jobs:light
-      WORKER_CONCURRENCY: 8
-      DB_POOL_SIZE: 12
-      DB_MAX_OVERFLOW: 8
+      WORKER_CONCURRENCY: 3
+      DB_POOL_MODE: "null"
     command: uv run --no-sync arq backend.workers.arq_worker.WorkerSettings
     depends_on:
       redis:
@@ -57,9 +55,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       COMIC_RAR_TOOLS_DIR: /app/.tools
       WORKER_QUEUE_NAME: driver:jobs
-      WORKER_CONCURRENCY: 3
-      DB_POOL_SIZE: 8
-      DB_MAX_OVERFLOW: 4
+      WORKER_CONCURRENCY: 2
+      DB_POOL_MODE: "null"
     command: uv run --no-sync arq backend.workers.arq_worker.WorkerSettings
     depends_on:
       redis:
@@ -78,8 +75,7 @@ services:
       COMIC_RAR_TOOLS_DIR: /app/.tools
       WORKER_QUEUE_NAME: driver:jobs:heavy
       WORKER_CONCURRENCY: 1
-      DB_POOL_SIZE: 4
-      DB_MAX_OVERFLOW: 2
+      DB_POOL_MODE: "null"
     command: uv run --no-sync arq backend.workers.arq_worker.WorkerSettings
     depends_on:
       redis:
@@ -104,8 +100,7 @@ services:
       WORKER_QUEUE_NAME: driver:jobs:vision
       WORKER_CONCURRENCY: 1
       WORKER_ENABLE_IMAGE_HANDLERS: "true"
-      DB_POOL_SIZE: 4
-      DB_MAX_OVERFLOW: 2
+      DB_POOL_MODE: "null"
     command: uv run --no-sync arq backend.workers.arq_worker.WorkerSettings
     depends_on:
       redis:

@@ -22,7 +22,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
 @router.get("/google/login")
-async def google_login() -> RedirectResponse:
+async def google_login(request: Request) -> RedirectResponse:
     """Initiate Google OAuth2 login flow."""
     settings = get_settings()
     auth_service = get_google_auth_service()
@@ -36,12 +36,13 @@ async def google_login() -> RedirectResponse:
     state = secrets.token_urlsafe(32)
     auth_url = auth_service.get_auth_url(settings.google_redirect_uri, state)
     response = RedirectResponse(url=auth_url, status_code=status.HTTP_302_FOUND)
+    secure_cookie = _request_is_secure(request)
 
     response.set_cookie(
         key="oauth_google_state",
         value=encrypt_token(state),
         httponly=True,
-        secure=False,
+        secure=secure_cookie,
         samesite="lax",
         max_age=600,
         path="/",
@@ -50,7 +51,7 @@ async def google_login() -> RedirectResponse:
 
 
 @router.get("/dropbox/login")
-async def dropbox_login() -> RedirectResponse:
+async def dropbox_login(request: Request) -> RedirectResponse:
     """Initiate Dropbox OAuth2 login flow."""
     settings = get_settings()
     auth_service = get_dropbox_auth_service()
@@ -64,12 +65,13 @@ async def dropbox_login() -> RedirectResponse:
     state = secrets.token_urlsafe(32)
     auth_url = auth_service.get_auth_url(settings.dropbox_redirect_uri, state)
     response = RedirectResponse(url=auth_url, status_code=status.HTTP_302_FOUND)
+    secure_cookie = _request_is_secure(request)
 
     response.set_cookie(
         key="oauth_dropbox_state",
         value=encrypt_token(state),
         httponly=True,
-        secure=False,
+        secure=secure_cookie,
         samesite="lax",
         max_age=600,
         path="/",
@@ -87,6 +89,7 @@ async def google_callback(
     """Handle Google OAuth2 callback and persist linked account."""
     auth_service = get_google_auth_service()
     settings = get_settings()
+    secure_cookie = _request_is_secure(request)
 
     encrypted_state = request.cookies.get("oauth_google_state")
     if not encrypted_state:
@@ -137,7 +140,7 @@ async def google_callback(
     )
 
     success_response = _success_redirect_response(settings.frontend_oauth_success_url)
-    success_response.delete_cookie("oauth_google_state", path="/")
+    success_response.delete_cookie("oauth_google_state", path="/", secure=secure_cookie)
     return success_response
 
 
@@ -151,6 +154,7 @@ async def dropbox_callback(
     """Handle Dropbox OAuth2 callback and persist linked account."""
     auth_service = get_dropbox_auth_service()
     settings = get_settings()
+    secure_cookie = _request_is_secure(request)
 
     encrypted_state = request.cookies.get("oauth_dropbox_state")
     if not encrypted_state:
@@ -205,7 +209,7 @@ async def dropbox_callback(
     )
 
     success_response = _success_redirect_response(settings.frontend_oauth_success_url)
-    success_response.delete_cookie("oauth_dropbox_state", path="/")
+    success_response.delete_cookie("oauth_dropbox_state", path="/", secure=secure_cookie)
     return success_response
 
 
@@ -216,7 +220,6 @@ async def microsoft_login(request: Request) -> RedirectResponse:
     Redirects the user directly to Microsoft login page.
     """
     auth_service = get_microsoft_auth_service()
-    settings = get_settings()
     settings = get_settings()
 
     flow = auth_service.get_auth_flow(settings.redirect_uri)
@@ -240,13 +243,14 @@ async def microsoft_login(request: Request) -> RedirectResponse:
 
     flow_json = json.dumps(flow)
     encrypted_flow = encrypt_token(flow_json)
+    secure_cookie = _request_is_secure(request)
 
     # Store state in cookie for stateless auth
     response.set_cookie(
         key="oauth_flow",
         value=encrypted_flow,
         httponly=True,
-        secure=False,  # Set to True in production with HTTPS
+        secure=secure_cookie,
         samesite="lax",
         max_age=600,  # 10 minutes
         path="/",
@@ -267,6 +271,8 @@ async def microsoft_callback(
     Exchanges the authorization code for tokens.
     """
     auth_service = get_microsoft_auth_service()
+    settings = get_settings()
+    secure_cookie = _request_is_secure(request)
 
     logger.info("Callback received. Cookies: %s", request.cookies.keys())
     encrypted_flow = request.cookies.get("oauth_flow")
@@ -286,6 +292,13 @@ async def microsoft_callback(
         flow = json.loads(flow_json)
     except Exception:
         logger.error("Failed to decrypt oauth flow cookie")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid session state.",
+        )
+
+    expected_state = str(flow.get("state") or "").strip()
+    if expected_state and expected_state != state:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid session state.",
@@ -323,7 +336,7 @@ async def microsoft_callback(
     )
 
     success_response = _success_redirect_response(settings.frontend_oauth_success_url)
-    success_response.delete_cookie("oauth_flow", path="/")
+    success_response.delete_cookie("oauth_flow", path="/", secure=secure_cookie)
     return success_response
 
 
@@ -398,3 +411,10 @@ def _success_redirect_response(url: str) -> RedirectResponse:
         )
         url = "http://localhost:5173/accounts"
     return RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)
+
+
+def _request_is_secure(request: Request) -> bool:
+    forwarded_proto = str(request.headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip().lower()
+    if forwarded_proto:
+        return forwarded_proto == "https"
+    return request.url.scheme == "https"

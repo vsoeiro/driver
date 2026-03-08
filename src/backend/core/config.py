@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     token_encryption_key: str = Field(alias="ENCRYPTION_KEY")
 
     database_url: str = Field(alias="DATABASE_URL")
+    db_pool_mode: str = Field(default="auto", alias="DB_POOL_MODE")
     db_pool_size: int = Field(default=5, alias="DB_POOL_SIZE")
     db_max_overflow: int = Field(default=0, alias="DB_MAX_OVERFLOW")
     db_pool_timeout_seconds: int = Field(default=30, alias="DB_POOL_TIMEOUT_SECONDS")
@@ -113,7 +114,7 @@ class Settings(BaseSettings):
     )
     comic_rar_tools_dir: str | None = Field(default=None, alias="COMIC_RAR_TOOLS_DIR")
     comic_rar_tool_path: str | None = Field(default=None, alias="COMIC_RAR_TOOL_PATH")
-    comic_rar_tool_auto_install: bool = Field(default=True, alias="COMIC_RAR_TOOL_AUTO_INSTALL")
+    comic_rar_tool_auto_install: bool = Field(default=False, alias="COMIC_RAR_TOOL_AUTO_INSTALL")
     comic_rar_tool_download_url: str | None = Field(default=None, alias="COMIC_RAR_TOOL_DOWNLOAD_URL")
     redis_url: str = Field(default="redis://127.0.0.1:6379/0", alias="REDIS_URL")
     redis_queue_name: str = Field(default="driver:jobs", alias="REDIS_QUEUE_NAME")
@@ -154,6 +155,9 @@ class Settings(BaseSettings):
     def assemble_db_connection(self) -> "Settings":
         if self.database_url.startswith("sqlite:///") and "aiosqlite" not in self.database_url:
             self.database_url = self.database_url.replace("sqlite:///", "sqlite+aiosqlite:///")
+        self.db_pool_mode = self.db_pool_mode.strip().lower() or "auto"
+        if self.db_pool_mode not in {"auto", "queue", "null"}:
+            raise ValueError("DB_POOL_MODE must be one of: auto, queue, null")
         if self.db_pool_size <= 0:
             raise ValueError("DB_POOL_SIZE must be greater than 0")
         if self.db_max_overflow < 0:
@@ -272,6 +276,17 @@ class Settings(BaseSettings):
             The Microsoft identity platform authority URL.
         """
         return f"https://login.microsoftonline.com/{self.microsoft_tenant_id}"
+
+    @property
+    def resolved_db_pool_mode(self) -> str:
+        """Resolve the effective SQLAlchemy pool strategy."""
+        if self.database_url.startswith("sqlite"):
+            return "queue"
+        if self.db_pool_mode != "auto":
+            return self.db_pool_mode
+        if "pooler.supabase.com" in self.database_url.lower():
+            return "null"
+        return "queue"
 
     @property
     def microsoft_scopes(self) -> list[str]:

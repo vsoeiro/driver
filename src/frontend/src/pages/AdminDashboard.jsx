@@ -98,7 +98,7 @@ export default function AdminDashboard() {
 
     usePolling({
         callback: () => refetch(),
-        intervalMs: 20000,
+        intervalMs: 60000,
         enabled: true,
         pauseWhenHidden: true,
         runImmediately: false,

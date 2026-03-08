@@ -114,6 +114,9 @@ You can run with only Microsoft, only Google, or only Dropbox. You do not need a
 - `REDIS_QUEUE_NAME` (defaults to `driver:jobs`)
 - `WORKER_CONCURRENCY`
 - `WORKER_JOB_TIMEOUT_SECONDS`
+- `DB_POOL_MODE`
+- `DB_POOL_SIZE`
+- `DB_MAX_OVERFLOW`
 - `ENABLE_DAILY_SYNC_SCHEDULER`
 - `RUN_SCHEDULER_IN_API`
 - `SCHEDULER_DISTRIBUTED_LOCK_ENABLED`
@@ -210,12 +213,13 @@ Current strategy:
 
 Current Compose profile:
 
-- `worker-light`: `WORKER_CONCURRENCY=8`, `DB_POOL_SIZE=3`
-- `worker-default`: `WORKER_CONCURRENCY=3`, `DB_POOL_SIZE=2`
-- `worker-heavy`: `WORKER_CONCURRENCY=1`, `DB_POOL_SIZE=1`
-- backend API: `DB_POOL_SIZE=6`
+- `worker-light`: `WORKER_CONCURRENCY=3`, `DB_POOL_MODE=null`
+- `worker-default`: `WORKER_CONCURRENCY=2`, `DB_POOL_MODE=null`
+- `worker-heavy`: `WORKER_CONCURRENCY=1`, `DB_POOL_MODE=null`
+- `worker-vision`: `WORKER_CONCURRENCY=1`, `DB_POOL_MODE=null`
+- backend API: `DB_POOL_MODE=null`
 
-This helps keep fast jobs responsive while preventing heavy jobs from monopolizing resources.
+For managed poolers such as Supabase Session mode, prefer `DB_POOL_MODE=null` so each process does not keep its own large SQLAlchemy pool on top of the external pooler.
 
 ## Optional Comics Module (Extra)
 
