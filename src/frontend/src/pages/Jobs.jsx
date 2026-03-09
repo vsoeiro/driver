@@ -493,6 +493,9 @@ export default function Jobs() {
     const selectedErrorText = selectedJob ? getJobErrorText(selectedJob, attempts) : null;
     const selectedErrorItems = selectedJob ? normalizeErrorItems(selectedJob) : [];
     const selectedErrorItemsTruncated = selectedJob ? getErrorItemsTruncated(selectedJob) : 0;
+    const selectedHasItemDetails = selectedMetricSummary
+        ? selectedMetricSummary.failed > 0 || selectedMetricSummary.skipped > 0
+        : false;
 
     return (
         <div className="app-page">
@@ -927,13 +930,13 @@ export default function Jobs() {
                             <div>
                                 <span className="text-sm font-medium text-destructive mb-2 flex items-center gap-2">
                                     <AlertTriangle className="w-4 h-4" />
-                                    {t('jobs.failedItems', {
+                                    {t('jobs.itemDetails', {
                                         details: selectedErrorItemsTruncated > 0
-                                            ? t('jobs.failedItemsShowing', {
+                                            ? t('jobs.itemDetailsShowing', {
                                                 shown: selectedErrorItems.length,
                                                 hidden: selectedErrorItemsTruncated,
                                             })
-                                            : t('jobs.failedItemsCount', { count: selectedErrorItems.length }),
+                                            : t('jobs.itemDetailsCount', { count: selectedErrorItems.length }),
                                     })}
                                 </span>
                                 <div className="bg-destructive/5 p-3 rounded-md border border-destructive/20 text-xs overflow-auto max-h-72">
@@ -955,9 +958,9 @@ export default function Jobs() {
                             </div>
                         )}
 
-                        {selectedMetricSummary && selectedMetricSummary.failed > 0 && selectedErrorItems.length === 0 && !selectedErrorText && (
+                        {selectedHasItemDetails && selectedErrorItems.length === 0 && !selectedErrorText && (
                             <div className="status-badge status-badge-warning rounded-sm px-3 py-2 text-xs">
-                                {t('jobs.failedItemsNoDetails')}
+                                {t('jobs.itemDetailsNoDetails')}
                             </div>
                         )}
 

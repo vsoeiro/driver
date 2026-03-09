@@ -95,6 +95,15 @@ class IndexedComicItem:
     size: int | None = None
 
 
+@dataclass(slots=True)
+class ComicProcessOutcome:
+    """Result of processing one comic item."""
+
+    mapped: bool
+    skip_reason: str | None = None
+    skip_stage: str | None = None
+
+
 def file_extension(filename: str | None) -> str:
     """Return filename extension in lowercase without leading dot."""
     if not filename:
@@ -545,6 +554,34 @@ def _is_non_comic_extraction_error(error_text: str) -> bool:
     return any(marker in normalized for marker in NON_COMIC_EXTRACTION_MARKERS)
 
 
+def _existing_comic_mapping_skip_reason(
+    existing: ItemMetadata | None,
+    *,
+    category_id: UUID,
+    attr_ids: dict[str, str],
+) -> str | None:
+    if existing is None:
+        return None
+    if existing.category_id != category_id:
+        return "Item already mapped to another metadata category"
+
+    values = existing.values or {}
+    check_fields = (
+        "cover_item_id",
+        "cover_account_id",
+        "page_count",
+        "file_format",
+    )
+    for field_key in check_fields:
+        attr_id = attr_ids.get(field_key)
+        if not attr_id:
+            continue
+        value = values.get(attr_id)
+        if value is not None and value != "":
+            return "Item already mapped"
+    return None
+
+
 def _extract_from_epub(local_path: str) -> ComicExtractionResult:
     with zipfile.ZipFile(local_path, "r") as archive:
         names = set(archive.namelist())
@@ -770,6 +807,7 @@ class ComicMetadataService:
         item_id: str | None = None,
         item_name: str | None = None,
         account_id: str | None = None,
+        stage: str | None = None,
     ) -> None:
         collector = ErrorItemsCollector(stats, limit=COMIC_ERROR_ITEMS_LIMIT)
         collector.record(
@@ -777,6 +815,7 @@ class ComicMetadataService:
             item_id=item_id,
             item_name=item_name,
             account_id=account_id,
+            stage=stage,
         )
 
     @classmethod
@@ -1017,7 +1056,7 @@ class ComicMetadataService:
         )
         for file_item in files_to_process:
             try:
-                mapped = await self._process_single_file(
+                outcome = await self._process_single_file(
                     source_client=source_client,
                     source_account=source_account,
                     source_account_pk=source_account_pk,
@@ -1033,10 +1072,19 @@ class ComicMetadataService:
                     batch_id=batch_id,
                     force_remap=force_remap,
                 )
-                if mapped:
+                if outcome.mapped:
                     stats["mapped"] += 1
                 else:
                     stats["skipped"] += 1
+                    if outcome.skip_reason:
+                        self._record_error_item(
+                            stats,
+                            reason=outcome.skip_reason,
+                            item_id=getattr(file_item, "id", None),
+                            item_name=getattr(file_item, "name", None),
+                            account_id=source_account_id,
+                            stage=outcome.skip_stage,
+                        )
                 processed_since_commit += 1
                 if processed_since_commit >= batch_size:
                     await self.session.commit()
@@ -1185,17 +1233,27 @@ class ComicMetadataService:
         job_id,
         batch_id,
         force_remap: bool,
-    ) -> bool:
+    ) -> ComicProcessOutcome:
         ext = (getattr(item, "extension", None) or file_extension(item.name)).lower()
         if ext not in SUPPORTED_COMIC_EXTENSIONS:
-            return False
-        if not force_remap and await self._is_already_mapped(
-            account_id=source_account_pk,
-            item_id=item.id,
-            category_id=category_id,
-            attr_ids=attr_ids,
-        ):
-            return False
+            return ComicProcessOutcome(
+                mapped=False,
+                skip_reason=f"Unsupported comic extension: {ext or 'none'}",
+                skip_stage="extension_filter",
+            )
+        if not force_remap:
+            skip_reason = await self._existing_mapping_skip_reason(
+                account_id=source_account_pk,
+                item_id=item.id,
+                category_id=category_id,
+                attr_ids=attr_ids,
+            )
+            if skip_reason:
+                return ComicProcessOutcome(
+                    mapped=False,
+                    skip_reason=skip_reason,
+                    skip_stage="existing_metadata",
+                )
 
         temp_dir = tempfile.mkdtemp(prefix="comic_extract_")
         local_path = str(Path(temp_dir) / f"{item.id}.{ext or 'bin'}")
@@ -1248,11 +1306,12 @@ class ComicMetadataService:
                 batch_id=batch_id,
                 job_id=job_id,
             )
-            return True
+            return ComicProcessOutcome(mapped=True)
         except ValueError as exc:
             # Non-comic/unsupported content inside accepted container types should be skipped.
             error_text = str(exc).lower()
             if _is_non_comic_extraction_error(error_text):
+                reason = f"Skipped non-comic content: {exc}"
                 logger.info(
                     "Skipping non-comic item account=%s item=%s name=%s reason=%s",
                     source_account_id,
@@ -1260,7 +1319,11 @@ class ComicMetadataService:
                     item.name,
                     exc,
                 )
-                return False
+                return ComicProcessOutcome(
+                    mapped=False,
+                    skip_reason=reason,
+                    skip_stage="extract_comic",
+                )
             raise
         finally:
             try:
@@ -1301,33 +1364,17 @@ class ComicMetadataService:
         set_if_exists("page_count", extraction.page_count)
         return values
 
-    async def _is_already_mapped(
+    async def _existing_mapping_skip_reason(
         self, *, account_id, item_id: str, category_id, attr_ids: dict[str, str]
-    ) -> bool:
+    ) -> str | None:
         stmt = select(ItemMetadata).where(
             ItemMetadata.account_id == account_id,
             ItemMetadata.item_id == item_id,
         )
         result = await self.session.execute(stmt)
         existing = result.scalar_one_or_none()
-        if existing is None:
-            return False
-        if existing.category_id != category_id:
-            # Do not overwrite metadata mapped by another category/library.
-            return True
-
-        values = existing.values or {}
-        check_fields = (
-            "cover_item_id",
-            "cover_account_id",
-            "page_count",
-            "file_format",
+        return _existing_comic_mapping_skip_reason(
+            existing,
+            category_id=category_id,
+            attr_ids=attr_ids,
         )
-        for field_key in check_fields:
-            attr_id = attr_ids.get(field_key)
-            if not attr_id:
-                continue
-            value = values.get(attr_id)
-            if value is not None and value != "":
-                return True
-        return False
