@@ -2,8 +2,49 @@ import { useEffect } from 'react';
 import { X, Check, AlertCircle, Info, AlertTriangle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+function formatToastMessage(message) {
+    if (typeof message === 'string' || typeof message === 'number') {
+        return String(message);
+    }
+
+    if (message == null) {
+        return '';
+    }
+
+    if (Array.isArray(message)) {
+        const parts = message
+            .map((entry) => formatToastMessage(entry))
+            .filter(Boolean);
+        return parts.join('\n');
+    }
+
+    if (typeof message === 'object') {
+        if (Array.isArray(message.detail)) {
+            return formatToastMessage(message.detail);
+        }
+        if (typeof message.detail === 'string') {
+            return message.detail;
+        }
+        if (typeof message.msg === 'string') {
+            const loc = Array.isArray(message.loc) ? message.loc.slice(1).join('.') : '';
+            return loc ? `${loc}: ${message.msg}` : message.msg;
+        }
+        if (typeof message.message === 'string') {
+            return message.message;
+        }
+        try {
+            return JSON.stringify(message);
+        } catch {
+            return String(message);
+        }
+    }
+
+    return String(message);
+}
+
 export default function Toast({ id, type, message, onClose, duration = 5000 }) {
     const { t } = useTranslation();
+    const safeMessage = formatToastMessage(message);
 
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -47,7 +88,7 @@ export default function Toast({ id, type, message, onClose, duration = 5000 }) {
                 {style.iconNode}
             </div>
             <div className="min-w-[180px] flex-1">
-                <p className={`leading-5 ${style.text}`}>{message}</p>
+                <p className={`whitespace-pre-line leading-5 ${style.text}`}>{safeMessage}</p>
             </div>
             <button
                 onClick={() => onClose(id)}
