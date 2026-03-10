@@ -184,7 +184,7 @@ class GraphClient(OAuthHTTPClientBase):
         """
         return await self._request("GET", "/me", account)
 
-    async def list_root_items(self, account: LinkedAccount) -> DriveListResponse:
+    async def list_root_items(self, account: LinkedAccount, page_size: int = 50) -> DriveListResponse:
         """List items in the root of OneDrive.
 
         Parameters
@@ -197,13 +197,14 @@ class GraphClient(OAuthHTTPClientBase):
         DriveListResponse
             List of items in the root folder.
         """
-        data = await self._request("GET", "/me/drive/root/children", account)
+        data = await self._request("GET", "/me/drive/root/children", account, params={"$top": max(1, min(200, int(page_size)))})
         return self._parse_drive_items(data, "/")
 
     async def list_folder_items(
         self,
         account: LinkedAccount,
         item_id: str,
+        page_size: int = 50,
     ) -> DriveListResponse:
         """List items in a specific folder.
 
@@ -223,6 +224,7 @@ class GraphClient(OAuthHTTPClientBase):
             "GET",
             f"/me/drive/items/{item_id}/children",
             account,
+            params={"$top": max(1, min(200, int(page_size)))},
         )
         return self._parse_drive_items(data, item_id)
 

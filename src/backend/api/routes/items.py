@@ -20,7 +20,7 @@ router = APIRouter(prefix="/items", tags=["Items"])
 @router.get("", response_model=ItemListResponse)
 async def list_items(
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100),
+    page_size: int = Query(50, ge=1, le=200),
     sort_by: str = Query("modified_at", pattern="^(name|size|modified_at|created_at)$"),
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     metadata_sort_attribute_id: Optional[str] = None,

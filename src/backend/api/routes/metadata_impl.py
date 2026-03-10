@@ -781,7 +781,7 @@ async def upsert_metadata_form_layout(
 async def get_category_series_summary(
     category_id: UUID,
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100),
+    page_size: int = Query(50, ge=1, le=200),
     sort_by: str = Query("series", pattern="^(series|total_items)$"),
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     q: str | None = None,

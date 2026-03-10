@@ -28,6 +28,8 @@ MAX_TOOL_DOWNLOAD_BYTES = 64 * 1024 * 1024
 
 def _candidate_tools(tools_dir: Path) -> list[Path]:
     names = [
+        "unar.exe",
+        "unar",
         "unrar.exe",
         "unrar",
         "rar.exe",
@@ -143,7 +145,7 @@ def _is_safe_download_url(download_url: str) -> bool:
 
 
 def _find_system_candidates() -> list[Path]:
-    names = ["unrar", "rar", "7z", "7za", "tar", "bsdtar"]
+    names = ["unar", "unrar", "rar", "7z", "7za", "tar", "bsdtar"]
     found: list[Path] = []
     for name in names:
         path = shutil.which(name)

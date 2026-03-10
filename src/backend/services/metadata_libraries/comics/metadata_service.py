@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import posixpath
 import shutil
 import subprocess
 import tarfile
 import tempfile
 import zipfile
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Iterator
 from uuid import UUID
 from xml.etree import ElementTree
 
@@ -71,6 +73,11 @@ NON_COMIC_EXTRACTION_MARKERS = (
     "not a rar archive",
     "not a rar file",
 )
+RAR_BACKEND_FAILURE_MARKERS = (
+    "pathname cannot be converted",
+    "unsupported method",
+)
+RAR_UTF8_LOCALE = "C.UTF-8"
 
 
 @dataclass(slots=True)
@@ -337,28 +344,29 @@ def _extract_from_rar(local_path: str, *, fmt: str) -> ComicExtractionResult:
         )
 
     try:
-        with rarfile.RarFile(local_path, "r") as archive:
-            image_names = [
-                info.filename
-                for info in archive.infolist()
-                if not info.is_dir()
-                and Path(info.filename).suffix.lower() in IMAGE_EXTENSIONS
-            ]
-            ordered_names, page_count = _ordered_image_names_and_count(image_names)
-            cover_name, cover_bytes = _pick_first_non_empty_payload(
-                ordered_names, reader=archive.read, source_label="RAR"
-            )
-            cover_extension = Path(cover_name).suffix.lower().lstrip(".") or "jpg"
-            return ComicExtractionResult(
-                format=fmt,
-                page_count=page_count,
-                cover_bytes=cover_bytes,
-                cover_extension=cover_extension,
-                details={"cover_member": cover_name, "backend": "rarfile"},
-            )
+        with _temporary_rar_cli_locale():
+            with rarfile.RarFile(local_path, "r") as archive:
+                image_names = [
+                    info.filename
+                    for info in archive.infolist()
+                    if not info.is_dir()
+                    and Path(info.filename).suffix.lower() in IMAGE_EXTENSIONS
+                ]
+                ordered_names, page_count = _ordered_image_names_and_count(image_names)
+                cover_name, cover_bytes = _pick_first_non_empty_payload(
+                    ordered_names, reader=archive.read, source_label="RAR"
+                )
+                cover_extension = Path(cover_name).suffix.lower().lstrip(".") or "jpg"
+                return ComicExtractionResult(
+                    format=fmt,
+                    page_count=page_count,
+                    cover_bytes=cover_bytes,
+                    cover_extension=cover_extension,
+                    details={"cover_member": cover_name, "backend": "rarfile"},
+                )
     except Exception as exc:
         logger.warning(
-            "rarfile extraction failed for %s: %s. Falling back to 7z CLI.",
+            "rarfile extraction failed for %s: %s. Falling back to RAR CLI tools.",
             local_path,
             exc,
         )
@@ -367,6 +375,8 @@ def _extract_from_rar(local_path: str, *, fmt: str) -> ComicExtractionResult:
 
 def _classify_rar_cli_tool(tool_path: str) -> str:
     name = Path(tool_path).name.lower()
+    if name.startswith("unar"):
+        return "unar"
     if name.startswith(("7z", "7za", "7zr")):
         return "7z"
     if "unrar" in name:
@@ -387,19 +397,21 @@ def _find_rar_cli_tools() -> list[tuple[str, str]]:
         if Path(explicit).exists():
             candidates.append(explicit)
 
-    # Prefer unrar/rar before 7z for RAR5 edge-cases where 7z reports
-    # "Unsupported Method".
-    for name in ("unrar", "rar", "7z", "7za", "7zr"):
+    # Prefer unar first for better Unicode/RAR5 handling, then unrar/rar,
+    # and only then 7z-family tools.
+    for name in ("unar", "unrar", "rar", "7z", "7za", "7zr"):
         path = shutil.which(name)
         if path:
             candidates.append(path)
 
     tools_dir = Path(settings.comic_rar_tools_dir).expanduser()
     local_candidates = [
+        tools_dir / "unar.exe",
         tools_dir / "unrar.exe",
         tools_dir / "rar.exe",
         Path(r"C:\Program Files\7-Zip\7z.exe"),
         Path(r"C:\Program Files (x86)\7-Zip\7z.exe"),
+        tools_dir / "unar",
         tools_dir / "unrar",
         tools_dir / "rar",
         tools_dir / "7z.exe",
@@ -419,10 +431,26 @@ def _find_rar_cli_tools() -> list[tuple[str, str]]:
             continue
         seen.add(candidate)
         kind = _classify_rar_cli_tool(candidate)
-        if kind in {"7z", "unrar", "rar"}:
+        if kind in {"7z", "unar", "unrar", "rar"}:
             found_tools.append((candidate, kind))
 
     return found_tools
+
+
+def _build_rar_cli_extract_command(
+    tool: str, kind: str, *, extract_dir: str, local_path: str
+) -> list[str]:
+    if kind == "7z":
+        return [tool, "x", "-y", f"-o{extract_dir}", local_path]
+    if kind == "unar":
+        return [
+            tool,
+            "-force-overwrite",
+            "-output-directory",
+            extract_dir,
+            local_path,
+        ]
+    return [tool, "x", "-y", "-o+", local_path, extract_dir]
 
 
 def _extract_from_rar_with_7z(local_path: str, *, fmt: str) -> ComicExtractionResult:
@@ -433,12 +461,18 @@ def _extract_from_rar_with_7z(local_path: str, *, fmt: str) -> ComicExtractionRe
     failures: list[str] = []
     for tool, kind in tool_order:
         with tempfile.TemporaryDirectory(prefix="comic_rar_7z_") as extract_dir:
-            if kind == "7z":
-                extract_cmd = [tool, "x", "-y", f"-o{extract_dir}", local_path]
-            else:
-                # unrar/rar syntax
-                extract_cmd = [tool, "x", "-y", "-o+", local_path, extract_dir]
-            extract_proc = subprocess.run(extract_cmd, capture_output=True, check=False)
+            extract_cmd = _build_rar_cli_extract_command(
+                tool,
+                kind,
+                extract_dir=extract_dir,
+                local_path=local_path,
+            )
+            extract_proc = subprocess.run(
+                extract_cmd,
+                capture_output=True,
+                check=False,
+                env=_rar_cli_subprocess_env(),
+            )
             stderr = extract_proc.stderr.decode("utf-8", errors="ignore").strip()
             stdout = extract_proc.stdout.decode("utf-8", errors="ignore").strip()
 
@@ -547,9 +581,44 @@ def _pick_first_non_empty_payload(
     raise ValueError(f"{source_label} extracted only empty cover files")
 
 
+def _rar_cli_locale_overrides() -> dict[str, str]:
+    return {
+        "LANG": RAR_UTF8_LOCALE,
+        "LC_ALL": RAR_UTF8_LOCALE,
+        "LC_CTYPE": RAR_UTF8_LOCALE,
+    }
+
+
+def _rar_cli_subprocess_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env.update(_rar_cli_locale_overrides())
+    return env
+
+
+@contextmanager
+def _temporary_rar_cli_locale() -> Iterator[None]:
+    overrides = _rar_cli_locale_overrides()
+    if not overrides:
+        yield
+        return
+
+    previous = {key: os.environ.get(key) for key in overrides}
+    os.environ.update(overrides)
+    try:
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
 def _is_non_comic_extraction_error(error_text: str) -> bool:
     normalized = (error_text or "").strip().lower()
     if not normalized:
+        return False
+    if any(marker in normalized for marker in RAR_BACKEND_FAILURE_MARKERS):
         return False
     return any(marker in normalized for marker in NON_COMIC_EXTRACTION_MARKERS)
 

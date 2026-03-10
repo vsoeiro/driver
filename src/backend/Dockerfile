@@ -4,7 +4,9 @@ FROM python:3.12-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
-    PYTHONPATH=/app/src
+    PYTHONPATH=/app/src \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
 
 WORKDIR /app
 ARG UV_SYNC_ARGS=""
@@ -15,6 +17,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && apt-get install -y --no-install-recommends \
         curl \
         p7zip-full \
+        unar \
         unrar-free \
     && rm -rf /var/lib/apt/lists/*
 

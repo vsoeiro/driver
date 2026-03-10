@@ -127,6 +127,7 @@ async def _refresh_index_from_provider(
 async def list_root_files(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
+    page_size: int = Query(50, ge=1, le=200),
     next_link: str | None = Query(
         None, description="Provider pagination cursor/next link"
     ),
@@ -134,7 +135,7 @@ async def list_root_files(
     """List files in the root of OneDrive."""
     if next_link:
         return await graph_client.list_items_by_next_link(account, next_link)
-    return await graph_client.list_root_items(account)
+    return await graph_client.list_root_items(account, page_size=page_size)
 
 
 @router.get(
@@ -144,6 +145,7 @@ async def list_folder_files(
     account: LinkedAccountDep,
     graph_client: DriveClientDep,
     item_id: str,
+    page_size: int = Query(50, ge=1, le=200),
     next_link: str | None = Query(
         None, description="Provider pagination cursor/next link"
     ),
@@ -151,7 +153,7 @@ async def list_folder_files(
     """List files in a specific folder."""
     if next_link:
         return await graph_client.list_items_by_next_link(account, next_link)
-    return await graph_client.list_folder_items(account, item_id)
+    return await graph_client.list_folder_items(account, item_id, page_size=page_size)
 
 
 @router.get("/{account_id}/file/{item_id}", response_model=DriveItem, tags=["Files"])

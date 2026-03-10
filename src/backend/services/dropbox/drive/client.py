@@ -241,7 +241,7 @@ class DropboxDriveClient(OAuthHTTPClientBase):
     async def get_user_info(self, account: LinkedAccount) -> dict:
         return await self._request_rpc("/users/get_current_account", account, payload={})
 
-    async def list_root_items(self, account: LinkedAccount) -> DriveListResponse:
+    async def list_root_items(self, account: LinkedAccount, page_size: int = 50) -> DriveListResponse:
         data = await self._request_rpc(
             "/files/list_folder",
             account,
@@ -250,12 +250,12 @@ class DropboxDriveClient(OAuthHTTPClientBase):
                 "recursive": False,
                 "include_deleted": False,
                 "include_non_downloadable_files": True,
-                "limit": 200,
+                "limit": max(1, min(200, int(page_size))),
             },
         )
         return self._parse_list(data, "/")
 
-    async def list_folder_items(self, account: LinkedAccount, item_id: str) -> DriveListResponse:
+    async def list_folder_items(self, account: LinkedAccount, item_id: str, page_size: int = 50) -> DriveListResponse:
         folder_path = await self._resolve_folder_path(account, item_id)
         data = await self._request_rpc(
             "/files/list_folder",
@@ -265,7 +265,7 @@ class DropboxDriveClient(OAuthHTTPClientBase):
                 "recursive": False,
                 "include_deleted": False,
                 "include_non_downloadable_files": True,
-                "limit": 200,
+                "limit": max(1, min(200, int(page_size))),
             },
         )
         return self._parse_list(data, folder_path or "/")

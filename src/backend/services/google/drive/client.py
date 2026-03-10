@@ -140,11 +140,11 @@ class GoogleDriveClient(OAuthHTTPClientBase):
         )
         return response.json().get("user", {})
 
-    async def list_root_items(self, account: LinkedAccount) -> DriveListResponse:
+    async def list_root_items(self, account: LinkedAccount, page_size: int = 50) -> DriveListResponse:
         params = {
             "q": "'root' in parents and trashed=false",
             "fields": f"nextPageToken,files({FILE_FIELDS})",
-            "pageSize": 200,
+            "pageSize": max(1, min(200, int(page_size))),
             "supportsAllDrives": "true",
             "includeItemsFromAllDrives": "true",
         }
@@ -157,12 +157,12 @@ class GoogleDriveClient(OAuthHTTPClientBase):
         return self._parse_list(response.json(), "/", params)
 
     async def list_folder_items(
-        self, account: LinkedAccount, item_id: str
+        self, account: LinkedAccount, item_id: str, page_size: int = 50
     ) -> DriveListResponse:
         params = {
             "q": f"'{item_id}' in parents and trashed=false",
             "fields": f"nextPageToken,files({FILE_FIELDS})",
-            "pageSize": 200,
+            "pageSize": max(1, min(200, int(page_size))),
             "supportsAllDrives": "true",
             "includeItemsFromAllDrives": "true",
         }

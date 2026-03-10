@@ -1,4 +1,7 @@
+import os
+import sys
 import zipfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -149,8 +152,19 @@ def test_non_comic_extraction_error_recognizes_invalid_archive_messages():
     assert comics._is_non_comic_extraction_error("unrar: no image pages (stderr=)")
 
 
+def test_non_comic_extraction_error_ignores_backend_limitations():
+    assert not comics._is_non_comic_extraction_error(
+        "unrar: no image pages (stderr=unrar-free: Pathname cannot be converted from UTF-16BE to current locale.)"
+    )
+    assert not comics._is_non_comic_extraction_error(
+        "RAR CLI extraction failed across available tools: 7z: code=2 stderr=ERROR: Unsupported Method : file.jpg"
+    )
+
+
 def test_non_comic_extraction_error_ignores_unrelated_errors():
-    assert not comics._is_non_comic_extraction_error("Network timeout while downloading source file")
+    assert not comics._is_non_comic_extraction_error(
+        "Network timeout while downloading source file"
+    )
 
 
 def test_existing_comic_mapping_skip_reason_detects_other_category():
@@ -229,3 +243,96 @@ async def test_process_files_records_skip_reason_in_error_items(monkeypatch):
         }
     ]
     session.commit.assert_awaited_once()
+
+
+def test_find_rar_cli_tools_prefers_unar(monkeypatch):
+    monkeypatch.setattr(
+        comics,
+        "get_settings",
+        lambda: SimpleNamespace(
+            comic_rar_tool_path=None,
+            comic_rar_tools_dir="missing-tools",
+        ),
+    )
+    tool_paths = {
+        "unar": "/usr/bin/unar",
+        "unrar": "/usr/bin/unrar",
+        "7z": "/usr/bin/7z",
+    }
+    monkeypatch.setattr(comics.shutil, "which", lambda name: tool_paths.get(name))
+
+    assert comics._find_rar_cli_tools()[:3] == [
+        ("/usr/bin/unar", "unar"),
+        ("/usr/bin/unrar", "unrar"),
+        ("/usr/bin/7z", "7z"),
+    ]
+
+
+def test_extract_from_rar_cli_fallback_uses_unar_and_utf8_locale(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        comics,
+        "_find_rar_cli_tools",
+        lambda: [("/usr/bin/unar", "unar")],
+    )
+
+    def fake_run(command, capture_output, check, env):
+        assert command[0] == "/usr/bin/unar"
+        assert "-force-overwrite" in command
+        output_index = command.index("-output-directory")
+        extract_dir = Path(command[output_index + 1])
+        (extract_dir / "comic-folder").mkdir(parents=True, exist_ok=True)
+        (extract_dir / "comic-folder" / "001.jpg").write_bytes(b"cover")
+        assert capture_output is True
+        assert check is False
+        assert env["LC_ALL"] == "C.UTF-8"
+        assert env["LANG"] == "C.UTF-8"
+        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(comics.subprocess, "run", fake_run)
+
+    result = comics._extract_from_rar_with_7z(str(tmp_path / "comic.cbr"), fmt="cbr")
+
+    assert result.page_count == 1
+    assert result.cover_bytes == b"cover"
+    assert result.details["cli_kind"] == "unar"
+
+
+def test_extract_from_rar_uses_utf8_locale_during_rarfile_access(monkeypatch):
+    monkeypatch.setattr(comics, "ensure_rar_backend", lambda: True)
+
+    class FakeRarInfo:
+        filename = "comic-folder/001.jpg"
+
+        @staticmethod
+        def is_dir() -> bool:
+            return False
+
+    class FakeRarFile:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            assert os.environ["LC_ALL"] == "C.UTF-8"
+            assert os.environ["LANG"] == "C.UTF-8"
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        @staticmethod
+        def infolist():
+            return [FakeRarInfo()]
+
+        @staticmethod
+        def read(_name: str) -> bytes:
+            return b"cover"
+
+    monkeypatch.setitem(sys.modules, "rarfile", SimpleNamespace(RarFile=FakeRarFile))
+    monkeypatch.delenv("LC_ALL", raising=False)
+    monkeypatch.delenv("LANG", raising=False)
+    monkeypatch.delenv("LC_CTYPE", raising=False)
+
+    result = comics._extract_from_rar("dummy.cbr", fmt="cbr")
+
+    assert result.page_count == 1
+    assert result.cover_bytes == b"cover"
