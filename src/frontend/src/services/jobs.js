@@ -43,7 +43,10 @@ export const getJobs = async (limit = 50, offset = 0, statuses = [], filters = {
     if (createdAfter) {
         params.created_after = createdAfter;
     }
-    const response = await api.get('/jobs/', { params });
+    const response = await api.get('/jobs/', {
+        params,
+        signal: options.signal,
+    });
     return response.data;
 };
 

@@ -1,7 +1,9 @@
 import api from './api';
 
-export const getCategories = async () => {
-    const response = await api.get('/metadata/categories');
+export const getCategories = async (options = {}) => {
+    const response = await api.get('/metadata/categories', {
+        signal: options.signal,
+    });
     return response.data;
 };
 
@@ -127,8 +129,10 @@ export const getSeriesSummary = async (categoryId, params = {}) => {
     return response.data;
 };
 
-export const listMetadataLibraries = async () => {
-    const response = await api.get('/metadata/libraries');
+export const listMetadataLibraries = async (options = {}) => {
+    const response = await api.get('/metadata/libraries', {
+        signal: options.signal,
+    });
     return response.data;
 };
 

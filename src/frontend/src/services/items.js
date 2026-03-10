@@ -15,7 +15,7 @@ export const itemsService = {
      * @param {number} params.size_max - Max size in bytes.
      * @param {string} params.account_id - Filter by account.
      */
-    listItems: async (params) => {
+    listItems: async (params, options = {}) => {
         const queryParams = new URLSearchParams();
 
         Object.entries(params).forEach(([key, value]) => {
@@ -30,7 +30,9 @@ export const itemsService = {
             }
         });
 
-        const response = await api.get(`/items?${queryParams.toString()}`);
+        const response = await api.get(`/items?${queryParams.toString()}`, {
+            signal: options.signal,
+        });
         return response.data;
     },
 

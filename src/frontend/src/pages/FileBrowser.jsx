@@ -1,34 +1,62 @@
-import React, { useRef, useState, useMemo, useEffect } from 'react';
+import React, { Suspense, lazy, useRef, useState, useMemo, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useDrive } from '../hooks/useDrive';
 import { useUpload } from '../hooks/useUpload';
 import { driveService } from '../services/drive';
-import { metadataService } from '../services/metadata';
+import { batchDeleteMetadata } from '../services/metadata';
 import { jobsService } from '../services/jobs';
-const { getDownloadUrl } = driveService;
-const { batchDeleteMetadata } = metadataService;
 import {
     Folder, File, Download, Trash2,
-    UploadCloud, FolderPlus, Loader2, ArrowRightLeft, Database, XCircle, CheckSquare, Square, Search, X, ChevronDown, BookOpen, RefreshCw, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, Image as ImageIcon
+    UploadCloud, FolderPlus, Loader2, ArrowRightLeft, Database, XCircle, CheckSquare, Square, Search, X, ChevronDown, BookOpen, RefreshCw, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, GripVertical, Image as ImageIcon
 } from 'lucide-react';
 import Modal from '../components/Modal';
-import MoveModal from '../components/MoveModal';
-import MetadataModal from '../components/MetadataModal';
-import BatchMetadataModal from '../components/BatchMetadataModal';
-import ImagePreviewModal from '../components/ImagePreviewModal';
 import { useToast } from '../contexts/ToastContext';
+import { useMetadataLibrariesQuery } from '../hooks/useAppQueries';
 import { isPreviewableFileName } from '../utils/imagePreview';
 import { formatDateTime } from '../utils/dateTime';
 
+const { getDownloadUrl } = driveService;
+const MetadataModal = lazy(() => import('../components/MetadataModal'));
+const BatchMetadataModal = lazy(() => import('../components/BatchMetadataModal'));
+const MoveModal = lazy(() => import('../components/MoveModal'));
+const ImagePreviewModal = lazy(() => import('../components/ImagePreviewModal'));
+let metadataModulePromise;
+let batchMetadataModulePromise;
+let moveModalModulePromise;
+let imagePreviewModulePromise;
 const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'cbw', 'pdf', 'epub', 'cbr', 'rar', 'cb7', '7z', 'cbt', 'tar']);
 const BOOK_MAPPABLE_EXTS = new Set(['pdf', 'epub']);
 const IMAGE_ANALYZABLE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'tiff', 'tif', 'heic', 'avif']);
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
+const FILE_BROWSER_COLUMNS = [
+    { id: 'name', width: 320, minWidth: 180, align: 'left' },
+    { id: 'size', width: 120, minWidth: 90, align: 'right' },
+    { id: 'modified', width: 180, minWidth: 140, align: 'right' },
+];
+const FILE_BROWSER_COLUMN_WIDTHS_STORAGE_KEY = 'driver-file-browser-column-widths-v1';
+
+function preloadMetadataModal() {
+    metadataModulePromise ||= import('../components/MetadataModal');
+}
+
+function preloadBatchMetadataModal() {
+    batchMetadataModulePromise ||= import('../components/BatchMetadataModal');
+}
+
+function preloadMoveModal() {
+    moveModalModulePromise ||= import('../components/MoveModal');
+}
+
+function preloadImagePreviewModal() {
+    imagePreviewModulePromise ||= import('../components/ImagePreviewModal');
+}
 
 export default function FileBrowser() {
     const { t, i18n } = useTranslation();
     const { showToast } = useToast();
     const { accountId, folderId } = useParams();
+    const [pageSize, setPageSize] = useState(50);
     const {
         files,
         breadcrumbs,
@@ -45,7 +73,7 @@ export default function FileBrowser() {
         goToNextPage,
         goToPrevPage,
         resetPagination,
-    } = useDrive(accountId, folderId);
+    } = useDrive(accountId, folderId, { pageSize });
     const { upload, uploading, progress: uploadProgress } = useUpload(
         accountId,
         folderId,
@@ -89,10 +117,30 @@ export default function FileBrowser() {
     const [sortBy, setSortBy] = useState('name');
     const [sortOrder, setSortOrder] = useState('asc');
     const [isNavDropActive, setIsNavDropActive] = useState(false);
-    const [isComicsLibraryActive, setIsComicsLibraryActive] = useState(false);
-    const [isImagesLibraryActive, setIsImagesLibraryActive] = useState(false);
-    const [isBooksLibraryActive, setIsBooksLibraryActive] = useState(false);
     const [imagePreviewItem, setImagePreviewItem] = useState(null);
+    const resizeStateRef = useRef(null);
+    const [columnWidths, setColumnWidths] = useState(() => {
+        const defaults = FILE_BROWSER_COLUMNS.reduce((acc, column) => ({ ...acc, [column.id]: column.width }), {});
+        if (typeof window === 'undefined') return defaults;
+        try {
+            const raw = window.localStorage.getItem(FILE_BROWSER_COLUMN_WIDTHS_STORAGE_KEY);
+            if (!raw) return defaults;
+            const parsed = JSON.parse(raw);
+            return FILE_BROWSER_COLUMNS.reduce((acc, column) => {
+                const candidate = Number(parsed?.[column.id]);
+                acc[column.id] = Number.isFinite(candidate)
+                    ? Math.max(column.minWidth, candidate)
+                    : column.width;
+                return acc;
+            }, {});
+        } catch {
+            return defaults;
+        }
+    });
+    const { data: metadataLibraries = [] } = useMetadataLibrariesQuery();
+    const isComicsLibraryActive = Boolean(metadataLibraries.find((library) => library.key === 'comics_core')?.is_active);
+    const isImagesLibraryActive = Boolean(metadataLibraries.find((library) => library.key === 'images_core')?.is_active);
+    const isBooksLibraryActive = Boolean(metadataLibraries.find((library) => library.key === 'books_core')?.is_active);
 
     // Reset selection on folder change
     React.useEffect(() => {
@@ -101,22 +149,9 @@ export default function FileBrowser() {
     }, [folderId, accountId]);
 
     useEffect(() => {
-        metadataService
-            .listMetadataLibraries()
-            .then((rows) => {
-                const comicsLibrary = (rows || []).find((library) => library.key === 'comics_core');
-                const imagesLibrary = (rows || []).find((library) => library.key === 'images_core');
-                const booksLibrary = (rows || []).find((library) => library.key === 'books_core');
-                setIsComicsLibraryActive(Boolean(comicsLibrary?.is_active));
-                setIsImagesLibraryActive(Boolean(imagesLibrary?.is_active));
-                setIsBooksLibraryActive(Boolean(booksLibrary?.is_active));
-            })
-            .catch(() => {
-                setIsComicsLibraryActive(false);
-                setIsImagesLibraryActive(false);
-                setIsBooksLibraryActive(false);
-            });
-    }, []);
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem(FILE_BROWSER_COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(columnWidths));
+    }, [columnWidths]);
 
     // Helper to format date
     const formatDate = (dateString) => {
@@ -165,6 +200,22 @@ export default function FileBrowser() {
         });
     }, [files, sortBy, sortOrder]);
 
+    const tableGridTemplate = useMemo(() => {
+        const dynamicColumns = FILE_BROWSER_COLUMNS.map(
+            (column) => `${Math.max(column.minWidth, columnWidths[column.id] ?? column.width)}px`
+        );
+        return `40px 40px ${dynamicColumns.join(' ')}`;
+    }, [columnWidths]);
+
+    const tableMinWidth = useMemo(() => {
+        const fixedWidth = 80;
+        const dynamicWidth = FILE_BROWSER_COLUMNS.reduce(
+            (sum, column) => sum + Math.max(column.minWidth, columnWidths[column.id] ?? column.width),
+            0
+        );
+        return fixedWidth + dynamicWidth;
+    }, [columnWidths]);
+
     // Selection Logic
     const toggleSelection = (id, index, multiSelect, rangeSelect) => {
         const newSelection = new Set(multiSelect ? selectedItems : []);
@@ -193,6 +244,31 @@ export default function FileBrowser() {
         } else {
             setSelectedItems(new Set(files.map(f => f.id)));
         }
+    };
+
+    const beginResize = (event, column) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const startX = event.clientX;
+        const initialWidth = Math.max(column.minWidth, columnWidths[column.id] ?? column.width);
+        resizeStateRef.current = { columnId: column.id, startX, initialWidth, minWidth: column.minWidth };
+
+        const onMouseMove = (moveEvent) => {
+            if (!resizeStateRef.current) return;
+            const nextWidth = resizeStateRef.current.initialWidth + (moveEvent.clientX - resizeStateRef.current.startX);
+            setColumnWidths((prev) => ({
+                ...prev,
+                [resizeStateRef.current.columnId]: Math.max(resizeStateRef.current.minWidth, nextWidth),
+            }));
+        };
+        const onMouseUp = () => {
+            resizeStateRef.current = null;
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', onMouseUp);
+        };
+
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
     };
 
     // Actions
@@ -437,7 +513,7 @@ export default function FileBrowser() {
             <div className="surface-card mb-4 overflow-hidden">
             <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-4 py-3">
                 <div
-                    className={`flex items-center gap-4 overflow-hidden rounded-lg border px-2 py-1.5 transition-colors ${
+                    className={`flex flex-wrap items-center gap-4 overflow-hidden rounded-lg border px-2 py-1.5 transition-colors ${
                         isNavDropActive
                             ? 'border-primary/45 bg-primary/10'
                             : 'border-transparent'
@@ -465,6 +541,21 @@ export default function FileBrowser() {
                     </span>
                     {!searchQuery && (
                         <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <label className="mr-2 inline-flex items-center gap-1">
+                                <span>{t('allFiles.resultsPerPage')}</span>
+                                <select
+                                    value={pageSize}
+                                    onChange={(event) => {
+                                        setPageSize(Number(event.target.value));
+                                        resetPagination();
+                                    }}
+                                    className="rounded-md border bg-background px-1.5 py-1 text-xs text-foreground"
+                                >
+                                    {PAGE_SIZE_OPTIONS.map((option) => (
+                                        <option key={option} value={option}>{option}</option>
+                                    ))}
+                                </select>
+                            </label>
                             <span>{t('jobs.page', { page })}</span>
                             <button
                                 onClick={goToPrevPage}
@@ -491,7 +582,7 @@ export default function FileBrowser() {
                     )}
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2">
                     <button
                         onClick={executeSync}
                         disabled={!accountId || syncing}
@@ -522,8 +613,8 @@ export default function FileBrowser() {
                 </div>
             </header>
 
-            <div className="px-4 py-2 flex items-center gap-3 text-sm">
-                <div className="flex items-center gap-2 flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-3 px-4 py-2 text-sm">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                     <div className="flex items-center w-full max-w-sm relative">
                         <Search className="absolute left-2 text-muted-foreground" size={16} />
                         <input
@@ -540,7 +631,7 @@ export default function FileBrowser() {
                             </button>
                         )}
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                         <select
                             value={sortBy}
                             onChange={(e) => setSortBy(e.target.value)}
@@ -563,7 +654,7 @@ export default function FileBrowser() {
                     </div>
                 </div>
 
-                <div className="flex items-center gap-2 ml-auto">
+                <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:ml-auto sm:w-auto sm:justify-end">
                     <div className="h-4 w-px bg-border mx-2" />
                     <span className="font-medium mr-2 whitespace-nowrap w-24 text-right tabular-nums">{t('similarFiles.selected', { count: selectedItems.size })}</span>
 
@@ -583,6 +674,7 @@ export default function FileBrowser() {
                                 showToast(t('fileBrowser.moveSingleOnly'), 'warning');
                                 return;
                             }
+                            preloadMoveModal();
                             setMoveModal({ isOpen: true });
                         }}
                         disabled={!canMoveSelected}
@@ -615,8 +707,10 @@ export default function FileBrowser() {
                                     <button
                                         onClick={() => {
                                             if (selectedItems.size === 1) {
+                                                preloadMetadataModal();
                                                 setMetadataModalOpen(true);
                                             } else if (selectedItems.size > 1) {
+                                                preloadBatchMetadataModal();
                                                 setBatchMetadataModalOpen(true);
                                             }
                                             setMetadataMenuOpen(false);
@@ -712,82 +806,107 @@ export default function FileBrowser() {
                     </div>
                 ) : (
                     <div className="surface-card overflow-hidden select-none">
-                        <div className="grid grid-cols-[40px_40px_1fr_120px_180px] gap-4 p-3 border-b border-border/70 bg-muted/45 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
-                            <div className="flex justify-center items-center">
-                                <button onClick={toggleSelectAll} className="hover:text-foreground">
-                                    {selectedItems.size === files.length && files.length > 0 ? <CheckSquare size={16} /> : <Square size={16} />}
-                                </button>
-                            </div>
-                            <div className="text-center"></div>
-                            <div>{t('fileBrowser.name')}</div>
-                            <div className="text-right">{t('similarFiles.size')}</div>
-                            <div className="text-right">{t('fileBrowser.modified')}</div>
-                        </div>
-
-                        <div className="divide-y">
-                            {sortedFiles.map((file, index) => {
-                                const isFolder = file.item_type === 'folder';
-                                const isSelected = selectedItems.has(file.id);
-                                return (
-                                    <div
-                                        key={file.id}
-                                        className={`group grid grid-cols-[40px_40px_1fr_120px_180px] gap-4 p-3 items-center hover:bg-accent/35 transition-colors ${isSelected ? 'bg-muted/45' : ''}`}
-                                        onClick={(e) => toggleSelection(file.id, index, !e.altKey, e.shiftKey)}
-                                    >
-                                        <div className="flex justify-center items-center">
-                                            <div className={`cursor-pointer ${isSelected ? 'text-primary' : 'text-muted-foreground/50'}`}>
-                                                {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
-                                            </div>
-                                        </div>
-
-                                        <div className="text-muted-foreground flex justify-center">
-                                            {isFolder ? <Folder className="text-primary fill-primary/15" size={20} /> : <File className="text-muted-foreground" size={20} />}
-                                        </div>
-
-                                        <div className="min-w-0 truncate font-medium">
-                                            {isFolder ? (
-                                                <Link
-                                                    to={`/drive/${accountId}/${file.id}`}
-                                                    className="hover:underline cursor-pointer text-foreground"
-                                                    onClick={(e) => e.stopPropagation()}
-                                                >
-                                                    {file.name}
-                                                </Link>
-                                            ) : (
-                                                isPreviewableFileName(file.name) ? (
-                                                    <button
-                                                        type="button"
-                                                        className="truncate text-left text-foreground hover:underline"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setImagePreviewItem({
-                                                                accountId,
-                                                                itemId: file.id,
-                                                                filename: file.name,
-                                                            });
-                                                        }}
-                                                        title={t('fileBrowser.previewFile')}
-                                                    >
-                                                        {file.name}
-                                                    </button>
-                                                ) : (
-                                                    <span className="text-foreground">
-                                                        {file.name}
-                                                    </span>
-                                                )
-                                            )}
-                                        </div>
-
-                                        <div className="text-right text-sm text-muted-foreground tabular-nums">
-                                            {formatSize(file.size ?? 0)}
-                                        </div>
-
-                                        <div className="text-right text-sm text-muted-foreground tabular-nums">
-                                            {formatDate(file.modified_at)}
-                                        </div>
+                        <div className="overflow-x-auto">
+                            <div style={{ minWidth: `${tableMinWidth}px` }}>
+                                <div
+                                    className="sticky top-0 z-20 grid items-center gap-4 border-b border-border/70 bg-muted/95 p-3 text-xs font-medium uppercase tracking-wider text-muted-foreground shadow-sm backdrop-blur supports-[backdrop-filter]:bg-muted/80"
+                                    style={{ display: 'grid', gridTemplateColumns: tableGridTemplate, minWidth: `${tableMinWidth}px` }}
+                                >
+                                    <div className="flex items-center justify-center">
+                                        <button onClick={toggleSelectAll} className="hover:text-foreground">
+                                            {selectedItems.size === files.length && files.length > 0 ? <CheckSquare size={16} /> : <Square size={16} />}
+                                        </button>
                                     </div>
-                                );
-                            })}
+                                    <div className="text-center" />
+                                    {FILE_BROWSER_COLUMNS.map((column) => (
+                                        <div
+                                            key={column.id}
+                                            className={`relative flex items-center gap-1 ${column.align === 'right' ? 'justify-end text-right' : ''}`}
+                                        >
+                                            <div className="pointer-events-none absolute bottom-0 right-0 top-0 w-px bg-border/80" />
+                                            <span className="inline-flex items-center gap-1">
+                                                <GripVertical size={12} className="opacity-45" />
+                                                {column.id === 'size' ? t('similarFiles.size') : t(`fileBrowser.${column.id}`)}
+                                            </span>
+                                            <div
+                                                className="absolute right-[-8px] top-0 h-full w-3 cursor-col-resize"
+                                                onMouseDown={(event) => beginResize(event, column)}
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <div className="divide-y">
+                                    {sortedFiles.map((file, index) => {
+                                        const isFolder = file.item_type === 'folder';
+                                        const isSelected = selectedItems.has(file.id);
+                                        return (
+                                            <div
+                                                key={file.id}
+                                                className={`group gap-4 p-3 items-center hover:bg-accent/35 transition-colors ${isSelected ? 'bg-muted/45' : ''}`}
+                                                style={{ display: 'grid', gridTemplateColumns: tableGridTemplate, minWidth: `${tableMinWidth}px` }}
+                                                onClick={(e) => toggleSelection(file.id, index, !e.altKey, e.shiftKey)}
+                                            >
+                                                <div className="flex items-center justify-center">
+                                                    <div className={`cursor-pointer ${isSelected ? 'text-primary' : 'text-muted-foreground/50'}`}>
+                                                        {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex justify-center text-muted-foreground">
+                                                    {isFolder ? <Folder className="text-primary fill-primary/15" size={20} /> : <File className="text-muted-foreground" size={20} />}
+                                                </div>
+
+                                                <div className="relative min-w-0 truncate font-medium">
+                                                    <div className="pointer-events-none absolute bottom-[-12px] right-[-8px] top-[-12px] w-px bg-border/50" />
+                                                    {isFolder ? (
+                                                        <Link
+                                                            to={`/drive/${accountId}/${file.id}`}
+                                                            className="cursor-pointer text-foreground hover:underline"
+                                                            onClick={(e) => e.stopPropagation()}
+                                                        >
+                                                            {file.name}
+                                                        </Link>
+                                                    ) : (
+                                                        isPreviewableFileName(file.name) ? (
+                                                            <button
+                                                                type="button"
+                                                                className="truncate text-left text-foreground hover:underline"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    preloadImagePreviewModal();
+                                                                    setImagePreviewItem({
+                                                                        accountId,
+                                                                        itemId: file.id,
+                                                                        filename: file.name,
+                                                                    });
+                                                                }}
+                                                                title={t('fileBrowser.previewFile')}
+                                                            >
+                                                                {file.name}
+                                                            </button>
+                                                        ) : (
+                                                            <span className="text-foreground">
+                                                                {file.name}
+                                                            </span>
+                                                        )
+                                                    )}
+                                                </div>
+
+                                                <div className="relative text-right text-sm tabular-nums text-muted-foreground">
+                                                    <div className="pointer-events-none absolute bottom-[-12px] right-[-8px] top-[-12px] w-px bg-border/50" />
+                                                    {formatSize(file.size ?? 0)}
+                                                </div>
+
+                                                <div className="relative text-right text-sm tabular-nums text-muted-foreground">
+                                                    <div className="pointer-events-none absolute bottom-[-12px] right-0 top-[-12px] w-px bg-border/50" />
+                                                    {formatDate(file.modified_at)}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
                         </div>
                     </div>
                 )}
@@ -861,47 +980,63 @@ export default function FileBrowser() {
                 </form>
             </Modal>
 
-            <MetadataModal
-                isOpen={metadataModalOpen}
-                onClose={() => setMetadataModalOpen(false)}
-                item={singleSelectedItem}
-                accountId={accountId}
-                onSuccess={() => {
-                    refresh();
-                }}
-            />
+            {metadataModalOpen && (
+                <Suspense fallback={null}>
+                    <MetadataModal
+                        isOpen={metadataModalOpen}
+                        onClose={() => setMetadataModalOpen(false)}
+                        item={singleSelectedItem}
+                        accountId={accountId}
+                        onSuccess={() => {
+                            void refresh();
+                        }}
+                    />
+                </Suspense>
+            )}
 
-            <BatchMetadataModal
-                isOpen={batchMetadataModalOpen}
-                onClose={() => setBatchMetadataModalOpen(false)}
-                selectedItems={selectedItemsForBatchEdit}
-                showToast={showToast}
-                onSuccess={() => {
-                    setBatchMetadataModalOpen(false);
-                    setSelectedItems(new Set());
-                    refresh();
-                }}
-            />
+            {batchMetadataModalOpen && (
+                <Suspense fallback={null}>
+                    <BatchMetadataModal
+                        isOpen={batchMetadataModalOpen}
+                        onClose={() => setBatchMetadataModalOpen(false)}
+                        selectedItems={selectedItemsForBatchEdit}
+                        showToast={showToast}
+                        onSuccess={() => {
+                            setBatchMetadataModalOpen(false);
+                            setSelectedItems(new Set());
+                            void refresh();
+                        }}
+                    />
+                </Suspense>
+            )}
 
-            <MoveModal
-                isOpen={moveModal.isOpen}
-                onClose={() => setMoveModal({ isOpen: false })}
-                item={singleSelectedItem}
-                sourceAccountId={accountId}
-                onSuccess={() => {
-                    setMoveModal({ isOpen: false });
-                    setSelectedItems(new Set());
-                    refresh();
-                }}
-            />
+            {moveModal.isOpen && (
+                <Suspense fallback={null}>
+                    <MoveModal
+                        isOpen={moveModal.isOpen}
+                        onClose={() => setMoveModal({ isOpen: false })}
+                        item={singleSelectedItem}
+                        sourceAccountId={accountId}
+                        onSuccess={() => {
+                            setMoveModal({ isOpen: false });
+                            setSelectedItems(new Set());
+                            void refresh();
+                        }}
+                    />
+                </Suspense>
+            )}
 
-            <ImagePreviewModal
-                isOpen={Boolean(imagePreviewItem)}
-                onClose={() => setImagePreviewItem(null)}
-                accountId={imagePreviewItem?.accountId}
-                itemId={imagePreviewItem?.itemId}
-                filename={imagePreviewItem?.filename}
-            />
+            {imagePreviewItem && (
+                <Suspense fallback={null}>
+                    <ImagePreviewModal
+                        isOpen={Boolean(imagePreviewItem)}
+                        onClose={() => setImagePreviewItem(null)}
+                        accountId={imagePreviewItem?.accountId}
+                        itemId={imagePreviewItem?.itemId}
+                        filename={imagePreviewItem?.filename}
+                    />
+                </Suspense>
+            )}
         </div>
     );
 }

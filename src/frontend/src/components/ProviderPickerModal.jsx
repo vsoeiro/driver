@@ -1,6 +1,7 @@
 import Modal from './Modal';
 import ProviderIcon from './ProviderIcon';
 import { useTranslation } from 'react-i18next';
+import { accountsService } from '../services/accounts';
 
 export default function ProviderPickerModal({ isOpen, onClose, onSelect }) {
     const { t } = useTranslation();
@@ -17,7 +18,14 @@ export default function ProviderPickerModal({ isOpen, onClose, onSelect }) {
                 {providers.map((provider) => (
                     <button
                         key={provider.id}
-                        onClick={() => onSelect(provider.id)}
+                        onClick={() => {
+                            onClose();
+                            if (onSelect) {
+                                onSelect(provider.id);
+                                return;
+                            }
+                            accountsService.linkAccount(provider.id);
+                        }}
                         className="w-full flex items-center gap-3 px-3 py-3 rounded-md border hover:bg-accent text-left"
                     >
                         <ProviderIcon provider={provider.id} className="w-5 h-5" />

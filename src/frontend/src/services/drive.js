@@ -8,7 +8,13 @@ export const getFiles = async (accountId, options = {}) => {
     if (options.nextLink) {
         params.next_link = options.nextLink;
     }
-    const response = await api.get(`/drive/${accountId}/files`, { params });
+    if (options.pageSize) {
+        params.page_size = options.pageSize;
+    }
+    const response = await api.get(`/drive/${accountId}/files`, {
+        params,
+        signal: options.signal,
+    });
     return response.data;
 };
 
@@ -17,15 +23,23 @@ export const getFolderFiles = async (accountId, folderId, options = {}) => {
     if (options.nextLink) {
         params.next_link = options.nextLink;
     }
-    const response = await api.get(`/drive/${accountId}/files/${folderId}`, { params });
+    if (options.pageSize) {
+        params.page_size = options.pageSize;
+    }
+    const response = await api.get(`/drive/${accountId}/files/${folderId}`, {
+        params,
+        signal: options.signal,
+    });
     return response.data;
 };
 
 /**
  * Get breadcrumb path
  */
-export const getPath = async (accountId, itemId) => {
-    const response = await api.get(`/drive/${accountId}/path/${itemId}`);
+export const getPath = async (accountId, itemId, options = {}) => {
+    const response = await api.get(`/drive/${accountId}/path/${itemId}`, {
+        signal: options.signal,
+    });
     return response.data;
 };
 
@@ -118,16 +132,20 @@ export const getDownloadContentUrl = (accountId, itemId, options = {}) => {
 /**
  * Get storage quota
  */
-export const getQuota = async (accountId) => {
-    const response = await api.get(`/drive/${accountId}/quota`);
+export const getQuota = async (accountId, options = {}) => {
+    const response = await api.get(`/drive/${accountId}/quota`, {
+        signal: options.signal,
+    });
     return response.data;
 };
 
 /**
  * Search for files
  */
-export const searchFiles = async (accountId, query) => {
-    const response = await api.get(`/drive/${accountId}/search?q=${encodeURIComponent(query)}`);
+export const searchFiles = async (accountId, query, options = {}) => {
+    const response = await api.get(`/drive/${accountId}/search?q=${encodeURIComponent(query)}`, {
+        signal: options.signal,
+    });
     return response.data;
 };
 

@@ -9,7 +9,7 @@ export default function AdminTabs() {
     ];
 
     return (
-        <div className="inline-flex rounded-md border border-border bg-muted/40 p-0.5">
+        <div className="inline-flex flex-wrap rounded-md border border-border bg-muted/40 p-0.5">
             {tabs.map((tab) => (
                 <NavLink
                     key={tab.to}

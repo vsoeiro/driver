@@ -32,7 +32,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { formatDateOnly, formatDateTime } from '../utils/dateTime';
 
-const ITEMS_PER_PAGE = 50;
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 const BASE_SORT_OPTIONS = [
     { value: 'modified_at', key: 'modified' },
     { value: 'name', key: 'name' },
@@ -84,6 +84,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
     const [seriesRows, setSeriesRows] = useState([]);
     const [loading, setLoading] = useState(true);
     const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(50);
     const [total, setTotal] = useState(0);
     const [totalPages, setTotalPages] = useState(1);
     const [sort, setSort] = useState({ by: 'modified_at', order: 'desc' });
@@ -111,6 +112,8 @@ const CategoryItemsTable = ({ category, onBack }) => {
     const [savingCellKey, setSavingCellKey] = useState(null);
     const [columnsMenuOpen, setColumnsMenuOpen] = useState(false);
     const columnsMenuRef = useRef(null);
+    const editingCellRef = useRef(null);
+    const inlineEditActionRef = useRef(null);
     const resizeStateRef = useRef(null);
     const [draggingColumnId, setDraggingColumnId] = useState(null);
     const [tableColumnOrder, setTableColumnOrder] = useState([]);
@@ -175,6 +178,10 @@ const CategoryItemsTable = ({ category, onBack }) => {
             setSort((prev) => ({ ...prev, by: 'modified_at' }));
         }
     }, [sort.by, selectedMetadataSort]);
+
+    useEffect(() => {
+        editingCellRef.current = editingCell;
+    }, [editingCell]);
 
     const CategoryFilterBar = ({ onFilter, currentFilters }) => {
         const [localFilters, setLocalFilters] = useState(currentFilters);
@@ -448,7 +455,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                 const seriesSortBy = sort.by === 'size' ? 'total_items' : 'series';
                 const data = await metadataService.getSeriesSummary(category.id, {
                     page: effectivePage,
-                    page_size: ITEMS_PER_PAGE,
+                    page_size: pageSize,
                     sort_by: seriesSortBy,
                     sort_order: sort.order,
                     q: debouncedSearchTerm,
@@ -465,7 +472,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                 const data = await itemsService.listItems({
                     ...baseParams,
                     page: effectivePage,
-                    page_size: ITEMS_PER_PAGE,
+                    page_size: pageSize,
                 });
                 setSeriesRows([]);
                 setItems(data.items);
@@ -477,7 +484,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
         } finally {
             setLoading(false);
         }
-    }, [page, sort.by, sort.order, selectedMetadataSort, category.id, supportsSeriesTracker, viewMode, debouncedSearchTerm, searchScope, filters]);
+    }, [page, pageSize, sort.by, sort.order, selectedMetadataSort, category.id, supportsSeriesTracker, viewMode, debouncedSearchTerm, searchScope, filters]);
 
     useEffect(() => {
         fetchItems();
@@ -643,6 +650,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
     const startInlineEdit = (item, attr, event) => {
         event.stopPropagation();
         if (isReadOnlyAttribute(attr)) return;
+        if (editingCellRef.current?.itemId === item.id && editingCellRef.current?.attrId === attr.id) return;
         setEditingCell({ itemId: item.id, attrId: attr.id });
         setEditingValue(getEditValue(item, attr));
     };
@@ -666,7 +674,19 @@ const CategoryItemsTable = ({ category, onBack }) => {
         return value;
     };
 
-    const saveInlineEdit = async (item, attr) => {
+    const saveInlineEdit = async (item, attr, nextValue = editingValue) => {
+        const originalValue = getEditValue(item, attr);
+        const cellMatchesCurrent = () => (
+            editingCellRef.current?.itemId === item.id && editingCellRef.current?.attrId === attr.id
+        );
+        if (String(originalValue) === String(nextValue)) {
+            if (cellMatchesCurrent()) {
+                setEditingCell(null);
+                setEditingValue('');
+            }
+            return true;
+        }
+
         const cellKey = `${item.id}:${attr.id}`;
         setSavingCellKey(cellKey);
         try {
@@ -675,7 +695,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                 item.item_id,
                 attr.id,
                 {
-                    value: toPayloadValue(attr, editingValue),
+                    value: toPayloadValue(attr, nextValue),
                     category_id: category.id,
                     expected_version: item.metadata?.version ?? null,
                 }
@@ -694,14 +714,27 @@ const CategoryItemsTable = ({ category, onBack }) => {
                     };
                 })
             );
-            setEditingCell(null);
-            setEditingValue('');
-            showToast(t('metadataManager.attributeUpdatedInline', { name: attr.name }), 'success');
+            if (cellMatchesCurrent()) {
+                setEditingCell(null);
+                setEditingValue('');
+            }
+            return true;
         } catch (error) {
             showToast(error?.response?.data?.detail || t('metadataManager.failedUpdateInline', { name: attr.name }), 'error');
+            return false;
         } finally {
-            setSavingCellKey(null);
+            setSavingCellKey((current) => (current === cellKey ? null : current));
         }
+    };
+
+    const handleInlineEditorBlur = (item, attr, value) => {
+        if (inlineEditActionRef.current === 'cancel') {
+            inlineEditActionRef.current = null;
+            cancelInlineEdit();
+            return;
+        }
+        inlineEditActionRef.current = null;
+        saveInlineEdit(item, attr, value);
     };
 
     const attributes = useMemo(
@@ -992,6 +1025,8 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                     className="w-full border rounded px-2 py-1 text-xs bg-background"
                                     value={editingValue}
                                     onChange={(e) => setEditingValue(e.target.value)}
+                                    onBlur={(e) => handleInlineEditorBlur(item, attr, e.target.value)}
+                                    autoFocus
                                 >
                                     <option value="">-</option>
                                     {getSelectOptions(attr.options).map((option) => (
@@ -1005,6 +1040,8 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                     className="w-full border rounded px-2 py-1 text-xs bg-background"
                                     value={editingValue}
                                     onChange={(e) => setEditingValue(e.target.value)}
+                                    onBlur={(e) => handleInlineEditorBlur(item, attr, e.target.value)}
+                                    autoFocus
                                 >
                                     <option value="">-</option>
                                     <option value="true">{t('common.yes')}</option>
@@ -1015,10 +1052,11 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                     type="text"
                                     value={editingValue}
                                     onChange={(e) => setEditingValue(e.target.value)}
+                                    onBlur={(e) => handleInlineEditorBlur(item, attr, e.target.value)}
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter') {
                                             e.preventDefault();
-                                            saveInlineEdit(item, attr);
+                                            saveInlineEdit(item, attr, e.currentTarget.value);
                                         }
                                         if (e.key === 'Escape') {
                                             e.preventDefault();
@@ -1034,10 +1072,11 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                     type={attr.data_type === 'number' ? 'number' : attr.data_type === 'date' ? 'date' : 'text'}
                                     value={editingValue}
                                     onChange={(e) => setEditingValue(e.target.value)}
+                                    onBlur={(e) => handleInlineEditorBlur(item, attr, e.target.value)}
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter') {
                                             e.preventDefault();
-                                            saveInlineEdit(item, attr);
+                                            saveInlineEdit(item, attr, e.currentTarget.value);
                                         }
                                         if (e.key === 'Escape') {
                                             e.preventDefault();
@@ -1051,9 +1090,13 @@ const CategoryItemsTable = ({ category, onBack }) => {
                             <button
                                 type="button"
                                 className="p-1 rounded hover:bg-accent disabled:opacity-50"
+                                onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    inlineEditActionRef.current = 'save';
+                                }}
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    saveInlineEdit(item, attr);
+                                    saveInlineEdit(item, attr, editingValue);
                                 }}
                                 disabled={isSaving}
                                 title={t('common.confirm')}
@@ -1063,6 +1106,10 @@ const CategoryItemsTable = ({ category, onBack }) => {
                             <button
                                 type="button"
                                 className="p-1 rounded hover:bg-accent disabled:opacity-50"
+                                onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    inlineEditActionRef.current = 'cancel';
+                                }}
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     cancelInlineEdit();
@@ -1193,7 +1240,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
             {/* Unified command bar */}
             <div className="surface-card relative layer-dropdown mb-4 overflow-visible">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-4 py-3">
-                <div className="flex items-center gap-3">
+                <div className="flex min-w-0 items-center gap-3">
                     <button
                         onClick={onBack}
                         className="ghost-icon-button"
@@ -1206,7 +1253,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                         <p className="text-xs text-muted-foreground">{t('allFiles.itemsCount', { count: total })}</p>
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:w-auto sm:justify-end">
                     {(supportsGallery || supportsSeriesTracker) && (
                         <div className="inline-flex items-center rounded-lg border border-border/70 overflow-hidden bg-muted/35">
                             <button
@@ -1266,12 +1313,12 @@ const CategoryItemsTable = ({ category, onBack }) => {
                     >
                         {sort.order === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
                     </button>
-                    <div className="relative">
+                    <div className="relative max-w-full">
                         <Search className="absolute left-2 top-1.5 text-muted-foreground" size={16} />
                         <input
                             type="text"
                             placeholder={searchPlaceholders[searchScope]}
-                            className="input-shell pl-8 pr-4 py-1.5 text-sm w-72"
+                            className="input-shell w-full min-w-[220px] max-w-full pl-8 pr-4 py-1.5 text-sm sm:w-72"
                             value={searchTerm}
                             onChange={(e) => {
                                 setSearchTerm(e.target.value);
@@ -1323,8 +1370,8 @@ const CategoryItemsTable = ({ category, onBack }) => {
                     )}
                 </div>
             </div>
-            <div className="px-4 py-2 flex items-center justify-between gap-2 text-sm">
-                <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-sm">
+                <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
                     <span className="font-medium mr-2 whitespace-nowrap w-24 text-right tabular-nums">{t('allFiles.selectedCount', { count: selectedItems.size })}</span>
                     <div className="h-4 w-px bg-border mx-2" />
                     <button
@@ -1409,7 +1456,22 @@ const CategoryItemsTable = ({ category, onBack }) => {
                     </button>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+                    <label className="flex items-center gap-2 text-muted-foreground">
+                        <span>{t('allFiles.resultsPerPage')}</span>
+                        <select
+                            value={pageSize}
+                            onChange={(event) => {
+                                setPageSize(Number(event.target.value));
+                                setPage(1);
+                            }}
+                            className="rounded-md border bg-background px-2 py-1 text-sm text-foreground"
+                        >
+                            {PAGE_SIZE_OPTIONS.map((option) => (
+                                <option key={option} value={option}>{option}</option>
+                            ))}
+                        </select>
+                    </label>
                     <span className="text-muted-foreground">{t('allFiles.pageOf', { page, total: totalPages })}</span>
                     <div className="flex gap-1">
                         <button
@@ -1690,7 +1752,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                 <div style={{ minWidth: `${tableMinWidth}px` }}>
                                     {/* Table Header */}
                                     <div
-                                        className="gap-4 p-3 border-b border-border/70 bg-muted/45 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center sticky top-0 z-10"
+                                        className="sticky top-0 z-20 gap-4 border-b border-border/70 bg-muted/95 p-3 text-xs font-medium uppercase tracking-wider text-muted-foreground shadow-sm backdrop-blur supports-[backdrop-filter]:bg-muted/80 items-center"
                                         style={{ display: 'grid', gridTemplateColumns: gridTemplate, minWidth: `${tableMinWidth}px` }}
                                     >
                                         <div className="flex justify-center">
@@ -1708,6 +1770,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                 onDrop={() => handleColumnDrop(column.id)}
                                                 className={`relative flex items-center gap-1 truncate ${column.align === 'right' ? 'justify-end text-right' : ''}`}
                                             >
+                                                <div className="pointer-events-none absolute bottom-0 right-0 top-0 w-px bg-border/80" />
                                                 <button
                                                     type="button"
                                                     className={`inline-flex items-center gap-1 hover:text-foreground ${column.sortKey ? '' : 'cursor-default'}`}
@@ -1750,7 +1813,8 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                         )}
                                                     </div>
                                                     {visibleTableColumns.map((column) => (
-                                                        <div key={column.id}>
+                                                        <div key={column.id} className="relative">
+                                                            <div className="pointer-events-none absolute bottom-[-12px] right-0 top-[-12px] w-px bg-border/50" />
                                                             {renderTableCell(item, column)}
                                                         </div>
                                                     ))}

@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { Bell, CheckCheck, Loader2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { settingsService } from '../services/settings';
-import { jobsService } from '../services/jobs';
+import { useJobActivity } from '../contexts/JobActivityContext';
+import { useObservabilityQuery } from '../hooks/useAppQueries';
 
 const DISMISSED_STORAGE_KEY = 'driver-notifications-dismissed-v1';
 const OPEN_POLL_INTERVAL_MS = 30000;
@@ -57,6 +56,7 @@ function relativeTime(value, t) {
 
 export default function NotificationBell() {
     const { t } = useTranslation();
+    const { jobs: recentJobs = [], refetch: refetchRecentJobs, canRefresh } = useJobActivity();
     const [open, setOpen] = useState(false);
     const [dismissedIds, setDismissedIds] = useState(() => loadDismissedIds());
     const wrapperRef = useRef(null);
@@ -72,26 +72,12 @@ export default function NotificationBell() {
         return () => document.removeEventListener('mousedown', onClickOutside);
     }, []);
 
-    const alertsQuery = useQuery({
-        queryKey: ['notifications', 'observability'],
-        queryFn: () => settingsService.getObservabilitySnapshot({ period: '24h', forceRefresh: false }),
-        refetchInterval: pollIntervalMs,
-        refetchIntervalInBackground: false,
-        staleTime: NOTIFICATIONS_STALE_MS,
-    });
-
-    const jobsQuery = useQuery({
-        queryKey: ['notifications', 'jobs'],
-        queryFn: () => {
-            const createdAfter = new Date(Date.now() - (24 * 60 * 60 * 1000)).toISOString();
-            return jobsService.getJobs(
-                40,
-                0,
-                ['COMPLETED', 'FAILED', 'DEAD_LETTER', 'CANCELLED'],
-                { createdAfter },
-                { includeEstimates: false },
-            );
-        },
+    const {
+        data: alertSnapshot,
+        isLoading: alertsLoading,
+        refetch: refetchAlerts,
+    } = useObservabilityQuery({
+        period: '24h',
         refetchInterval: pollIntervalMs,
         refetchIntervalInBackground: false,
         staleTime: NOTIFICATIONS_STALE_MS,
@@ -99,12 +85,14 @@ export default function NotificationBell() {
 
     useEffect(() => {
         if (!open) return;
-        void alertsQuery.refetch();
-        void jobsQuery.refetch();
-    }, [open]);
+        void refetchAlerts();
+        if (canRefresh) {
+            void refetchRecentJobs();
+        }
+    }, [canRefresh, open, refetchAlerts, refetchRecentJobs]);
 
     const notifications = useMemo(() => {
-        const alerts = (alertsQuery.data?.recent_alerts || []).map((alert) => ({
+        const alerts = (alertSnapshot?.recent_alerts || []).map((alert) => ({
             id: `alert:${alert.code}:${alert.created_at}`,
             kind: alert.severity === 'error' ? 'error' : alert.severity === 'warning' ? 'warning' : 'info',
             title: `${String(alert.severity || 'info').toUpperCase()} - ${alert.code}`,
@@ -112,7 +100,9 @@ export default function NotificationBell() {
             created_at: alert.created_at,
         }));
 
-        const jobs = (jobsQuery.data || []).map((job) => {
+        const jobs = recentJobs
+            .filter((job) => ['COMPLETED', 'FAILED', 'DEAD_LETTER', 'CANCELLED'].includes(String(job.status || '').toUpperCase()))
+            .map((job) => {
             const status = String(job.status || '').toUpperCase();
             const kind = status === 'FAILED' || status === 'DEAD_LETTER' ? 'error' : status === 'CANCELLED' ? 'warning' : 'info';
             const title = status === 'COMPLETED'
@@ -134,7 +124,7 @@ export default function NotificationBell() {
         return [...alerts, ...jobs]
             .sort((a, b) => asDateMs(b.created_at) - asDateMs(a.created_at))
             .slice(0, 80);
-    }, [alertsQuery.data, jobsQuery.data, t]);
+    }, [alertSnapshot?.recent_alerts, recentJobs, t]);
 
     const visibleNotifications = useMemo(
         () => notifications.filter((item) => !dismissedIds.has(item.id)),
@@ -161,7 +151,7 @@ export default function NotificationBell() {
         });
     };
 
-    const loading = alertsQuery.isLoading || jobsQuery.isLoading;
+    const loading = alertsLoading && notifications.length === 0;
 
     return (
         <div className="relative" ref={wrapperRef}>

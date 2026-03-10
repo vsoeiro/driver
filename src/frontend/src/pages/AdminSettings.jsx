@@ -130,6 +130,60 @@ export default function AdminSettings() {
         [accounts]
     );
 
+    const renderPluginGroup = (group) => (
+        <div key={group.plugin_key} className="rounded-lg border border-border/80 bg-background/80 p-4">
+            <div>
+                <h3 className="font-medium">{group.plugin_name}</h3>
+                <p className="text-sm text-muted-foreground">{group.plugin_description || t('adminSettings.metadataSettingsFallback')}</p>
+                {group.capabilities?.supported_input_types?.length > 0 && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                        {t('adminSettings.supportedFieldTypes', { types: group.capabilities.supported_input_types.join(', ') })}
+                    </p>
+                )}
+            </div>
+
+            {(group.capabilities?.actions || []).length > 0 && (
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                    {(group.capabilities.actions || []).map((action) => (
+                        <button
+                            key={`${group.plugin_key}:${action}`}
+                            type="button"
+                            onClick={() => handlePluginAction(group, action)}
+                            disabled={!!pluginActionLoading[`${group.plugin_key}:${action}`]}
+                            className="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
+                        >
+                            {pluginActionLoading[`${group.plugin_key}:${action}`]
+                                ? <Loader2 className="h-4 w-4 animate-spin" />
+                                : <RefreshCw className="h-4 w-4" />}
+                            {action === 'reindex_covers' ? t('adminSettings.reindexCovers') : action}
+                        </button>
+                    ))}
+                </div>
+            )}
+
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                {group.fields.map((field) => (
+                    <div
+                        key={`${group.plugin_key}:${field.key}`}
+                        className={field.input_type === 'folder_target' ? 'space-y-1 md:col-span-2' : 'space-y-1'}
+                    >
+                        <label className="block text-sm font-medium">{field.label}</label>
+                        <PluginField
+                            field={field}
+                            accountLabelById={accountLabelById}
+                            t={t}
+                            onChange={(fieldKey, value) => updatePluginField(group.plugin_key, fieldKey, value)}
+                            onOpenFolderPicker={(f) => openFolderPicker(group.plugin_key, f)}
+                        />
+                        {field.description && (
+                            <p className="text-xs text-muted-foreground">{field.description}</p>
+                        )}
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+
     const groups = useMemo(() => {
         const baseGroups = [
             {
@@ -156,20 +210,28 @@ export default function AdminSettings() {
                 description: t('adminSettings.interfaceDescription'),
                 type: 'interface',
             },
-            ...form.plugin_settings.map((group) => ({
-                id: `plugin:${group.plugin_key}`,
-                title: group.plugin_name,
-                description: group.plugin_description || 'Metadata library runtime settings.',
-                type: 'plugin',
-                pluginKey: group.plugin_key,
-            })),
         ];
+        if (form.plugin_settings.length > 0) {
+            baseGroups.push({
+                id: 'metadata-libraries',
+                title: t('adminSettings.metadataLibrariesTitle'),
+                description: t('adminSettings.metadataLibrariesDescription'),
+                type: 'metadata_libraries',
+                searchText: form.plugin_settings
+                    .flatMap((group) => [group.plugin_name, group.plugin_description])
+                    .filter(Boolean)
+                    .join(' '),
+            });
+        }
 
         const normalizedFilter = groupFilter.trim().toLowerCase();
         if (!normalizedFilter) return baseGroups;
         return baseGroups.filter((group) => {
-            const description = (group.description || '').toLowerCase();
-            return group.title.toLowerCase().includes(normalizedFilter) || description.includes(normalizedFilter);
+            const haystack = [group.title, group.description, group.searchText]
+                .filter(Boolean)
+                .join(' ')
+                .toLowerCase();
+            return haystack.includes(normalizedFilter);
         });
     }, [form.plugin_settings, groupFilter, t]);
 
@@ -459,65 +521,18 @@ export default function AdminSettings() {
             );
         }
 
-        const pluginKey = selectedGroup.pluginKey;
-        const group = form.plugin_settings.find((item) => item.plugin_key === pluginKey);
-        if (!group) {
-            return <p className="text-sm text-muted-foreground">{t('adminSettings.metadataGroupNotFound')}</p>;
+        if (selectedGroup.type === 'metadata_libraries') {
+            if (form.plugin_settings.length === 0) {
+                return <p className="text-sm text-muted-foreground">{t('adminSettings.metadataGroupNotFound')}</p>;
+            }
+            return (
+                <div className="space-y-4">
+                    {form.plugin_settings.map((group) => renderPluginGroup(group))}
+                </div>
+            );
         }
 
-        return (
-            <div className="space-y-4">
-                <div>
-                    <h2 className="font-medium">{group.plugin_name}</h2>
-                    <p className="text-sm text-muted-foreground">{group.plugin_description || t('adminSettings.metadataSettingsFallback')}</p>
-                    {group.capabilities?.supported_input_types?.length > 0 && (
-                        <p className="text-xs text-muted-foreground mt-1">
-                            {t('adminSettings.supportedFieldTypes', { types: group.capabilities.supported_input_types.join(', ') })}
-                        </p>
-                    )}
-                </div>
-
-                {(group.capabilities?.actions || []).length > 0 && (
-                    <div className="flex items-center gap-2">
-                        {(group.capabilities.actions || []).map((action) => (
-                            <button
-                                key={`${group.plugin_key}:${action}`}
-                                type="button"
-                                onClick={() => handlePluginAction(group, action)}
-                                disabled={!!pluginActionLoading[`${group.plugin_key}:${action}`]}
-                                className="px-3 py-1.5 rounded-md border text-sm hover:bg-accent disabled:opacity-50 inline-flex items-center gap-2"
-                            >
-                                {pluginActionLoading[`${group.plugin_key}:${action}`]
-                                    ? <Loader2 className="w-4 h-4 animate-spin" />
-                                    : <RefreshCw className="w-4 h-4" />}
-                                {action === 'reindex_covers' ? t('adminSettings.reindexCovers') : action}
-                            </button>
-                        ))}
-                    </div>
-                )}
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {group.fields.map((field) => (
-                        <div
-                            key={`${group.plugin_key}:${field.key}`}
-                            className={field.input_type === 'folder_target' ? 'md:col-span-2 space-y-1' : 'space-y-1'}
-                        >
-                            <label className="block text-sm font-medium">{field.label}</label>
-                            <PluginField
-                                field={field}
-                                accountLabelById={accountLabelById}
-                                t={t}
-                                onChange={(fieldKey, value) => updatePluginField(group.plugin_key, fieldKey, value)}
-                                onOpenFolderPicker={(f) => openFolderPicker(group.plugin_key, f)}
-                            />
-                            {field.description && (
-                                <p className="text-xs text-muted-foreground">{field.description}</p>
-                            )}
-                        </div>
-                    ))}
-                </div>
-            </div>
-        );
+        return <p className="text-sm text-muted-foreground">{t('adminSettings.noGroupFound')}</p>;
     };
 
     return (
@@ -534,8 +549,8 @@ export default function AdminSettings() {
                     <Loader2 className="animate-spin text-primary" size={30} />
                 </div>
             ) : (
-                <form onSubmit={handleSave} className="flex-1 min-h-0 flex gap-3">
-                    <aside className="surface-card w-64 p-2 space-y-2 overflow-auto">
+                <form onSubmit={handleSave} className="flex flex-1 min-h-0 flex-col gap-3 xl:flex-row">
+                    <aside className="surface-card w-full space-y-2 overflow-auto p-2 xl:w-64 xl:shrink-0">
                         <div className="relative">
                             <Search className="w-4 h-4 absolute left-2 top-2.5 text-muted-foreground" />
                             <input
@@ -568,8 +583,8 @@ export default function AdminSettings() {
                         </div>
                     </aside>
 
-                    <section className="surface-card flex-1 min-h-0 overflow-auto p-4 space-y-4">
-                        <div className="flex items-center justify-between gap-3 border-b border-border/70 pb-3">
+                    <section className="surface-card flex-1 min-h-0 min-w-0 overflow-auto p-4 space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 pb-3">
                             <div>
                                 <h2 className="text-sm font-semibold">{selectedGroup?.title || t('adminSettings.settingsGroup')}</h2>
                                 <p className="text-xs text-muted-foreground">{selectedGroup?.description || t('adminSettings.selectGroup')}</p>

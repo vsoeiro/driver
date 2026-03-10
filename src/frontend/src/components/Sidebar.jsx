@@ -1,6 +1,5 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
     Cloud,
@@ -12,12 +11,9 @@ import {
     Gauge,
     Bot,
     Settings,
+    X,
 } from 'lucide-react';
-import { accountsService } from '../services/accounts';
-import { driveService } from '../services/drive';
-
-const { getAccounts } = accountsService;
-const { getQuota } = driveService;
+import { useAccountsQuery, useQuotaQuery } from '../hooks/useAppQueries';
 
 function formatSize(bytes) {
     if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
@@ -27,47 +23,10 @@ function formatSize(bytes) {
     return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
 }
 
-export default function Sidebar() {
-    const { t } = useTranslation();
-    const location = useLocation();
-    const showQuotaCard = location.pathname === '/accounts' || location.pathname.startsWith('/drive/');
-
-    const { data: accounts = [] } = useQuery({
-        queryKey: ['accounts'],
-        queryFn: getAccounts,
-        staleTime: 60000,
-    });
-
-    const selectedAccountId = useMemo(() => {
-        const match = location.pathname.match(/^\/drive\/([^/]+)/);
-        if (match?.[1]) return match[1];
-        return accounts[0]?.id || '';
-    }, [accounts, location.pathname]);
-
-    const { data: quota, isLoading: isQuotaLoading, isError: isQuotaError } = useQuery({
-        queryKey: ['quota', selectedAccountId],
-        queryFn: () => getQuota(selectedAccountId),
-        enabled: showQuotaCard && !!selectedAccountId,
-        staleTime: 45000,
-    });
-
-    const used = Number(quota?.used || 0);
-    const total = Number(quota?.total || 0);
-    const usedPercent = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0;
-
-    const quickLinks = [
-        { to: '/accounts', label: t('sidebar.accounts'), icon: HardDrive },
-        { to: '/all-files', label: t('sidebar.files'), icon: FileText },
-        { to: '/metadata', label: t('sidebar.metadata'), icon: Database },
-        { to: '/rules', label: t('sidebar.rules'), icon: Wand2 },
-        { to: '/jobs', label: t('sidebar.jobs'), icon: Activity },
-        { to: '/ai', label: t('sidebar.aiExperimental'), icon: Bot },
-        { to: '/admin/dashboard', label: t('sidebar.admin'), icon: Settings },
-    ];
-
+function SidebarBody({ location, quickLinks, showQuotaCard, usedPercent, used, total, isQuotaLoading, isQuotaError, onNavigate, t }) {
     return (
-        <aside className="sticky top-0 flex h-full w-56 shrink-0 flex-col border-r border-border bg-card xl:w-60">
-            <div className="flex h-14 items-center border-b border-border px-3">
+        <>
+            <div className="flex h-14 items-center justify-between border-b border-border px-3">
                 <div className="inline-flex min-w-0 items-center gap-3">
                     <div className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
                         <Cloud size={16} />
@@ -76,9 +35,19 @@ export default function Sidebar() {
                         <div className="text-sm font-semibold">{t('sidebar.product')}</div>
                     </div>
                 </div>
+                {onNavigate && (
+                    <button
+                        type="button"
+                        onClick={onNavigate}
+                        className="btn-minimal px-2 py-2 lg:hidden"
+                        aria-label={t('common.close')}
+                    >
+                        <X size={16} />
+                    </button>
+                )}
             </div>
 
-            <div className="flex-1 min-h-0 flex flex-col px-2 py-3">
+            <div className="flex min-h-0 flex-1 flex-col px-2 py-3">
                 <div className="mb-2 px-2 py-1.5 text-xs font-semibold tracking-wide text-muted-foreground">
                     {t('sidebar.navigation')}
                 </div>
@@ -88,6 +57,7 @@ export default function Sidebar() {
                             key={to}
                             to={to}
                             title={label}
+                            onClick={onNavigate || undefined}
                             className={({ isActive }) => {
                                 const activeByDrive = to === '/accounts' && location.pathname.startsWith('/drive/');
                                 const isLinkActive = isActive || activeByDrive;
@@ -102,7 +72,7 @@ export default function Sidebar() {
                             }}
                         >
                             <Icon size={15} className="shrink-0" />
-                            <span>{label}</span>
+                            <span className="truncate">{label}</span>
                         </NavLink>
                     ))}
                 </nav>
@@ -135,6 +105,84 @@ export default function Sidebar() {
                     </div>
                 )}
             </div>
-        </aside>
+        </>
+    );
+}
+
+export default function Sidebar({ mobileOpen = false, onNavigate = null }) {
+    const { t } = useTranslation();
+    const location = useLocation();
+    const showQuotaCard = location.pathname === '/accounts' || location.pathname.startsWith('/drive/');
+
+    const { data: accounts = [] } = useAccountsQuery();
+
+    const selectedAccountId = useMemo(() => {
+        const match = location.pathname.match(/^\/drive\/([^/]+)/);
+        if (match?.[1]) return match[1];
+        return accounts[0]?.id || '';
+    }, [accounts, location.pathname]);
+
+    const { data: quota, isLoading: isQuotaLoading, isError: isQuotaError } = useQuotaQuery(selectedAccountId, {
+        enabled: showQuotaCard && !!selectedAccountId,
+    });
+
+    const used = Number(quota?.used || 0);
+    const total = Number(quota?.total || 0);
+    const usedPercent = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0;
+
+    const quickLinks = [
+        { to: '/accounts', label: t('sidebar.accounts'), icon: HardDrive },
+        { to: '/all-files', label: t('sidebar.files'), icon: FileText },
+        { to: '/metadata', label: t('sidebar.metadata'), icon: Database },
+        { to: '/rules', label: t('sidebar.rules'), icon: Wand2 },
+        { to: '/jobs', label: t('sidebar.jobs'), icon: Activity },
+        { to: '/ai', label: t('sidebar.aiExperimental'), icon: Bot },
+        { to: '/admin/dashboard', label: t('sidebar.admin'), icon: Settings },
+    ];
+
+    return (
+        <>
+            <aside className="sticky top-0 hidden h-full w-56 shrink-0 flex-col border-r border-border bg-card lg:flex xl:w-60">
+                <SidebarBody
+                    location={location}
+                    quickLinks={quickLinks}
+                    showQuotaCard={showQuotaCard}
+                    usedPercent={usedPercent}
+                    used={used}
+                    total={total}
+                    isQuotaLoading={isQuotaLoading}
+                    isQuotaError={isQuotaError}
+                    onNavigate={null}
+                    t={t}
+                />
+            </aside>
+
+            <div
+                className={`layer-overlay fixed inset-0 bg-slate-900/35 transition-opacity duration-200 lg:hidden ${
+                    mobileOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
+                }`}
+                onClick={onNavigate || undefined}
+                aria-hidden={!mobileOpen}
+            />
+            <aside
+                className={`layer-overlay fixed inset-y-0 left-0 z-[330] flex w-[min(18rem,calc(100vw-1.5rem))] flex-col border-r border-border bg-card shadow-xl transition-transform duration-200 lg:hidden ${
+                    mobileOpen ? 'translate-x-0' : '-translate-x-full'
+                }`}
+                aria-hidden={!mobileOpen}
+            >
+                <SidebarBody
+                    location={location}
+                    quickLinks={quickLinks}
+                    showQuotaCard={showQuotaCard}
+                    usedPercent={usedPercent}
+                    used={used}
+                    total={total}
+                    isQuotaLoading={isQuotaLoading}
+                    isQuotaError={isQuotaError}
+                    onNavigate={onNavigate}
+                    t={t}
+                />
+            </aside>
+        </>
     );
 }

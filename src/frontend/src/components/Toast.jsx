@@ -19,6 +19,9 @@ function formatToastMessage(message) {
     }
 
     if (typeof message === 'object') {
+        if (message.props?.children !== undefined) {
+            return formatToastMessage(message.props.children);
+        }
         if (Array.isArray(message.detail)) {
             return formatToastMessage(message.detail);
         }

@@ -3,7 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Layout from './components/Layout';
 import { ToastProvider } from './contexts/ToastContext';
-import JobStatusNotifier from './components/JobStatusNotifier';
+import { JobActivityProvider } from './contexts/JobActivityContext';
 
 const FileBrowser = lazy(() => import('./pages/FileBrowser'));
 const AllFiles = lazy(() => import('./pages/AllFiles'));
@@ -20,27 +20,28 @@ function App() {
 
     return (
         <ToastProvider>
-            <JobStatusNotifier />
-            <div className="min-h-screen text-foreground font-sans antialiased">
-                <Suspense fallback={<div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">{t('app.loadingWorkspace')}</div>}>
-                    <Routes>
-                        <Route element={<Layout />}>
-                            <Route path="/" element={<Navigate to="/accounts" replace />} />
-                            <Route path="/accounts" element={<AccountsRedirect />} />
-                            <Route path="/drive/:accountId" element={<FileBrowser />} />
-                            <Route path="/drive/:accountId/:folderId" element={<FileBrowser />} />
-                            <Route path="/all-files" element={<AllFiles />} />
-                            <Route path="/jobs" element={<Jobs />} />
-                            <Route path="/ai" element={<AIAssistant />} />
-                            <Route path="/metadata" element={<MetadataManager />} />
-                            <Route path="/rules" element={<RulesManager />} />
-                            <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
-                            <Route path="/admin/dashboard" element={<AdminDashboard />} />
-                            <Route path="/admin/settings" element={<AdminSettings />} />
-                        </Route>
-                    </Routes>
-                </Suspense>
-            </div>
+            <JobActivityProvider>
+                <div className="min-h-screen text-foreground font-sans antialiased">
+                    <Suspense fallback={<div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">{t('app.loadingWorkspace')}</div>}>
+                        <Routes>
+                            <Route element={<Layout />}>
+                                <Route path="/" element={<Navigate to="/accounts" replace />} />
+                                <Route path="/accounts" element={<AccountsRedirect />} />
+                                <Route path="/drive/:accountId" element={<FileBrowser />} />
+                                <Route path="/drive/:accountId/:folderId" element={<FileBrowser />} />
+                                <Route path="/all-files" element={<AllFiles />} />
+                                <Route path="/jobs" element={<Jobs />} />
+                                <Route path="/ai" element={<AIAssistant />} />
+                                <Route path="/metadata" element={<MetadataManager />} />
+                                <Route path="/rules" element={<RulesManager />} />
+                                <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
+                                <Route path="/admin/dashboard" element={<AdminDashboard />} />
+                                <Route path="/admin/settings" element={<AdminSettings />} />
+                            </Route>
+                        </Routes>
+                    </Suspense>
+                </div>
+            </JobActivityProvider>
         </ToastProvider>
     );
 }

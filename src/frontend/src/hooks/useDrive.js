@@ -1,82 +1,79 @@
-import { useState, useEffect, useCallback } from 'react';
-import { getFiles, getFolderFiles, getPath, deleteItem, batchDeleteItems, createFolder, searchFiles } from '../services/drive';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { batchDeleteItems, createFolder, deleteItem } from '../services/drive';
+import { queryKeys } from '../lib/queryKeys';
+import { useDriveBreadcrumbQuery, useDriveListingQuery } from './useAppQueries';
 
-export function useDrive(accountId, folderId) {
-    const [files, setFiles] = useState([]);
-    const [breadcrumbs, setBreadcrumbs] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState(null);
-
+export function useDrive(accountId, folderId, options = {}) {
+    const queryClient = useQueryClient();
     const [searchQuery, setSearchQuery] = useState('');
     const [currentCursor, setCurrentCursor] = useState(null);
     const [cursorHistory, setCursorHistory] = useState([]);
-    const [nextCursor, setNextCursor] = useState(null);
+    const pageSize = Number.isFinite(Number(options.pageSize)) ? Math.max(1, Math.floor(Number(options.pageSize))) : 50;
 
     // Reset search on navigation
     useEffect(() => {
         setSearchQuery('');
         setCurrentCursor(null);
         setCursorHistory([]);
-        setNextCursor(null);
-    }, [folderId, accountId]);
+    }, [folderId, accountId, pageSize]);
 
-    const fetchFiles = useCallback(async () => {
-        if (!accountId) return;
-        setLoading(true);
-        setError(null);
-        try {
-            let data;
-            if (searchQuery) {
-                data = await searchFiles(accountId, searchQuery);
-                setFiles(data.items || []);
-                setBreadcrumbs([{ id: 'search', name: `Search results: ${searchQuery}` }]);
-                setCurrentCursor(null);
-                setCursorHistory([]);
-                setNextCursor(null);
-            } else if (folderId) {
-                data = await getFolderFiles(accountId, folderId, { nextLink: currentCursor });
-                setFiles(data.items || []);
-                setNextCursor(data.next_link || null);
-                try {
-                    const pathData = await getPath(accountId, folderId);
-                    const cleanPath = (pathData.breadcrumb || []).filter(b => b.name.toLowerCase() !== 'root');
-                    setBreadcrumbs(cleanPath);
-                } catch (e) {
-                    console.warn("Failed to fetch path", e);
-                    setBreadcrumbs([]);
-                }
-            } else {
-                data = await getFiles(accountId, { nextLink: currentCursor });
-                setFiles(data.items || []);
-                setBreadcrumbs([]);
-                setNextCursor(data.next_link || null);
-            }
-        } catch (err) {
-            console.error(err);
-            setError(err.message || 'Failed to load files');
-        } finally {
-            setLoading(false);
+    const listQueryParams = useMemo(
+        () => ({
+            accountId,
+            folderId,
+            searchQuery,
+            cursor: currentCursor,
+            pageSize,
+        }),
+        [accountId, currentCursor, folderId, pageSize, searchQuery],
+    );
+
+    const filesQuery = useDriveListingQuery(listQueryParams, {
+        staleTime: 30000,
+    });
+
+    const breadcrumbQuery = useDriveBreadcrumbQuery(accountId, folderId, {
+        enabled: Boolean(accountId && folderId && !searchQuery),
+    });
+
+    const files = filesQuery.data?.items || [];
+    const nextCursor = searchQuery ? null : filesQuery.data?.next_link || null;
+    const loading = filesQuery.isPending && !filesQuery.data;
+    const error = filesQuery.error?.message || null;
+    const breadcrumbs = useMemo(() => {
+        if (searchQuery) {
+            return [{ id: 'search', name: `Search results: ${searchQuery}` }];
         }
-    }, [accountId, folderId, searchQuery, currentCursor]);
+        if (!folderId) {
+            return [];
+        }
+        return (breadcrumbQuery.data?.breadcrumb || []).filter((item) => item.name.toLowerCase() !== 'root');
+    }, [breadcrumbQuery.data?.breadcrumb, folderId, searchQuery]);
 
-    useEffect(() => {
-        fetchFiles();
-    }, [fetchFiles]);
+    const refresh = useCallback(async () => {
+        if (!accountId) return;
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: queryKeys.drive.list(listQueryParams) }),
+            folderId
+                ? queryClient.invalidateQueries({ queryKey: queryKeys.drive.breadcrumb(accountId, folderId) })
+                : Promise.resolve(),
+        ]);
+    }, [accountId, folderId, listQueryParams, queryClient]);
 
     const handleDelete = async (itemId) => {
         await deleteItem(accountId, itemId);
-        fetchFiles();
+        await refresh();
     };
 
     const handleBatchDelete = async (itemIds) => {
-        // If single item, fallback to simple delete? No, batch endpoint handles list.
         await batchDeleteItems(accountId, Array.from(itemIds));
-        fetchFiles();
+        await refresh();
     };
 
     const handleCreateFolder = async (name) => {
         await createFolder(accountId, folderId || 'root', name);
-        fetchFiles();
+        await refresh();
     };
 
     const canNextPage = !searchQuery && !!nextCursor;
@@ -99,7 +96,6 @@ export function useDrive(accountId, folderId) {
     const resetPagination = () => {
         setCurrentCursor(null);
         setCursorHistory([]);
-        setNextCursor(null);
     };
 
     return {
@@ -107,7 +103,7 @@ export function useDrive(accountId, folderId) {
         breadcrumbs,
         loading,
         error,
-        refresh: fetchFiles,
+        refresh,
         handleDelete,
         handleBatchDelete,
         handleCreateFolder,

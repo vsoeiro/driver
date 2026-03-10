@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { Loader2, RefreshCw, RotateCcw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { settingsService } from '../services/settings';
 import { jobsService } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
 import AdminTabs from '../components/AdminTabs';
-import { usePolling } from '../hooks/usePolling';
+import { useObservabilityQuery } from '../hooks/useAppQueries';
+import { queryKeys } from '../lib/queryKeys';
 import { formatDateTime } from '../utils/dateTime';
 
 function PercentRing({ value }) {
@@ -67,10 +68,10 @@ export default function AdminDashboard() {
         [period, PERIOD_OPTIONS],
     );
 
-    const { data: snapshot, isLoading: loading, error, refetch } = useQuery({
-        queryKey: ['observability', period],
-        queryFn: () => settingsService.getObservabilitySnapshot({ period, forceRefresh: false }),
-        staleTime: 15000,
+    const { data: snapshot, isLoading: loading, error } = useObservabilityQuery({
+        period,
+        refetchInterval: 60000,
+        refetchIntervalInBackground: false,
     });
 
     useEffect(() => {
@@ -87,7 +88,7 @@ export default function AdminDashboard() {
                 period,
                 forceRefresh,
             });
-            queryClient.setQueryData(['observability', period], data);
+            queryClient.setQueryData(queryKeys.observability.detail(period), data);
         } catch (error) {
             const message = error?.response?.data?.detail || t('adminDashboard.failedLoad');
             showToast(message, 'error');
@@ -95,14 +96,6 @@ export default function AdminDashboard() {
             setRefreshing(false);
         }
     }, [period, queryClient, showToast, t]);
-
-    usePolling({
-        callback: () => refetch(),
-        intervalMs: 60000,
-        enabled: true,
-        pauseWhenHidden: true,
-        runImmediately: false,
-    });
 
     const windowLabel = useMemo(
         () => snapshot?.period_label || selectedPeriodLabel,

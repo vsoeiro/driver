@@ -3,8 +3,10 @@ import api from './api';
 /**
  * Get all linked accounts
  */
-export const getAccounts = async () => {
-    const response = await api.get('/accounts');
+export const getAccounts = async (options = {}) => {
+    const response = await api.get('/accounts', {
+        signal: options.signal,
+    });
     return response.data.accounts;
 };
 

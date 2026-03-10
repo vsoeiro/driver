@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import Modal from './Modal';
 import { metadataService } from '../services/metadata';
@@ -67,6 +67,28 @@ function getLayoutItemType(item) {
     return 'attribute';
 }
 
+function normalizeMetadataSignatureValue(value) {
+    if (Array.isArray(value)) {
+        return value.map((entry) => normalizeMetadataSignatureValue(entry));
+    }
+    if (value && typeof value === 'object') {
+        return Object.keys(value)
+            .sort()
+            .reduce((acc, key) => {
+                acc[key] = normalizeMetadataSignatureValue(value[key]);
+                return acc;
+            }, {});
+    }
+    return value ?? null;
+}
+
+function buildMetadataSignature(categoryId, values) {
+    return JSON.stringify({
+        categoryId: categoryId || '',
+        values: normalizeMetadataSignatureValue(values || {}),
+    });
+}
+
 export default function MetadataModal({
     isOpen,
     onClose,
@@ -98,6 +120,7 @@ export default function MetadataModal({
     // Form State
     const [selectedCategoryId, setSelectedCategoryId] = useState('');
     const [formValues, setFormValues] = useState({});
+    const [initialMetadataSignature, setInitialMetadataSignature] = useState(buildMetadataSignature('', {}));
     const providerItemId = item?.item_id || item?.id;
 
     const loadData = useCallback(async () => {
@@ -135,9 +158,11 @@ export default function MetadataModal({
             if (meta) {
                 setSelectedCategoryId(meta.category_id);
                 setFormValues(meta.values || {});
+                setInitialMetadataSignature(buildMetadataSignature(meta.category_id, meta.values || {}));
             } else {
                 setSelectedCategoryId('');
                 setFormValues({});
+                setInitialMetadataSignature(buildMetadataSignature('', {}));
             }
             const historyData = await metadataService.getItemMetadataHistory(accountId, providerItemId);
             setHistory(historyData || []);
@@ -157,6 +182,7 @@ export default function MetadataModal({
             // Reset state
             setSelectedCategoryId('');
             setFormValues({});
+            setInitialMetadataSignature(buildMetadataSignature('', {}));
             setHistory([]);
             setLayoutMap({});
             setTagInputDrafts({});
@@ -187,14 +213,31 @@ export default function MetadataModal({
         return () => window.removeEventListener('keydown', onKeyDown);
     }, [isCoverZoomOpen]);
 
-    const handleSave = async (e) => {
-        e.preventDefault();
+    const handleInputChange = (attributeId, value) => {
+        setFormValues(prev => ({
+            ...prev,
+            [attributeId]: value
+        }));
+    };
+
+    const currentMetadataSignature = useMemo(
+        () => buildMetadataSignature(selectedCategoryId, formValues),
+        [selectedCategoryId, formValues],
+    );
+    const hasUnsavedChanges = currentMetadataSignature !== initialMetadataSignature;
+
+    const persistMetadata = useCallback(async ({ silentSuccess = false } = {}) => {
+        if (!hasUnsavedChanges) return true;
+        if (!selectedCategoryId) {
+            showToast(t('metadataModal.selectCategory'), 'error');
+            return false;
+        }
+
         try {
             setSaving(true);
 
-            // Validate required fields
-            const category = categories.find(c => c.id === selectedCategoryId);
-            if (!category) return;
+            const category = categories.find((candidate) => candidate.id === selectedCategoryId);
+            if (!category) return false;
 
             const missingRequired = category.attributes
                 .filter((attr) => {
@@ -207,24 +250,14 @@ export default function MetadataModal({
                 });
 
             if (missingRequired.length > 0) {
-                showToast(t('metadataModal.missingRequired', { fields: missingRequired.map(a => a.name).join(', ') }), 'error');
-                setSaving(false);
-                return;
+                showToast(t('metadataModal.missingRequired', { fields: missingRequired.map((a) => a.name).join(', ') }), 'error');
+                return false;
             }
 
-            // Check if folder -> Bulk Update
             if (item.item_type === 'folder') {
-                // Prepare metadata map: { "Attribute Name": "Value" }
-                // The backend job expects attribute names, not IDs, because it resolves them recursively 
-                // (or strictly speaking, the handler implementation maps input keys to attribute IDs).
-                // Wait, my backend implementation:
-                // `attr_map = {attr.name: attr.id for attr in attributes}`
-                // `if key in attr_map`
-                // So yes, I need to send Attribute Names as keys.
-
                 const metadata = {};
                 Object.entries(formValues).forEach(([attrId, value]) => {
-                    const attr = category.attributes.find(a => a.id === attrId);
+                    const attr = category.attributes.find((attribute) => attribute.id === attrId);
                     if (attr) {
                         metadata[attr.name] = value;
                     }
@@ -236,7 +269,9 @@ export default function MetadataModal({
                     metadata,
                     category.name
                 );
-                showToast(t('metadataModal.bulkStarted'), 'success');
+                if (!silentSuccess) {
+                    showToast(t('metadataModal.bulkStarted'), 'success');
+                }
             } else {
                 await metadataService.saveItemMetadata({
                     account_id: accountId,
@@ -244,25 +279,48 @@ export default function MetadataModal({
                     category_id: selectedCategoryId,
                     values: formValues,
                 });
-                showToast(t('metadataModal.saved'), 'success');
+                if (!silentSuccess) {
+                    showToast(t('metadataModal.saved'), 'success');
+                }
             }
 
+            setInitialMetadataSignature(currentMetadataSignature);
             if (onSuccess) onSuccess();
-            await loadData();
-            onClose();
+            return true;
         } catch (error) {
             console.error(error);
             showToast(t('metadataModal.failedSave'), 'error');
+            return false;
         } finally {
             setSaving(false);
         }
+    }, [
+        accountId,
+        categories,
+        currentMetadataSignature,
+        formValues,
+        hasUnsavedChanges,
+        item,
+        onSuccess,
+        providerItemId,
+        selectedCategoryId,
+        showToast,
+        t,
+    ]);
+
+    const handleSave = async (e) => {
+        e.preventDefault();
+        const saved = await persistMetadata();
+        if (!saved) return;
+        onClose();
     };
 
-    const handleInputChange = (attributeId, value) => {
-        setFormValues(prev => ({
-            ...prev,
-            [attributeId]: value
-        }));
+    const handleNavigate = async (navigate) => {
+        if (!navigate || saving) return;
+        const saved = await persistMetadata({ silentSuccess: true });
+        if (saved) {
+            navigate();
+        }
     };
 
     const selectedCategory = categories.find(c => c.id === selectedCategoryId);
@@ -558,7 +616,7 @@ export default function MetadataModal({
                         <div className="mb-3 flex items-center justify-end gap-2">
                             <button
                                 type="button"
-                                onClick={onPrevious}
+                                onClick={() => handleNavigate(onPrevious)}
                                 disabled={!hasPrevious || saving}
                                 className="inline-flex items-center gap-1 rounded-md border border-border/70 px-2.5 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-50"
                             >
@@ -567,7 +625,7 @@ export default function MetadataModal({
                             </button>
                             <button
                                 type="button"
-                                onClick={onNext}
+                                onClick={() => handleNavigate(onNext)}
                                 disabled={!hasNext || saving}
                                 className="inline-flex items-center gap-1 rounded-md border border-border/70 px-2.5 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-50"
                             >
@@ -769,7 +827,7 @@ export default function MetadataModal({
                                 </button>
                                 <button
                                     type="submit"
-                                    disabled={!selectedCategoryId || saving}
+                                    disabled={!selectedCategoryId || saving || !hasUnsavedChanges}
                                     className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
                                 >
                                     {saving && <Loader2 className="animate-spin" size={14} />}

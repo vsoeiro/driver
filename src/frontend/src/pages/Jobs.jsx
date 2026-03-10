@@ -1,12 +1,12 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { RefreshCw, CheckCircle, XCircle, Clock, PlayCircle, Eye, AlertTriangle, Undo2, Trash2, Square, RotateCcw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { RefreshCw, CheckCircle, XCircle, Clock, PlayCircle, Eye, AlertTriangle, Undo2, Trash2, Square, RotateCcw, ChevronLeft, ChevronRight, GripVertical } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cancelJob, createMetadataUndoJob, deleteJob, getJobAttempts, getJobs, reprocessJob } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
 import Modal from '../components/Modal';
 import { formatJobStatus, formatJobType } from '../utils/jobLabels';
-import { usePolling } from '../hooks/usePolling';
+import { queryKeys } from '../lib/queryKeys';
 import { formatDateTime } from '../utils/dateTime';
 
 const DATE_RANGE_MS = {
@@ -17,10 +17,25 @@ const DATE_RANGE_MS = {
     '90d': 90 * 24 * 60 * 60 * 1000,
 };
 const LIVE_JOB_STATUSES = new Set(['PENDING', 'RUNNING', 'RETRY_SCHEDULED', 'CANCEL_REQUESTED']);
+const JOB_TABLE_COLUMNS = [
+    { id: 'status', width: 104, minWidth: 96, align: 'left' },
+    { id: 'jobId', width: 96, minWidth: 90, align: 'left' },
+    { id: 'type', width: 280, minWidth: 220, align: 'left' },
+    { id: 'created', width: 116, minWidth: 110, align: 'right' },
+    { id: 'started', width: 116, minWidth: 110, align: 'right' },
+    { id: 'finished', width: 116, minWidth: 110, align: 'right' },
+    { id: 'duration', width: 82, minWidth: 80, align: 'right' },
+    { id: 'eta', width: 112, minWidth: 104, align: 'left' },
+    { id: 'progress', width: 320, minWidth: 240, align: 'left' },
+    { id: 'actions', width: 106, minWidth: 88, align: 'center' },
+];
+const JOB_TABLE_COLUMN_WIDTHS_STORAGE_KEY = 'driver-jobs-table-widths-v1';
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 
 export default function Jobs() {
     const { t, i18n } = useTranslation();
     const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(50);
     const [selectedJob, setSelectedJob] = useState(null);
     const [undoingBatchId, setUndoingBatchId] = useState(null);
     const [deletingJobId, setDeletingJobId] = useState(null);
@@ -34,10 +49,27 @@ export default function Jobs() {
     const [selectedJobIds, setSelectedJobIds] = useState(new Set());
     const [bulkCancelling, setBulkCancelling] = useState(false);
     const [bulkDeleting, setBulkDeleting] = useState(false);
+    const resizeStateRef = useRef(null);
+    const [columnWidths, setColumnWidths] = useState(() => {
+        const defaults = JOB_TABLE_COLUMNS.reduce((acc, column) => ({ ...acc, [column.id]: column.width }), {});
+        if (typeof window === 'undefined') return defaults;
+        try {
+            const raw = window.localStorage.getItem(JOB_TABLE_COLUMN_WIDTHS_STORAGE_KEY);
+            if (!raw) return defaults;
+            const parsed = JSON.parse(raw);
+            return JOB_TABLE_COLUMNS.reduce((acc, column) => {
+                const candidate = Number(parsed?.[column.id]);
+                acc[column.id] = Number.isFinite(candidate)
+                    ? Math.max(column.minWidth, candidate)
+                    : column.width;
+                return acc;
+            }, {});
+        } catch {
+            return defaults;
+        }
+    });
     const { showToast } = useToast();
     const queryClient = useQueryClient();
-    const PAGE_SIZE = 20;
-
     const DATE_RANGE_OPTIONS = [
         { value: 'ALL', label: t('jobs.allTime') },
         { value: '24h', label: t('adminDashboard.last24h'), hours: 24 },
@@ -64,10 +96,21 @@ export default function Jobs() {
         { value: 'analyze_library_image_assets', label: t('jobs.typeOptions.analyze_library_image_assets') },
         { value: 'remove_duplicate_files', label: t('jobs.typeOptions.remove_duplicate_files') },
     ];
+    const autoRefreshEnabled = page === 1 && (statusFilter === 'ALL' || LIVE_JOB_STATUSES.has(statusFilter));
 
     const queryKey = useMemo(
-        () => ['jobs', page, statusFilter, typeFilter, dateRangeFilter],
-        [dateRangeFilter, page, statusFilter, typeFilter],
+        () => queryKeys.jobs.list({
+            page,
+            pageSize,
+            statuses: statusFilter === 'ALL' ? [] : [statusFilter],
+            types: typeFilter === 'ALL' ? [] : [typeFilter],
+            createdAfter: (() => {
+                const deltaMs = DATE_RANGE_MS[dateRangeFilter] || 0;
+                return deltaMs > 0 ? new Date(Date.now() - deltaMs).toISOString() : null;
+            })(),
+            includeEstimates: true,
+        }),
+        [dateRangeFilter, page, pageSize, statusFilter, typeFilter],
     );
     const {
         data: jobs = [],
@@ -77,21 +120,21 @@ export default function Jobs() {
         refetch,
     } = useQuery({
         queryKey,
-        queryFn: async () => {
-            const offset = (page - 1) * PAGE_SIZE;
+        queryFn: async ({ signal }) => {
+            const offset = (page - 1) * pageSize;
             const statuses = statusFilter === 'ALL' ? [] : [statusFilter];
             const types = typeFilter === 'ALL' ? [] : [typeFilter];
             const deltaMs = DATE_RANGE_MS[dateRangeFilter] || 0;
             const createdAfter = deltaMs > 0 ? new Date(Date.now() - deltaMs).toISOString() : null;
-            return getJobs(PAGE_SIZE, offset, statuses, { types, createdAfter });
+            return getJobs(pageSize, offset, statuses, { types, createdAfter }, { signal });
         },
         staleTime: 5000,
+        refetchInterval: autoRefreshEnabled ? 10000 : false,
+        refetchIntervalInBackground: false,
     });
     const loading = isLoading;
     const refreshing = isFetching && !isLoading;
-    const hasNextPage = jobs.length === PAGE_SIZE;
-    const autoRefreshEnabled = page === 1 && (statusFilter === 'ALL' || LIVE_JOB_STATUSES.has(statusFilter));
-    const autoRefreshIntervalMs = autoRefreshEnabled ? 10000 : 0;
+    const hasNextPage = jobs.length === pageSize;
 
     useEffect(() => {
         if (error) {
@@ -99,13 +142,51 @@ export default function Jobs() {
         }
     }, [error, showToast, t]);
 
-    usePolling({
-        callback: () => refetch(),
-        intervalMs: autoRefreshIntervalMs,
-        enabled: autoRefreshEnabled,
-        pauseWhenHidden: true,
-        runImmediately: false,
-    });
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem(JOB_TABLE_COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(columnWidths));
+    }, [columnWidths]);
+
+    const jobsTableTemplate = useMemo(() => {
+        const dynamicColumns = JOB_TABLE_COLUMNS.map(
+            (column) => `${Math.max(column.minWidth, columnWidths[column.id] ?? column.width)}px`
+        );
+        return `38px ${dynamicColumns.join(' ')}`;
+    }, [columnWidths]);
+
+    const jobsTableMinWidth = useMemo(() => {
+        const selectWidth = 38;
+        const dynamicWidth = JOB_TABLE_COLUMNS.reduce(
+            (sum, column) => sum + Math.max(column.minWidth, columnWidths[column.id] ?? column.width),
+            0
+        );
+        return selectWidth + dynamicWidth;
+    }, [columnWidths]);
+
+    const beginResize = (event, column) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const startX = event.clientX;
+        const initialWidth = Math.max(column.minWidth, columnWidths[column.id] ?? column.width);
+        resizeStateRef.current = { columnId: column.id, startX, initialWidth, minWidth: column.minWidth };
+
+        const onMouseMove = (moveEvent) => {
+            if (!resizeStateRef.current) return;
+            const nextWidth = resizeStateRef.current.initialWidth + (moveEvent.clientX - resizeStateRef.current.startX);
+            setColumnWidths((prev) => ({
+                ...prev,
+                [resizeStateRef.current.columnId]: Math.max(resizeStateRef.current.minWidth, nextWidth),
+            }));
+        };
+        const onMouseUp = () => {
+            resizeStateRef.current = null;
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', onMouseUp);
+        };
+
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+    };
 
     const goToPreviousPage = () => {
         if (page <= 1) return;
@@ -131,7 +212,7 @@ export default function Jobs() {
 
     useEffect(() => {
         setSelectedJobIds(new Set());
-    }, [page, statusFilter, typeFilter, dateRangeFilter]);
+    }, [page, pageSize, statusFilter, typeFilter, dateRangeFilter]);
 
     const toggleJobSelection = (jobId) => {
         setSelectedJobIds((prev) => {
@@ -550,6 +631,21 @@ export default function Jobs() {
                                 <option key={option.value} value={option.value}>{option.label}</option>
                             ))}
                         </select>
+                        <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                            <span>{t('jobs.resultsPerPage')}</span>
+                            <select
+                                className="input-shell px-2 py-1.5 text-sm text-foreground"
+                                value={pageSize}
+                                onChange={(event) => {
+                                    setPageSize(Number(event.target.value));
+                                    setPage(1);
+                                }}
+                            >
+                                {PAGE_SIZE_OPTIONS.map((option) => (
+                                    <option key={option} value={option}>{option}</option>
+                                ))}
+                            </select>
+                        </label>
                         <span className="status-chip">{t('jobs.page', { page })}</span>
                         <div className="flex gap-1">
                             <button
@@ -623,8 +719,11 @@ export default function Jobs() {
                         </div>
 
                         <div className="surface-card overflow-x-auto">
-                        <div className="min-w-[1240px]">
-                            <div className="grid grid-cols-[38px_104px_96px_minmax(260px,1.5fr)_116px_116px_116px_82px_112px_minmax(280px,1.3fr)_106px] gap-3 p-3 border-b border-border/70 bg-muted/45 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center">
+                        <div style={{ minWidth: `${jobsTableMinWidth}px` }}>
+                            <div
+                                className="sticky top-0 z-20 grid items-center gap-3 border-b border-border/70 bg-muted/95 p-3 text-xs font-medium uppercase tracking-wider text-muted-foreground shadow-sm backdrop-blur supports-[backdrop-filter]:bg-muted/80"
+                                style={{ gridTemplateColumns: jobsTableTemplate, minWidth: `${jobsTableMinWidth}px` }}
+                            >
                                 <div>
                                     <input
                                         type="checkbox"
@@ -633,16 +732,31 @@ export default function Jobs() {
                                         aria-label={t('jobs.selectAllOnPage')}
                                     />
                                 </div>
-                                <div>{t('jobs.status')}</div>
-                                <div>{t('jobs.jobId')}</div>
-                                <div>{t('jobs.type')}</div>
-                                <div className="text-right">{t('jobs.created')}</div>
-                                <div className="text-right">{t('jobs.started')}</div>
-                                <div className="text-right">{t('jobs.finished')}</div>
-                                <div className="text-right">{t('jobs.duration')}</div>
-                                <div>{t('jobs.eta')}</div>
-                                <div>{t('jobs.progress')}</div>
-                                <div className="text-center"></div>
+                                {JOB_TABLE_COLUMNS.map((column) => {
+                                    const label = column.id === 'jobId'
+                                        ? t('jobs.jobId')
+                                        : column.id === 'actions'
+                                            ? ''
+                                            : t(`jobs.${column.id}`);
+                                    return (
+                                        <div
+                                            key={column.id}
+                                            className={`relative flex items-center gap-1 ${column.align === 'right' ? 'justify-end text-right' : column.align === 'center' ? 'justify-center text-center' : ''}`}
+                                        >
+                                            {column.id !== 'actions' && <div className="pointer-events-none absolute bottom-0 right-0 top-0 w-px bg-border/80" />}
+                                            <span className="inline-flex items-center gap-1">
+                                                {column.id !== 'actions' && <GripVertical size={12} className="opacity-45" />}
+                                                {label}
+                                            </span>
+                                            {column.id !== 'actions' && (
+                                                <div
+                                                    className="absolute right-[-8px] top-0 h-full w-3 cursor-col-resize"
+                                                    onMouseDown={(event) => beginResize(event, column)}
+                                                />
+                                            )}
+                                        </div>
+                                    );
+                                })}
                             </div>
 
                             <div className="divide-y text-sm">
@@ -675,7 +789,8 @@ export default function Jobs() {
                                     return (
                                         <div
                                             key={job.id}
-                                            className="grid grid-cols-[38px_104px_96px_minmax(260px,1.5fr)_116px_116px_116px_82px_112px_minmax(280px,1.3fr)_106px] gap-3 p-3 items-center hover:bg-accent/35 transition-colors pointer-events-none"
+                                            className="grid gap-3 p-3 items-center hover:bg-accent/35 transition-colors pointer-events-none"
+                                            style={{ gridTemplateColumns: jobsTableTemplate, minWidth: `${jobsTableMinWidth}px` }}
                                         >
                                         <div className="pointer-events-auto">
                                             <input
@@ -685,31 +800,39 @@ export default function Jobs() {
                                                 aria-label={`${t('jobs.jobId')} ${String(job.id).slice(0, 8)}`}
                                             />
                                         </div>
-                                        <div className="pointer-events-auto">
+                                        <div className="pointer-events-auto relative">
+                                            <div className="pointer-events-none absolute bottom-[-10px] right-[-6px] top-[-10px] w-px bg-border/50" />
                                             <div className={`status-badge ${getStatusTone(job.status)}`}>
                                                 {getStatusIcon(job.status)}
                                                 <span>{formatJobStatus(job.status, t)}</span>
                                             </div>
                                         </div>
-                                        <div className="pointer-events-auto font-mono text-xs text-muted-foreground truncate" title={job.id}>
+                                        <div className="pointer-events-auto relative font-mono text-xs text-muted-foreground truncate" title={job.id}>
+                                            <div className="pointer-events-none absolute bottom-[-10px] right-[-6px] top-[-10px] w-px bg-border/50" />
                                             {String(job.id).slice(0, 8)}...
                                         </div>
-                                        <div className="font-medium text-foreground truncate pointer-events-auto">
+                                        <div className="pointer-events-auto relative font-medium text-foreground truncate">
+                                            <div className="pointer-events-none absolute bottom-[-10px] right-[-6px] top-[-10px] w-px bg-border/50" />
                                             {formatJobType(job.type, t)}
                                         </div>
-                                        <div className="text-right text-muted-foreground tabular-nums pointer-events-auto">
+                                        <div className="pointer-events-auto relative text-right text-muted-foreground tabular-nums">
+                                            <div className="pointer-events-none absolute bottom-[-10px] right-[-6px] top-[-10px] w-px bg-border/50" />
                                             {formatDate(job.created_at)}
                                         </div>
-                                        <div className="text-right text-muted-foreground tabular-nums pointer-events-auto">
+                                        <div className="pointer-events-auto relative text-right text-muted-foreground tabular-nums">
+                                            <div className="pointer-events-none absolute bottom-[-10px] right-[-6px] top-[-10px] w-px bg-border/50" />
                                             {formatDate(job.started_at)}
                                         </div>
-                                        <div className="text-right text-muted-foreground tabular-nums pointer-events-auto">
+                                        <div className="pointer-events-auto relative text-right text-muted-foreground tabular-nums">
+                                            <div className="pointer-events-none absolute bottom-[-10px] right-[-6px] top-[-10px] w-px bg-border/50" />
                                             {formatDate(finishedAt)}
                                         </div>
-                                        <div className="text-right text-muted-foreground tabular-nums font-mono pointer-events-auto">
+                                        <div className="pointer-events-auto relative text-right text-muted-foreground tabular-nums font-mono">
+                                            <div className="pointer-events-none absolute bottom-[-10px] right-[-6px] top-[-10px] w-px bg-border/50" />
                                             {duration}
                                         </div>
-                                        <div className="text-xs text-muted-foreground pointer-events-auto tabular-nums leading-5">
+                                        <div className="pointer-events-auto relative text-xs text-muted-foreground tabular-nums leading-5">
+                                            <div className="pointer-events-none absolute bottom-[-10px] right-[-6px] top-[-10px] w-px bg-border/50" />
                                             <div>{etaText}</div>
                                             {isQueued && (
                                                 <div>
@@ -717,36 +840,44 @@ export default function Jobs() {
                                                 </div>
                                             )}
                                         </div>
-                                        <div className="pointer-events-auto">
-                                            <div className="h-3 w-full rounded-sm border border-border/60 bg-muted/60 overflow-hidden flex">
-                                                {breakdownTotal > 0 ? (
-                                                    <>
-                                                        <div className="h-full bg-emerald-500" style={{ width: `${successWidth}%` }} />
-                                                        <div className="h-full bg-destructive" style={{ width: `${failedWidth}%` }} />
-                                                        <div className="h-full bg-amber-400" style={{ width: `${skippedWidth}%` }} />
-                                                    </>
-                                                ) : (
-                                                    <div
-                                                        className={`h-full ${job.status === 'FAILED' || job.status === 'DEAD_LETTER' ? 'bg-destructive' : 'bg-primary'}`}
-                                                        style={{ width: `${normalizedProgressPercent}%` }}
-                                                    />
-                                                )}
-                                            </div>
-                                            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] tabular-nums">
-                                                <span className="rounded bg-emerald-500/12 px-1.5 py-0.5 text-emerald-700">
-                                                    {t('jobs.success')}: {metricSummary.success}
-                                                </span>
-                                                <span className={`rounded px-1.5 py-0.5 ${metricSummary.failed > 0 ? 'bg-destructive/12 text-destructive' : 'bg-muted text-muted-foreground'}`}>
-                                                    {t('jobs.failed')}: {metricSummary.failed}
-                                                </span>
-                                                <span className="rounded bg-amber-400/15 px-1.5 py-0.5 text-amber-700">
-                                                    {t('jobs.skipped')}: {metricSummary.skipped}
-                                                </span>
-                                                <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
-                                                    {t('jobs.total')}: {hasKnownTotal ? totalItems : '-'}
-                                                </span>
-                                                <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
+                                        <div className="pointer-events-auto relative">
+                                            <div className="pointer-events-none absolute bottom-[-10px] right-[-6px] top-[-10px] w-px bg-border/50" />
+                                            <div className="flex items-center gap-2">
+                                                <div className="h-3 flex-1 overflow-hidden rounded-sm border border-border/60 bg-muted/60">
+                                                    <div className="flex h-full">
+                                                        {breakdownTotal > 0 ? (
+                                                            <>
+                                                                <div className="h-full bg-emerald-500" style={{ width: `${successWidth}%` }} />
+                                                                <div className="h-full bg-destructive" style={{ width: `${failedWidth}%` }} />
+                                                                <div className="h-full bg-amber-400" style={{ width: `${skippedWidth}%` }} />
+                                                            </>
+                                                        ) : (
+                                                            <div
+                                                                className={`h-full ${job.status === 'FAILED' || job.status === 'DEAD_LETTER' ? 'bg-destructive' : 'bg-primary'}`}
+                                                                style={{ width: `${normalizedProgressPercent}%` }}
+                                                            />
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <span className="w-10 text-right text-[11px] tabular-nums text-muted-foreground">
                                                     {completionPercent}%
+                                                </span>
+                                            </div>
+                                            <div className="mt-1.5 flex items-center gap-3 overflow-hidden whitespace-nowrap text-[11px] tabular-nums text-muted-foreground">
+                                                <span className="inline-flex items-center gap-1" title={`${t('jobs.success')}: ${metricSummary.success}`}>
+                                                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                                                    {metricSummary.success}
+                                                </span>
+                                                <span className="inline-flex items-center gap-1" title={`${t('jobs.failed')}: ${metricSummary.failed}`}>
+                                                    <span className={`h-2 w-2 rounded-full ${metricSummary.failed > 0 ? 'bg-destructive' : 'bg-muted-foreground/35'}`} />
+                                                    {metricSummary.failed}
+                                                </span>
+                                                <span className="inline-flex items-center gap-1" title={`${t('jobs.skipped')}: ${metricSummary.skipped}`}>
+                                                    <span className="h-2 w-2 rounded-full bg-amber-400" />
+                                                    {metricSummary.skipped}
+                                                </span>
+                                                <span title={`${t('jobs.total')}: ${hasKnownTotal ? totalItems : '-'}`}>
+                                                    {hasKnownTotal ? totalItems : '-'}
                                                 </span>
                                             </div>
                                         </div>

@@ -1,9 +1,7 @@
 ﻿import { Fragment, useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
+import { Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
-import { itemsService } from '../services/items';
-import { metadataService } from '../services/metadata';
-import { accountsService } from '../services/accounts';
 import { jobsService } from '../services/jobs';
 import { driveService } from '../services/drive';
 import { useToast } from '../contexts/ToastContext';
@@ -14,20 +12,24 @@ import {
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import ProviderIcon from '../components/ProviderIcon';
-import MetadataModal from '../components/MetadataModal';
-import BatchMetadataModal from '../components/BatchMetadataModal';
-import RemoveMetadataModal from '../components/RemoveMetadataModal';
-import MoveModal from '../components/MoveModal';
-import SimilarFilesReportTab from '../components/SimilarFilesReportTab';
-import ImagePreviewModal from '../components/ImagePreviewModal';
+import { queryKeys } from '../lib/queryKeys';
+import { useAccountsQuery, useItemsListQuery, useMetadataCategoriesQuery, useMetadataLibrariesQuery } from '../hooks/useAppQueries';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { isPreviewableFileName } from '../utils/imagePreview';
 import { formatDateTime } from '../utils/dateTime';
+
+const MetadataModal = lazy(() => import('../components/MetadataModal'));
+const BatchMetadataModal = lazy(() => import('../components/BatchMetadataModal'));
+const RemoveMetadataModal = lazy(() => import('../components/RemoveMetadataModal'));
+const MoveModal = lazy(() => import('../components/MoveModal'));
+const SimilarFilesReportTab = lazy(() => import('../components/SimilarFilesReportTab'));
+const ImagePreviewModal = lazy(() => import('../components/ImagePreviewModal'));
 
 const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'cbw', 'pdf', 'epub', 'cbr', 'rar', 'cb7', '7z', 'cbt', 'tar']);
 const BOOK_MAPPABLE_EXTS = new Set(['pdf', 'epub']);
 const IMAGE_ANALYZABLE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'tiff', 'tif', 'heic', 'avif']);
 const ALL_FILES_COLUMNS_STORAGE_KEY = 'driver-all-files-columns-v1';
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 const ALL_FILES_COLUMNS = [
     { id: 'name', label: 'Name', width: 280, minWidth: 180, sortKey: 'name' },
     { id: 'account', label: 'Account', width: 190, minWidth: 150, sortKey: null },
@@ -186,11 +188,8 @@ const FilterBar = ({ onFilter, filters, accounts, categories }) => {
 
 export default function AllFiles() {
     const { t, i18n } = useTranslation();
-    const [items, setItems] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
-    const [totalPages, setTotalPages] = useState(1);
+    const [pageSize, setPageSize] = useState(50);
     const [activeTab, setActiveTab] = useState('library');
 
     const [filters, setFilters] = useState({
@@ -210,9 +209,6 @@ export default function AllFiles() {
     const [pathPrefix, setPathPrefix] = useState('');
     const [selectedItems, setSelectedItems] = useState(new Set());
     const [lastSelectedIndex, setLastSelectedIndex] = useState(null);
-    const [isComicsLibraryActive, setIsComicsLibraryActive] = useState(false);
-    const [isImagesLibraryActive, setIsImagesLibraryActive] = useState(false);
-    const [isBooksLibraryActive, setIsBooksLibraryActive] = useState(false);
 
     const [batchModalOpen, setBatchModalOpen] = useState(false);
     const [metadataModalOpen, setMetadataModalOpen] = useState(false);
@@ -250,31 +246,13 @@ export default function AllFiles() {
     );
 
     const { showToast } = useToast();
-
-    const { data: accounts = [] } = useQuery({
-        queryKey: ['accounts'],
-        queryFn: accountsService.getAccounts,
-        staleTime: 60000,
-    });
-    const { data: metaCategories = [] } = useQuery({
-        queryKey: ['metadata-categories'],
-        queryFn: metadataService.listCategories,
-        staleTime: 30000,
-    });
-    const { data: metadataLibraries = [] } = useQuery({
-        queryKey: ['metadata-libraries'],
-        queryFn: metadataService.listMetadataLibraries,
-        staleTime: 30000,
-    });
-
-    useEffect(() => {
-        const comicsLibrary = (metadataLibraries || []).find((library) => library.key === 'comics_core');
-        const imagesLibrary = (metadataLibraries || []).find((library) => library.key === 'images_core');
-        const booksLibrary = (metadataLibraries || []).find((library) => library.key === 'books_core');
-        setIsComicsLibraryActive(Boolean(comicsLibrary?.is_active));
-        setIsImagesLibraryActive(Boolean(imagesLibrary?.is_active));
-        setIsBooksLibraryActive(Boolean(booksLibrary?.is_active));
-    }, [metadataLibraries]);
+    const queryClient = useQueryClient();
+    const { data: accounts = [] } = useAccountsQuery();
+    const { data: metaCategories = [] } = useMetadataCategoriesQuery();
+    const { data: metadataLibraries = [] } = useMetadataLibrariesQuery();
+    const isComicsLibraryActive = Boolean(metadataLibraries.find((library) => library.key === 'comics_core')?.is_active);
+    const isImagesLibraryActive = Boolean(metadataLibraries.find((library) => library.key === 'images_core')?.is_active);
+    const isBooksLibraryActive = Boolean(metadataLibraries.find((library) => library.key === 'books_core')?.is_active);
 
     useEffect(() => {
         const handleClickOutside = (event) => {
@@ -344,36 +322,34 @@ export default function AllFiles() {
         window.localStorage.setItem(ALL_FILES_COLUMNS_STORAGE_KEY, JSON.stringify(payload));
     }, [columnOrder, columnVisibility, columnWidths]);
 
-    const fetchItems = useCallback(async (overridePage) => {
-        setLoading(true);
-        try {
-            const effectivePage = overridePage ?? page;
-            const isSearching = debouncedSearchTerm.trim().length > 0;
-            const params = {
-                page: effectivePage,
-                page_size: 50,
-                sort_by: sort.by,
-                sort_order: sort.order,
-                q: debouncedSearchTerm,
-                search_fields: searchScope,
-                path_prefix: pathPrefix,
-                direct_children_only: !!pathPrefix && !isSearching,
-                ...filters
-            };
-            const data = await itemsService.listItems(params);
-            setItems(data.items);
-            setTotal(data.total);
-            setTotalPages(data.total_pages);
-        } catch (error) {
-            console.error("Failed to fetch items:", error);
-        } finally {
-            setLoading(false);
-        }
-    }, [page, debouncedSearchTerm, sort.by, sort.order, searchScope, pathPrefix, filters]);
+    const itemsQueryParams = useMemo(() => {
+        const isSearching = debouncedSearchTerm.trim().length > 0;
+        return {
+            page,
+            page_size: pageSize,
+            sort_by: sort.by,
+            sort_order: sort.order,
+            q: debouncedSearchTerm,
+            search_fields: searchScope,
+            path_prefix: pathPrefix,
+            direct_children_only: !!pathPrefix && !isSearching,
+            ...filters,
+        };
+    }, [debouncedSearchTerm, filters, page, pageSize, pathPrefix, searchScope, sort.by, sort.order]);
 
-    useEffect(() => {
-        fetchItems();
-    }, [fetchItems]);
+    const {
+        data: itemsResponse,
+        isPending: loading,
+    } = useItemsListQuery(itemsQueryParams, {
+        staleTime: 30000,
+    });
+    const items = useMemo(() => itemsResponse?.items || [], [itemsResponse?.items]);
+    const total = itemsResponse?.total || 0;
+    const totalPages = itemsResponse?.total_pages || 1;
+
+    const invalidateItems = useCallback(async () => {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.items.listRoot() });
+    }, [queryClient]);
 
     // Selection Logic (copied from FileBrowser)
     const toggleSelection = (id, index, multiSelect, rangeSelect) => {
@@ -812,7 +788,7 @@ export default function AllFiles() {
                 showToast(t('allFiles.uploadQueued', { count: files.length }), 'success');
             }
 
-            await fetchItems();
+            await invalidateItems();
         } finally {
             setUploading(false);
             setUploadProgress(0);
@@ -841,7 +817,7 @@ export default function AllFiles() {
             showToast(t('allFiles.selectedDeleted'), 'success');
             setDeleteModalOpen(false);
             setSelectedItems(new Set());
-            fetchItems();
+            await invalidateItems();
         } catch (error) {
             showToast(error?.response?.data?.detail || t('allFiles.failedDeleteSelected'), 'error');
         } finally {
@@ -873,7 +849,7 @@ export default function AllFiles() {
             showToast(t('allFiles.renamedSuccessfully'), 'success');
             setRenameModalOpen(false);
             setMetadataMenuOpen(false);
-            await fetchItems();
+            await invalidateItems();
         } catch (error) {
             showToast(`${t('allFiles.failedRename')}: ${error.message}`, 'error');
         } finally {
@@ -1316,6 +1292,21 @@ export default function AllFiles() {
 
                 {/* Pagination */}
                 <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-2 text-muted-foreground">
+                        <span>{t('allFiles.resultsPerPage')}</span>
+                        <select
+                            value={pageSize}
+                            onChange={(event) => {
+                                setPageSize(Number(event.target.value));
+                                setPage(1);
+                            }}
+                            className="rounded-md border bg-background px-2 py-1 text-sm text-foreground"
+                        >
+                            {PAGE_SIZE_OPTIONS.map((option) => (
+                                <option key={option} value={option}>{option}</option>
+                            ))}
+                        </select>
+                    </label>
                     <span className="text-muted-foreground">{t('allFiles.pageOf', { page, total: totalPages })}</span>
                     <div className="flex gap-1">
                         <button
@@ -1368,7 +1359,7 @@ export default function AllFiles() {
                         <div className="overflow-x-auto">
                             {/* Header */}
                             <div
-                                className="gap-4 p-3 border-b border-border/70 bg-muted/45 text-xs font-medium text-muted-foreground uppercase tracking-wider items-center sticky top-0 z-10"
+                                className="sticky top-0 z-20 gap-4 border-b border-border/70 bg-muted/95 p-3 text-xs font-medium uppercase tracking-wider text-muted-foreground shadow-sm backdrop-blur supports-[backdrop-filter]:bg-muted/80 items-center"
                                 style={{ display: 'grid', gridTemplateColumns: dataGridTemplate, minWidth: `${tableMinWidth}px` }}
                             >
                                 <div className="flex justify-center">
@@ -1386,6 +1377,7 @@ export default function AllFiles() {
                                         onDrop={() => handleColumnDrop(column.id)}
                                         className={`relative flex items-center gap-1 ${column.align === 'right' ? 'justify-end text-right' : ''}`}
                                     >
+                                        <div className="pointer-events-none absolute bottom-0 right-0 top-0 w-px bg-border/80" />
                                         <button
                                             type="button"
                                             className={`inline-flex items-center gap-1 hover:text-foreground ${column.sortKey ? '' : 'cursor-default'}`}
@@ -1434,7 +1426,8 @@ export default function AllFiles() {
                                                 )}
                                             </div>
                                             {visibleColumns.map((column) => (
-                                                <div key={column.id}>
+                                                <div key={column.id} className="relative">
+                                                    <div className="pointer-events-none absolute bottom-[-12px] right-0 top-[-12px] w-px bg-border/50" />
                                                     {renderColumnCell(item, column)}
                                                 </div>
                                             ))}
@@ -1447,37 +1440,49 @@ export default function AllFiles() {
                 )}
             </main>
 
-            <BatchMetadataModal
-                isOpen={batchModalOpen}
-                onClose={() => setBatchModalOpen(false)}
-                selectedItems={getSelectedObjects()}
-                showToast={showToast}
-                onSuccess={() => {
-                    fetchItems();
-                    setSelectedItems(new Set());
-                }}
-            />
+            {batchModalOpen && (
+                <Suspense fallback={null}>
+                    <BatchMetadataModal
+                        isOpen={batchModalOpen}
+                        onClose={() => setBatchModalOpen(false)}
+                        selectedItems={getSelectedObjects()}
+                        showToast={showToast}
+                        onSuccess={() => {
+                            void invalidateItems();
+                            setSelectedItems(new Set());
+                        }}
+                    />
+                </Suspense>
+            )}
 
-            <MetadataModal
-                isOpen={metadataModalOpen}
-                onClose={() => setMetadataModalOpen(false)}
-                item={singleSelectedItem}
-                accountId={singleSelectedItem?.account_id}
-                onSuccess={() => {
-                    fetchItems();
-                }}
-            />
+            {metadataModalOpen && (
+                <Suspense fallback={null}>
+                    <MetadataModal
+                        isOpen={metadataModalOpen}
+                        onClose={() => setMetadataModalOpen(false)}
+                        item={singleSelectedItem}
+                        accountId={singleSelectedItem?.account_id}
+                        onSuccess={() => {
+                            void invalidateItems();
+                        }}
+                    />
+                </Suspense>
+            )}
 
-            <RemoveMetadataModal
-                isOpen={removeModalOpen}
-                onClose={() => setRemoveModalOpen(false)}
-                selectedItems={getSelectedObjects()}
-                showToast={showToast}
-                onSuccess={() => {
-                    fetchItems();
-                    setSelectedItems(new Set());
-                }}
-            />
+            {removeModalOpen && (
+                <Suspense fallback={null}>
+                    <RemoveMetadataModal
+                        isOpen={removeModalOpen}
+                        onClose={() => setRemoveModalOpen(false)}
+                        selectedItems={getSelectedObjects()}
+                        showToast={showToast}
+                        onSuccess={() => {
+                            void invalidateItems();
+                            setSelectedItems(new Set());
+                        }}
+                    />
+                </Suspense>
+            )}
 
             <Modal
                 isOpen={deleteModalOpen}
@@ -1511,17 +1516,21 @@ export default function AllFiles() {
                 </div>
             </Modal>
 
-            <MoveModal
-                isOpen={moveModalOpen}
-                onClose={() => setMoveModalOpen(false)}
-                item={moveTargetItem}
-                sourceAccountId={moveTargetItem?.account_id}
-                onSuccess={() => {
-                    setMoveModalOpen(false);
-                    setSelectedItems(new Set());
-                    fetchItems();
-                }}
-            />
+            {moveModalOpen && (
+                <Suspense fallback={null}>
+                    <MoveModal
+                        isOpen={moveModalOpen}
+                        onClose={() => setMoveModalOpen(false)}
+                        item={moveTargetItem}
+                        sourceAccountId={moveTargetItem?.account_id}
+                        onSuccess={() => {
+                            setMoveModalOpen(false);
+                            setSelectedItems(new Set());
+                            void invalidateItems();
+                        }}
+                    />
+                </Suspense>
+            )}
 
             <Modal
                 isOpen={renameModalOpen}
@@ -1637,16 +1646,22 @@ export default function AllFiles() {
                 </div>
             </Modal>
 
-            <ImagePreviewModal
-                isOpen={Boolean(imagePreviewItem)}
-                onClose={() => setImagePreviewItem(null)}
-                accountId={imagePreviewItem?.accountId}
-                itemId={imagePreviewItem?.itemId}
-                filename={imagePreviewItem?.filename}
-            />
+            {imagePreviewItem && (
+                <Suspense fallback={null}>
+                    <ImagePreviewModal
+                        isOpen={Boolean(imagePreviewItem)}
+                        onClose={() => setImagePreviewItem(null)}
+                        accountId={imagePreviewItem?.accountId}
+                        itemId={imagePreviewItem?.itemId}
+                        filename={imagePreviewItem?.filename}
+                    />
+                </Suspense>
+            )}
                 </>
             ) : (
-                <SimilarFilesReportTab accounts={accounts} />
+                <Suspense fallback={<div className="surface-card p-4 text-sm text-muted-foreground">{t('common.loading')}</div>}>
+                    <SimilarFilesReportTab accounts={accounts} />
+                </Suspense>
             )}
         </div>
     );
