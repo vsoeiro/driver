@@ -34,9 +34,10 @@ class MetadataRulesService:
         if not category:
             raise HTTPException(status_code=404, detail="Category not found")
 
-        # JSON columns must not receive raw UUID objects nested inside filter payloads.
-        model_payload = payload.model_dump(mode="json")
-        await self.validate_rule_configuration(model_payload)
+        model_payload = payload.model_dump()
+        validation_payload = payload.model_dump(mode="json")
+        await self.validate_rule_configuration(validation_payload)
+        model_payload["metadata_filters"] = validation_payload.get("metadata_filters", [])
         db_rule = MetadataRule(**model_payload)
         self._session.add(db_rule)
         await self._session.commit()

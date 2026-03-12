@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from time import perf_counter
 from typing import Any
 
@@ -352,7 +352,7 @@ class LangGraphAgentRunner:
             HumanMessage(
                 content=(
                     f"Pergunta do usuario: {user_message}\n"
-                    f"Traces de tools (JSON): {json.dumps([t.__dict__ for t in traces], ensure_ascii=False)}"
+                    f"Traces de tools (JSON): {json.dumps([asdict(t) for t in traces], ensure_ascii=False)}"
                 )
             ),
         ]

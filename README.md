@@ -239,6 +239,7 @@ If you do not need it, keep comics queue concurrency low or disable comics-orien
 
 ```bash
 uv run pytest -q
+uv run --project src/backend pytest --cov=src/backend --cov-report=xml
 ```
 
 ### Frontend
@@ -247,6 +248,14 @@ uv run pytest -q
 cd src/frontend
 npm.cmd run lint --workspaces=false
 npm.cmd run build --workspaces=false
+npm.cmd run test --workspaces=false
+npm.cmd run coverage --workspaces=false
+```
+
+### Full coverage check
+
+```bash
+python scripts/run_coverage.py
 ```
 
 ### Important endpoints

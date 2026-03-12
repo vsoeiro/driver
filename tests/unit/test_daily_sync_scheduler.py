@@ -68,3 +68,82 @@ async def test_get_runtime_settings_falls_back_to_env_defaults():
     assert isinstance(runtime, RuntimeSettings)
     assert runtime.daily_sync_cron == "0 1 * * *"
     assert runtime.worker_job_timeout_seconds == 900
+
+
+@pytest.mark.asyncio
+async def test_wait_or_stop_returns_true_when_stop_event_is_set():
+    scheduler = DailySyncScheduler(MagicMock())
+    scheduler.stop()
+
+    assert await scheduler._wait_or_stop(0.1) is True
+
+
+@pytest.mark.asyncio
+async def test_wait_or_stop_returns_false_on_timeout():
+    scheduler = DailySyncScheduler(MagicMock())
+
+    assert await scheduler._wait_or_stop(0.01) is False
+
+
+class _FakeRedisClient:
+    def __init__(self):
+        self.current_value = None
+        self.expire_calls = []
+        self.set_calls = []
+        self.eval_calls = []
+        self.closed = False
+
+    async def get(self, key):
+        return self.current_value if key else None
+
+    async def expire(self, key, ttl):
+        self.expire_calls.append((key, ttl))
+
+    async def set(self, key, value, ex, nx):
+        self.set_calls.append((key, value, ex, nx))
+        self.current_value = value
+        return True
+
+    async def eval(self, script, key_count, key, owner):
+        self.eval_calls.append((script, key_count, key, owner))
+
+    async def aclose(self):
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_leader_lock_acquire_renew_release_and_close():
+    scheduler = DailySyncScheduler(MagicMock())
+    scheduler._lock_enabled = True
+    scheduler._lock_key = "driver:test-lock"
+    scheduler._lock_ttl_seconds = 30
+    scheduler._lock_owner = "owner-1"
+    scheduler._lock_client = _FakeRedisClient()
+
+    acquired = await scheduler._acquire_or_renew_leader_lock()
+    assert acquired is True
+    assert scheduler._lock_is_owned is True
+    assert scheduler._lock_client.set_calls == [("driver:test-lock", "owner-1", 30, True)]
+
+    scheduler._lock_client.current_value = "owner-1"
+    renewed = await scheduler._acquire_or_renew_leader_lock()
+    assert renewed is True
+    assert scheduler._lock_client.expire_calls == [("driver:test-lock", 30)]
+
+    await scheduler._release_leader_lock()
+    assert scheduler._lock_is_owned is False
+    assert scheduler._lock_client.eval_calls
+
+    client = scheduler._lock_client
+    await scheduler._close_lock_client()
+    assert client.closed is True
+    assert scheduler._lock_client is None
+
+
+@pytest.mark.asyncio
+async def test_acquire_leader_lock_returns_false_when_redis_is_unavailable():
+    scheduler = DailySyncScheduler(MagicMock())
+    scheduler._lock_enabled = True
+
+    with patch("backend.services.sync_scheduler.Redis", None):
+        assert await scheduler._acquire_or_renew_leader_lock() is False

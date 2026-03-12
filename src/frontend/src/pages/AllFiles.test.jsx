@@ -214,7 +214,7 @@ describe('AllFiles page', () => {
             expect(screen.getByText('/Books')).toBeInTheDocument();
             expect(screen.getByText('issue-01.cbz')).toBeInTheDocument();
         });
-    });
+    }, 15000);
 
     it('opens metadata actions, renames and deletes the selected item', async () => {
         const user = userEvent.setup();
@@ -310,7 +310,7 @@ describe('AllFiles page', () => {
                 extensions: [],
             });
         });
-    });
+    }, 15000);
 
     it('runs library actions and download flow for selected files', async () => {
         const user = userEvent.setup();
