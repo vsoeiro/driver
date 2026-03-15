@@ -1,8 +1,9 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { Bell, Bot, Link2, Menu, Settings, X } from 'lucide-react';
+import { Bell, Bot, ChevronLeft, ChevronRight, Link2, Menu, Settings, X } from 'lucide-react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 const LAST_ACCOUNT_STORAGE_KEY = 'driver-last-account-id';
+const SIDEBAR_COLLAPSED_STORAGE_KEY = 'driver-sidebar-collapsed-v1';
 const AccountSwitcher = lazy(() => import('./AccountSwitcher'));
 const Sidebar = lazy(() => import('./Sidebar'));
 const NotificationBell = lazy(() => import('./NotificationBell'));
@@ -41,6 +42,10 @@ export default function Layout() {
     const [quickAiOpen, setQuickAiOpen] = useState(false);
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [sidebarReady, setSidebarReady] = useState(false);
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+        if (typeof window === 'undefined') return false;
+        return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === '1';
+    });
     const [quickAiRequested, setQuickAiRequested] = useState(false);
     const [notificationsReady, setNotificationsReady] = useState(false);
 
@@ -60,6 +65,11 @@ export default function Layout() {
         if (!selectedAccountId) return;
         window.localStorage.setItem(LAST_ACCOUNT_STORAGE_KEY, selectedAccountId);
     }, [selectedAccountId]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, sidebarCollapsed ? '1' : '0');
+    }, [sidebarCollapsed]);
 
     useEffect(() => {
         setSidebarOpen(false);
@@ -118,15 +128,19 @@ export default function Layout() {
             <div className="min-h-screen">
                 <div className="app-panel flex min-h-screen overflow-hidden rounded-none shadow-none lg:h-screen">
                     {sidebarReady ? (
-                        <Suspense fallback={<aside className="hidden h-full w-56 shrink-0 border-r border-border bg-card lg:flex xl:w-60" aria-hidden="true" />}>
-                            <Sidebar mobileOpen={sidebarOpen} onNavigate={() => setSidebarOpen(false)} />
+                        <Suspense fallback={sidebarCollapsed ? null : <aside className="hidden h-full w-56 shrink-0 border-r border-border bg-card lg:flex xl:w-60" aria-hidden="true" />}>
+                            <Sidebar
+                                mobileOpen={sidebarOpen}
+                                desktopCollapsed={sidebarCollapsed}
+                                onNavigate={() => setSidebarOpen(false)}
+                            />
                         </Suspense>
-                    ) : (
+                    ) : !sidebarCollapsed ? (
                         <aside className="hidden h-full w-56 shrink-0 border-r border-border bg-card lg:flex xl:w-60" aria-hidden="true" />
-                    )}
+                    ) : null}
                     <div className="flex flex-1 min-w-0 min-h-0 flex-col">
-                        <header className="layer-overlay relative border-b border-border px-3 py-2 md:px-4">
-                            <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <header className="layer-overlay relative border-b border-border px-3 py-2 md:px-4 lg:h-14 lg:py-0">
+                            <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between lg:h-full">
                                 <div className="flex min-w-0 items-center gap-2">
                                     <button
                                         type="button"
@@ -147,6 +161,32 @@ export default function Layout() {
                                         aria-label={t('sidebar.navigation')}
                                     >
                                         <Menu size={16} />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const nextCollapsed = !sidebarCollapsed;
+                                            if (!nextCollapsed) {
+                                                preloadSidebar();
+                                                setSidebarReady(true);
+                                            }
+                                            setSidebarCollapsed(nextCollapsed);
+                                        }}
+                                        onMouseEnter={() => {
+                                            if (!sidebarCollapsed) return;
+                                            preloadSidebar();
+                                            setSidebarReady(true);
+                                        }}
+                                        onFocus={() => {
+                                            if (!sidebarCollapsed) return;
+                                            preloadSidebar();
+                                            setSidebarReady(true);
+                                        }}
+                                        className="hidden btn-minimal px-2 py-2 lg:inline-flex"
+                                        aria-label={sidebarCollapsed ? t('sidebar.expand') : t('sidebar.collapse')}
+                                        title={sidebarCollapsed ? t('sidebar.expand') : t('sidebar.collapse')}
+                                    >
+                                        {sidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
                                     </button>
                                     {showAccountSelector ? (
                                         <Suspense fallback={<div className="input-shell h-9 flex-1 animate-pulse sm:max-w-[340px]" />}>

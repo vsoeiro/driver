@@ -3,7 +3,9 @@
 This module provides endpoints for creating and managing background jobs.
 """
 
+import json
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 from uuid import UUID
 
@@ -100,6 +102,47 @@ def _is_image_item_already_analyzed(status: str | None) -> bool:
 def _sanitize_upload_filename(filename: str | None) -> str:
     safe_name = Path(str(filename or "upload.bin")).name.strip()
     return safe_name or "upload.bin"
+
+
+def _build_grouped_chunk_dedupe_key(
+    *,
+    prefix: str,
+    item_groups: list[dict[str, object]],
+) -> str:
+    canonical_payload = json.dumps(
+        item_groups,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+    digest = sha256(canonical_payload.encode("utf-8")).hexdigest()
+    return f"{prefix}:{digest}"
+
+
+def _chunk_indexed_items_globally(
+    by_account: dict[UUID, list[str]],
+    *,
+    chunk_size: int,
+) -> list[list[dict[str, object]]]:
+    ordered_pairs: list[tuple[str, str]] = []
+    for account_id in sorted(by_account, key=lambda value: str(value)):
+        item_ids = [str(item_id) for item_id in by_account[account_id] if str(item_id).strip()]
+        item_ids.sort()
+        ordered_pairs.extend((str(account_id), item_id) for item_id in item_ids)
+
+    payloads: list[list[dict[str, object]]] = []
+    for start in range(0, len(ordered_pairs), chunk_size):
+        chunk_pairs = ordered_pairs[start : start + chunk_size]
+        grouped: dict[str, list[str]] = {}
+        for account_id, item_id in chunk_pairs:
+            grouped.setdefault(account_id, []).append(item_id)
+        payloads.append(
+            [
+                {"account_id": account_id, "item_ids": item_ids}
+                for account_id, item_ids in grouped.items()
+            ]
+        )
+    return payloads
 
 
 async def _fetch_rows_with_limit(
@@ -791,19 +834,21 @@ async def create_extract_library_comic_assets_job(
         )
 
     created_job_ids: list[UUID] = []
-    for account_id, item_ids in by_account.items():
-        for i in range(0, len(item_ids), chunk_size):
-            chunk_ids = item_ids[i : i + chunk_size]
-            job = await enqueue_job_command(
-                db,
-                job_type="extract_comic_assets",
-                payload={
-                    "account_id": str(account_id),
-                    "item_ids": chunk_ids,
-                    "use_indexed_items": True,
-                },
-            )
-            created_job_ids.append(job.id)
+    chunked_groups = _chunk_indexed_items_globally(by_account, chunk_size=chunk_size)
+    for chunk_groups in chunked_groups:
+        job = await enqueue_job_command(
+            db,
+            job_type="extract_comic_assets",
+            payload={
+                "indexed_item_groups": chunk_groups,
+                "use_indexed_items": True,
+            },
+            dedupe_key=_build_grouped_chunk_dedupe_key(
+                prefix="comics-map",
+                item_groups=chunk_groups,
+            ),
+        )
+        created_job_ids.append(job.id)
 
     return JobExtractLibraryComicAssetsResponse(
         total_items=total_unmapped_items,

@@ -1,5 +1,5 @@
 import userEvent from '@testing-library/user-event';
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 
 const useAccountsQueryMock = vi.fn();
 const useItemsListQueryMock = vi.fn();
@@ -310,6 +310,50 @@ describe('AllFiles page', () => {
                 extensions: [],
             });
         });
+    }, 15000);
+
+    it('persists column order and widths across reloads', async () => {
+        useItemsListQueryMock.mockReturnValue({
+            data: rootItemsResponse,
+            isPending: false,
+        });
+
+        const { container, unmount } = renderWithProviders(<AllFiles />);
+
+        await screen.findByText('cover.png');
+
+        const getHeaderCells = (currentContainer) =>
+            Array.from(currentContainer.querySelector('.sticky.top-0').children).slice(2);
+
+        const initialHeaderCells = getHeaderCells(container);
+        fireEvent.dragStart(initialHeaderCells.at(-1));
+        fireEvent.drop(initialHeaderCells[0]);
+
+        await waitFor(() => {
+            const savedColumns = JSON.parse(window.localStorage.getItem('driver-all-files-columns-v1'));
+            expect(savedColumns.order[0]).toBe('path');
+        });
+
+        const resizedHeaderCells = getHeaderCells(container);
+        const nameHeaderCell = resizedHeaderCells.find((cell) => cell.textContent.includes('Name'));
+        const resizeHandle = nameHeaderCell.querySelector('.cursor-col-resize');
+        fireEvent.mouseDown(resizeHandle, { clientX: 100 });
+        fireEvent.mouseMove(window, { clientX: 180 });
+        fireEvent.mouseUp(window);
+
+        await waitFor(() => {
+            const savedColumns = JSON.parse(window.localStorage.getItem('driver-all-files-columns-v1'));
+            expect(savedColumns.widths.name).toBe(360);
+        });
+
+        unmount();
+
+        const { container: reloadedContainer } = renderWithProviders(<AllFiles />);
+        await screen.findByText('cover.png');
+
+        const reloadedHeaderCells = getHeaderCells(reloadedContainer);
+        expect(reloadedHeaderCells[0].textContent).toContain('Path');
+        expect(reloadedContainer.querySelector('.sticky.top-0').style.gridTemplateColumns).toContain('360px');
     }, 15000);
 
     it('runs library actions and download flow for selected files', async () => {

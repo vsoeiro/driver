@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from backend.services import oauth_http
+from backend.services.oauth_http import OAuthTokenRequestError
 
 
 class _AsyncClientContext:
@@ -52,9 +53,7 @@ async def test_post_form_with_retry_retries_retryable_status_codes(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_post_form_with_retry_returns_none_for_transport_and_client_errors(monkeypatch):
-    request = httpx.Request("POST", "https://example.test/token")
-
+async def test_post_form_with_retry_raises_transient_error_after_transport_retries(monkeypatch):
     timeout_client = type(
         "TimeoutClient",
         (),
@@ -66,31 +65,54 @@ async def test_post_form_with_retry_returns_none_for_transport_and_client_errors
     monkeypatch.setattr(oauth_http.asyncio, "sleep", sleep_mock)
     monkeypatch.setattr(oauth_http.random, "uniform", lambda _start, _end: 0.0)
 
-    timeout_result = await oauth_http.post_form_with_retry(
-        url="https://example.test/token",
-        payload={"code": "abc"},
-        timeout=httpx.Timeout(5.0),
-        provider="google",
-        max_attempts=2,
-    )
+    with pytest.raises(OAuthTokenRequestError) as exc_info:
+        await oauth_http.post_form_with_retry(
+            url="https://example.test/token",
+            payload={"code": "abc"},
+            timeout=httpx.Timeout(5.0),
+            provider="google",
+            max_attempts=2,
+        )
 
-    assert timeout_result is None
+    assert exc_info.value.transient is True
+    assert "boom" in (exc_info.value.details or "")
     assert sleep_mock.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_post_form_with_retry_raises_provider_error_details_for_client_errors(monkeypatch):
+    request = httpx.Request("POST", "https://example.test/token")
 
     error_client = type(
         "ErrorClient",
         (),
-        {"post": AsyncMock(return_value=httpx.Response(400, request=request, text="bad request"))},
+        {
+            "post": AsyncMock(
+                return_value=httpx.Response(
+                    400,
+                    request=request,
+                    json={
+                        "error": "invalid_grant",
+                        "error_description": "Token has been expired or revoked.",
+                    },
+                )
+            )
+        },
     )()
     monkeypatch.setattr(oauth_http.httpx, "AsyncClient", lambda timeout: _AsyncClientContext(error_client))
-    sleep_mock.reset_mock()
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr(oauth_http.asyncio, "sleep", sleep_mock)
 
-    error_result = await oauth_http.post_form_with_retry(
-        url="https://example.test/token",
-        payload={"code": "abc"},
-        timeout=httpx.Timeout(5.0),
-        provider="google",
-    )
+    with pytest.raises(OAuthTokenRequestError) as exc_info:
+        await oauth_http.post_form_with_retry(
+            url="https://example.test/token",
+            payload={"code": "abc"},
+            timeout=httpx.Timeout(5.0),
+            provider="google",
+        )
 
-    assert error_result is None
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.error_code == "invalid_grant"
+    assert exc_info.value.transient is False
+    assert exc_info.value.details == "Token has been expired or revoked."
     sleep_mock.assert_not_awaited()

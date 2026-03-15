@@ -17,49 +17,140 @@ from backend.workers.job_progress import JobProgressReporter
 COMIC_ERROR_ITEMS_LIMIT = 50
 
 
-@register_handler("extract_comic_assets")
-async def extract_comic_assets_handler(payload: dict, session: AsyncSession) -> dict:
-    account_id = UUID(payload["account_id"])
-    item_ids = [str(item_id) for item_id in payload.get("item_ids", [])]
-    if not item_ids:
+def _normalize_indexed_item_groups(payload: dict) -> list[tuple[UUID, list[str]]]:
+    raw_groups = payload.get("indexed_item_groups")
+    if not isinstance(raw_groups, list):
+        return []
+
+    normalized: list[tuple[UUID, list[str]]] = []
+    for raw_group in raw_groups:
+        if not isinstance(raw_group, dict):
+            continue
+        try:
+            account_id = UUID(str(raw_group.get("account_id")))
+        except (TypeError, ValueError):
+            continue
+        item_ids = [
+            str(item_id)
+            for item_id in (raw_group.get("item_ids") or [])
+            if str(item_id).strip()
+        ]
+        if item_ids:
+            normalized.append((account_id, item_ids))
+    return normalized
+
+
+async def _load_indexed_items(
+    session: AsyncSession,
+    *,
+    account_id: UUID,
+    item_ids: list[str],
+) -> list[IndexedComicItem]:
+    stmt = select(Item.item_id, Item.name, Item.extension, Item.item_type, Item.size).where(
+        Item.account_id == account_id,
+        Item.item_id.in_(item_ids),
+        Item.item_type == "file",
+    )
+    rows = (await session.execute(stmt)).all()
+    return [
+        IndexedComicItem(
+            id=str(item_id),
+            name=str(name or item_id),
+            extension=str(extension).lower() if extension else None,
+            item_type=str(item_type or "file"),
+            size=int(size) if size is not None else None,
+        )
+        for item_id, name, extension, item_type, size in rows
+    ]
+
+
+async def _process_indexed_item_groups(
+    payload: dict,
+    *,
+    session: AsyncSession,
+    service: ComicMetadataService,
+    progress: JobProgressReporter,
+) -> dict:
+    item_groups = _normalize_indexed_item_groups(payload)
+    if not item_groups:
         return {"total": 0, "mapped": 0, "skipped": 0, "failed": 0}
 
-    progress = JobProgressReporter.from_payload(session, payload)
-    progress.flush_every_items = 5
-    await progress.set_total(len(item_ids))
+    total_requested = sum(len(item_ids) for _account_id, item_ids in item_groups)
+    await progress.set_total(total_requested)
 
-    service = ComicMetadataService(session)
-    if payload.get("use_indexed_items"):
-        stmt = select(Item.item_id, Item.name, Item.extension, Item.item_type, Item.size).where(
-            Item.account_id == account_id,
-            Item.item_id.in_(item_ids),
-            Item.item_type == "file",
+    stats = {
+        "total": 0,
+        "mapped": 0,
+        "skipped": 0,
+        "failed": 0,
+        "accounts": len(item_groups),
+        "error_items": [],
+        "error_items_truncated": 0,
+    }
+    error_collector = ErrorItemsCollector(stats, limit=COMIC_ERROR_ITEMS_LIMIT)
+
+    for account_id, item_ids in item_groups:
+        indexed_items = await _load_indexed_items(
+            session,
+            account_id=account_id,
+            item_ids=item_ids,
         )
-        rows = (await session.execute(stmt)).all()
-        indexed = [
-            IndexedComicItem(
-                id=str(item_id),
-                name=str(name or item_id),
-                extension=str(extension).lower() if extension else None,
-                item_type=str(item_type or "file"),
-                size=int(size) if size is not None else None,
-            )
-            for item_id, name, extension, item_type, size in rows
-        ]
-        stats = await service.process_indexed_items(
+        account_stats = await service.process_indexed_items(
             account_id,
-            indexed,
+            indexed_items,
             job_id=progress.job_id,
             progress_reporter=progress,
             initialize_progress_total=False,
         )
-    else:
-        stats = await service.process_item_ids(
-            account_id,
-            item_ids,
-            job_id=progress.job_id,
-            progress_reporter=progress,
+        stats["total"] += account_stats.get("total", 0)
+        stats["mapped"] += account_stats.get("mapped", 0)
+        stats["skipped"] += account_stats.get("skipped", 0)
+        stats["failed"] += account_stats.get("failed", 0)
+        error_collector.merge(account_stats)
+
+    return stats
+
+
+@register_handler("extract_comic_assets")
+async def extract_comic_assets_handler(payload: dict, session: AsyncSession) -> dict:
+    progress = JobProgressReporter.from_payload(session, payload)
+    progress.flush_every_items = 5
+    service = ComicMetadataService(session)
+    indexed_groups = _normalize_indexed_item_groups(payload)
+    if indexed_groups:
+        stats = await _process_indexed_item_groups(
+            payload,
+            session=session,
+            service=service,
+            progress=progress,
         )
+    else:
+        account_id = UUID(payload["account_id"])
+        item_ids = [str(item_id) for item_id in payload.get("item_ids", [])]
+        if not item_ids:
+            return {"total": 0, "mapped": 0, "skipped": 0, "failed": 0}
+
+        await progress.set_total(len(item_ids))
+        if payload.get("use_indexed_items"):
+            indexed = await _load_indexed_items(
+                session,
+                account_id=account_id,
+                item_ids=item_ids,
+            )
+            stats = await service.process_indexed_items(
+                account_id,
+                indexed,
+                job_id=progress.job_id,
+                progress_reporter=progress,
+                initialize_progress_total=False,
+            )
+        else:
+            stats = await service.process_item_ids(
+                account_id,
+                item_ids,
+                job_id=progress.job_id,
+                progress_reporter=progress,
+            )
     await session.commit()
 
     await progress.update_metrics(

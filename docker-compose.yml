@@ -26,7 +26,7 @@ services:
       dockerfile: backend/Dockerfile
       target: backend-runtime
     container_name: driver-migrate
-    command: uv run --no-sync alembic upgrade head
+    command: uv run --no-sync alembic -c src/alembic.ini upgrade head
     restart: "no"
 
   backend:

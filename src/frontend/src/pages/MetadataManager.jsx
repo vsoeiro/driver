@@ -75,6 +75,12 @@ const getLibraryDescription = (library, t) => {
     return library.description || '';
 };
 
+const getColumnAlignmentClasses = (align) => {
+    if (align === 'right') return 'justify-end text-right';
+    if (align === 'center') return 'justify-center text-center';
+    return 'justify-start text-left';
+};
+
 
 // -- Category Items Table --
 const CategoryItemsTable = ({ category, onBack }) => {
@@ -115,6 +121,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
     const editingCellRef = useRef(null);
     const inlineEditActionRef = useRef(null);
     const resizeStateRef = useRef(null);
+    const skipTableColumnSaveRef = useRef(false);
     const [draggingColumnId, setDraggingColumnId] = useState(null);
     const [tableColumnOrder, setTableColumnOrder] = useState([]);
     const [tableColumnVisibility, setTableColumnVisibility] = useState({});
@@ -788,8 +795,8 @@ const CategoryItemsTable = ({ category, onBack }) => {
             attrId: attr.id,
         }));
         const tail = [
-            { id: 'modified', label: t('allFiles.columns.modified'), width: 150, minWidth: 130, sortKey: 'modified_at', align: 'right' },
-            { id: 'path', label: t('allFiles.columns.path'), width: 260, minWidth: 150, sortKey: null, align: 'right' },
+            { id: 'modified', label: t('allFiles.columns.modified'), width: 150, minWidth: 130, sortKey: 'modified_at' },
+            { id: 'path', label: t('allFiles.columns.path'), width: 260, minWidth: 150, sortKey: null },
         ];
         return [...fixed, ...dynamicAttributes, ...tail];
     }, [attributes, t]);
@@ -802,6 +809,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
         let nextOrder = defaultOrder;
         let nextVisibility = defaultVisibility;
         let nextWidths = defaultWidths;
+        skipTableColumnSaveRef.current = true;
 
         try {
             const raw = window.localStorage.getItem(tableColumnsStorageKey);
@@ -838,6 +846,10 @@ const CategoryItemsTable = ({ category, onBack }) => {
     }, [tableColumnsStorageKey, tableColumnDefs]);
 
     useEffect(() => {
+        if (skipTableColumnSaveRef.current) {
+            skipTableColumnSaveRef.current = false;
+            return;
+        }
         if (tableColumnOrder.length === 0) return;
         const payload = {
             order: tableColumnOrder,
@@ -994,13 +1006,13 @@ const CategoryItemsTable = ({ category, onBack }) => {
             );
         }
         if (column.id === 'size') {
-            return <div className="text-right text-sm text-muted-foreground tabular-nums">{formatSize(item.size)}</div>;
+            return <div className="text-sm text-muted-foreground tabular-nums">{formatSize(item.size)}</div>;
         }
         if (column.id === 'modified') {
-            return <div className="text-right text-sm text-muted-foreground tabular-nums">{formatDate(item.modified_at)}</div>;
+            return <div className="text-sm text-muted-foreground tabular-nums">{formatDate(item.modified_at)}</div>;
         }
         if (column.id === 'path') {
-            return <div className="text-right text-xs text-muted-foreground truncate" title={item.path}>{item.path}</div>;
+            return <div className="min-w-0 text-xs text-muted-foreground truncate" title={item.path}>{item.path}</div>;
         }
         if (column.id.startsWith('attr:')) {
             const attr = attributes.find((candidate) => `attr:${candidate.id}` === column.id);
@@ -1766,14 +1778,15 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                 key={column.id}
                                                 draggable
                                                 onDragStart={() => setDraggingColumnId(column.id)}
+                                                onDragEnd={() => setDraggingColumnId(null)}
                                                 onDragOver={(event) => event.preventDefault()}
                                                 onDrop={() => handleColumnDrop(column.id)}
-                                                className={`relative flex items-center gap-1 truncate ${column.align === 'right' ? 'justify-end text-right' : ''}`}
+                                                className={`relative flex min-w-0 items-center gap-1 truncate ${getColumnAlignmentClasses(column.align)}`}
                                             >
                                                 <div className="pointer-events-none absolute bottom-0 right-0 top-0 w-px bg-border/80" />
                                                 <button
                                                     type="button"
-                                                    className={`inline-flex items-center gap-1 hover:text-foreground ${column.sortKey ? '' : 'cursor-default'}`}
+                                                    className={`inline-flex min-w-0 items-center gap-1 hover:text-foreground ${column.sortKey ? '' : 'cursor-default'}`}
                                                     onClick={() => column.sortKey && handleSort(column.sortKey)}
                                                 >
                                                     <GripVertical size={12} className="opacity-45" />
@@ -1813,7 +1826,10 @@ const CategoryItemsTable = ({ category, onBack }) => {
                                                         )}
                                                     </div>
                                                     {visibleTableColumns.map((column) => (
-                                                        <div key={column.id} className="relative">
+                                                        <div
+                                                            key={column.id}
+                                                            className={`relative flex min-w-0 items-center ${getColumnAlignmentClasses(column.align)}`}
+                                                        >
                                                             <div className="pointer-events-none absolute bottom-[-12px] right-0 top-[-12px] w-px bg-border/50" />
                                                             {renderTableCell(item, column)}
                                                         </div>

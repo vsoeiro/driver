@@ -35,9 +35,65 @@ const ALL_FILES_COLUMNS = [
     { id: 'account', label: 'Account', width: 190, minWidth: 150, sortKey: null },
     { id: 'size', label: 'Size', width: 110, minWidth: 90, sortKey: 'size', align: 'right' },
     { id: 'category', label: 'Category', width: 110, minWidth: 90, sortKey: null },
-    { id: 'modified', label: 'Modified', width: 160, minWidth: 130, sortKey: 'modified_at', align: 'right' },
+    { id: 'modified', label: 'Modified', width: 160, minWidth: 130, sortKey: 'modified_at' },
     { id: 'path', label: 'Path', width: 280, minWidth: 150, sortKey: null },
 ];
+
+const getDefaultAllFilesColumnPreferences = () => ({
+    order: ALL_FILES_COLUMNS.map((column) => column.id),
+    visibility: ALL_FILES_COLUMNS.reduce((acc, column) => ({ ...acc, [column.id]: true }), {}),
+    widths: ALL_FILES_COLUMNS.reduce((acc, column) => ({ ...acc, [column.id]: column.width }), {}),
+});
+
+const loadAllFilesColumnPreferences = () => {
+    const defaults = getDefaultAllFilesColumnPreferences();
+    if (typeof window === 'undefined') return defaults;
+
+    try {
+        const raw = window.localStorage.getItem(ALL_FILES_COLUMNS_STORAGE_KEY);
+        if (!raw) return defaults;
+
+        const parsed = JSON.parse(raw);
+        const validIds = new Set(defaults.order);
+        const loadedOrder = Array.isArray(parsed.order)
+            ? parsed.order.filter((id) => validIds.has(id))
+            : [];
+        const nextOrder = [...loadedOrder, ...defaults.order.filter((id) => !loadedOrder.includes(id))];
+        const nextVisibility = { ...defaults.visibility };
+        const nextWidths = { ...defaults.widths };
+
+        if (parsed.visibility && typeof parsed.visibility === 'object') {
+            defaults.order.forEach((id) => {
+                if (Object.prototype.hasOwnProperty.call(parsed.visibility, id)) {
+                    nextVisibility[id] = Boolean(parsed.visibility[id]);
+                }
+            });
+        }
+
+        if (parsed.widths && typeof parsed.widths === 'object') {
+            ALL_FILES_COLUMNS.forEach((column) => {
+                const candidate = Number(parsed.widths[column.id]);
+                if (Number.isFinite(candidate)) {
+                    nextWidths[column.id] = Math.max(column.minWidth, candidate);
+                }
+            });
+        }
+
+        return {
+            order: nextOrder,
+            visibility: nextVisibility,
+            widths: nextWidths,
+        };
+    } catch {
+        return defaults;
+    }
+};
+
+const getColumnAlignmentClasses = (align) => {
+    if (align === 'right') return 'justify-end pr-2 text-right';
+    if (align === 'center') return 'justify-center px-2 text-center';
+    return 'justify-start pl-2 text-left';
+};
 
 // Filter Component
 const FilterBar = ({ onFilter, filters, accounts, categories }) => {
@@ -237,13 +293,14 @@ export default function AllFiles() {
     const columnsMenuRef = useRef(null);
     const resizeStateRef = useRef(null);
     const [draggingColumnId, setDraggingColumnId] = useState(null);
-    const [columnOrder, setColumnOrder] = useState(() => ALL_FILES_COLUMNS.map((col) => col.id));
-    const [columnVisibility, setColumnVisibility] = useState(() =>
-        ALL_FILES_COLUMNS.reduce((acc, col) => ({ ...acc, [col.id]: true }), {})
-    );
-    const [columnWidths, setColumnWidths] = useState(() =>
-        ALL_FILES_COLUMNS.reduce((acc, col) => ({ ...acc, [col.id]: col.width }), {})
-    );
+    const initialColumnPreferencesRef = useRef(null);
+    if (initialColumnPreferencesRef.current === null) {
+        initialColumnPreferencesRef.current = loadAllFilesColumnPreferences();
+    }
+    const initialColumnPreferences = initialColumnPreferencesRef.current;
+    const [columnOrder, setColumnOrder] = useState(() => initialColumnPreferences.order);
+    const [columnVisibility, setColumnVisibility] = useState(() => initialColumnPreferences.visibility);
+    const [columnWidths, setColumnWidths] = useState(() => initialColumnPreferences.widths);
 
     const { showToast } = useToast();
     const queryClient = useQueryClient();
@@ -272,48 +329,7 @@ export default function AllFiles() {
     }, []);
 
     useEffect(() => {
-        try {
-            const raw = window.localStorage.getItem(ALL_FILES_COLUMNS_STORAGE_KEY);
-            if (!raw) return;
-            const parsed = JSON.parse(raw);
-            const validIds = new Set(ALL_FILES_COLUMNS.map((col) => col.id));
-            const nextOrder = Array.isArray(parsed.order)
-                ? parsed.order.filter((id) => validIds.has(id))
-                : [];
-            const mergedOrder = [
-                ...nextOrder,
-                ...ALL_FILES_COLUMNS.map((col) => col.id).filter((id) => !nextOrder.includes(id)),
-            ];
-            setColumnOrder(mergedOrder);
-            if (parsed.visibility && typeof parsed.visibility === 'object') {
-                setColumnVisibility((prev) => {
-                    const next = { ...prev };
-                    ALL_FILES_COLUMNS.forEach((col) => {
-                        if (Object.prototype.hasOwnProperty.call(parsed.visibility, col.id)) {
-                            next[col.id] = Boolean(parsed.visibility[col.id]);
-                        }
-                    });
-                    return next;
-                });
-            }
-            if (parsed.widths && typeof parsed.widths === 'object') {
-                setColumnWidths((prev) => {
-                    const next = { ...prev };
-                    ALL_FILES_COLUMNS.forEach((col) => {
-                        const candidate = Number(parsed.widths[col.id]);
-                        if (Number.isFinite(candidate)) {
-                            next[col.id] = Math.max(col.minWidth, candidate);
-                        }
-                    });
-                    return next;
-                });
-            }
-        } catch {
-            // Ignore malformed preferences
-        }
-    }, []);
-
-    useEffect(() => {
+        if (typeof window === 'undefined') return;
         const payload = {
             order: columnOrder,
             visibility: columnVisibility,
@@ -472,11 +488,13 @@ export default function AllFiles() {
 
     const tableMinWidth = useMemo(() => {
         const base = 80;
+        const totalColumns = 2 + visibleColumns.length;
+        const gapPx = Math.max(0, totalColumns - 1) * 16; // gap-4
         const dynamic = visibleColumns.reduce(
             (sum, col) => sum + Math.max(col.minWidth, columnWidths[col.id] ?? col.width),
             0
         );
-        return base + dynamic;
+        return base + dynamic + gapPx;
     }, [visibleColumns, columnWidths]);
 
     const beginResize = (event, column) => {
@@ -585,10 +603,10 @@ export default function AllFiles() {
                     </div>
                 );
             case 'size':
-                return <div className="text-right text-sm text-muted-foreground tabular-nums">{formatSize(item.size ?? 0)}</div>;
+                return <div className="text-sm text-muted-foreground tabular-nums">{formatSize(item.size ?? 0)}</div>;
             case 'category':
                 return (
-                    <div className="text-right text-sm text-muted-foreground truncate">
+                    <div className="min-w-0 text-sm text-muted-foreground truncate">
                         {item.metadata
                             ? (
                                 <span className="status-badge status-badge-info" title={item.metadata.category_name}>
@@ -599,13 +617,13 @@ export default function AllFiles() {
                     </div>
                 );
             case 'modified':
-                return <div className="text-right text-sm text-muted-foreground tabular-nums">{formatDate(item.modified_at)}</div>;
+                return <div className="text-sm text-muted-foreground tabular-nums">{formatDate(item.modified_at)}</div>;
             case 'path':
                 return (
-                    <div className="text-right text-xs text-muted-foreground truncate">
+                    <div className="min-w-0 text-xs text-muted-foreground truncate">
                         <button
                             type="button"
-                            className="max-w-full truncate text-right hover:text-foreground hover:underline"
+                            className="max-w-full truncate text-left hover:text-foreground hover:underline"
                             onClick={(event) => openFolderFromPath(item, event)}
                             title={t('allFiles.showFolderContents')}
                         >
@@ -1371,14 +1389,15 @@ export default function AllFiles() {
                                                 key={column.id}
                                                 draggable
                                                 onDragStart={() => setDraggingColumnId(column.id)}
+                                                onDragEnd={() => setDraggingColumnId(null)}
                                                 onDragOver={(event) => event.preventDefault()}
                                                 onDrop={() => handleColumnDrop(column.id)}
-                                                className={`relative flex items-center gap-1 ${column.align === 'right' ? 'justify-end text-right' : ''}`}
+                                                className={`relative flex min-w-0 items-center gap-1 ${getColumnAlignmentClasses(column.align)}`}
                                             >
                                                 <div className="pointer-events-none absolute bottom-0 right-0 top-0 w-px bg-border/80" />
                                                 <button
                                                     type="button"
-                                                    className={`inline-flex items-center gap-1 hover:text-foreground ${column.sortKey ? '' : 'cursor-default'}`}
+                                                    className={`inline-flex min-w-0 items-center gap-1 hover:text-foreground ${column.sortKey ? '' : 'cursor-default'}`}
                                                     onClick={() => column.sortKey && handleSort(column.sortKey)}
                                                 >
                                                     <GripVertical size={12} className="opacity-45" />
@@ -1424,7 +1443,10 @@ export default function AllFiles() {
                                                         )}
                                                     </div>
                                                     {visibleColumns.map((column) => (
-                                                        <div key={column.id} className="relative">
+                                                        <div
+                                                            key={column.id}
+                                                            className={`relative flex min-w-0 items-center ${getColumnAlignmentClasses(column.align)}`}
+                                                        >
                                                             <div className="pointer-events-none absolute bottom-[-12px] right-0 top-[-12px] w-px bg-border/50" />
                                                             {renderColumnCell(item, column)}
                                                         </div>

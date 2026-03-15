@@ -32,9 +32,15 @@ const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 const FILE_BROWSER_COLUMNS = [
     { id: 'name', width: 320, minWidth: 180, align: 'left' },
     { id: 'size', width: 120, minWidth: 90, align: 'right' },
-    { id: 'modified', width: 180, minWidth: 140, align: 'right' },
+    { id: 'modified', width: 180, minWidth: 140, align: 'left' },
 ];
 const FILE_BROWSER_COLUMN_WIDTHS_STORAGE_KEY = 'driver-file-browser-column-widths-v1';
+
+const getColumnAlignmentClasses = (align) => {
+    if (align === 'right') return 'justify-end pr-2 text-right';
+    if (align === 'center') return 'justify-center px-2 text-center';
+    return 'justify-start pl-2 text-left';
+};
 
 function preloadMetadataModal() {
     metadataModulePromise ||= import('../components/MetadataModal');
@@ -209,11 +215,13 @@ export default function FileBrowser() {
 
     const tableMinWidth = useMemo(() => {
         const fixedWidth = 80;
+        const totalColumns = 2 + FILE_BROWSER_COLUMNS.length;
+        const gapPx = Math.max(0, totalColumns - 1) * 16; // gap-4
         const dynamicWidth = FILE_BROWSER_COLUMNS.reduce(
             (sum, column) => sum + Math.max(column.minWidth, columnWidths[column.id] ?? column.width),
             0
         );
-        return fixedWidth + dynamicWidth;
+        return fixedWidth + dynamicWidth + gapPx;
     }, [columnWidths]);
 
     // Selection Logic
@@ -821,10 +829,10 @@ export default function FileBrowser() {
                                     {FILE_BROWSER_COLUMNS.map((column) => (
                                         <div
                                             key={column.id}
-                                            className={`relative flex items-center gap-1 ${column.align === 'right' ? 'justify-end text-right' : ''}`}
+                                            className={`relative flex min-w-0 items-center gap-1 ${getColumnAlignmentClasses(column.align)}`}
                                         >
                                             <div className="pointer-events-none absolute bottom-0 right-0 top-0 w-px bg-border/80" />
-                                            <span className="inline-flex items-center gap-1">
+                                            <span className="inline-flex min-w-0 items-center gap-1">
                                                 <GripVertical size={12} className="opacity-45" />
                                                 {column.id === 'size' ? t('similarFiles.size') : t(`fileBrowser.${column.id}`)}
                                             </span>
@@ -857,50 +865,56 @@ export default function FileBrowser() {
                                                     {isFolder ? <Folder className="text-primary fill-primary/15" size={20} /> : <File className="text-muted-foreground" size={20} />}
                                                 </div>
 
-                                                <div className="relative min-w-0 truncate font-medium">
+                                                <div className={`relative flex min-w-0 items-center ${getColumnAlignmentClasses(FILE_BROWSER_COLUMNS.find((column) => column.id === 'name')?.align)}`}>
                                                     <div className="pointer-events-none absolute bottom-[-12px] right-[-8px] top-[-12px] w-px bg-border/50" />
-                                                    {isFolder ? (
-                                                        <Link
-                                                            to={`/drive/${accountId}/${file.id}`}
-                                                            className="cursor-pointer text-foreground hover:underline"
-                                                            onClick={(e) => e.stopPropagation()}
-                                                        >
-                                                            {file.name}
-                                                        </Link>
-                                                    ) : (
-                                                        isPreviewableFileName(file.name) ? (
-                                                            <button
-                                                                type="button"
-                                                                className="truncate text-left text-foreground hover:underline"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    preloadImagePreviewModal();
-                                                                    setImagePreviewItem({
-                                                                        accountId,
-                                                                        itemId: file.id,
-                                                                        filename: file.name,
-                                                                    });
-                                                                }}
-                                                                title={t('fileBrowser.previewFile')}
+                                                    <div className="min-w-0 truncate font-medium">
+                                                        {isFolder ? (
+                                                            <Link
+                                                                to={`/drive/${accountId}/${file.id}`}
+                                                                className="cursor-pointer text-foreground hover:underline"
+                                                                onClick={(e) => e.stopPropagation()}
                                                             >
                                                                 {file.name}
-                                                            </button>
+                                                            </Link>
                                                         ) : (
-                                                            <span className="text-foreground">
-                                                                {file.name}
-                                                            </span>
-                                                        )
-                                                    )}
+                                                            isPreviewableFileName(file.name) ? (
+                                                                <button
+                                                                    type="button"
+                                                                    className="truncate text-left text-foreground hover:underline"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        preloadImagePreviewModal();
+                                                                        setImagePreviewItem({
+                                                                            accountId,
+                                                                            itemId: file.id,
+                                                                            filename: file.name,
+                                                                        });
+                                                                    }}
+                                                                    title={t('fileBrowser.previewFile')}
+                                                                >
+                                                                    {file.name}
+                                                                </button>
+                                                            ) : (
+                                                                <span className="text-foreground">
+                                                                    {file.name}
+                                                                </span>
+                                                            )
+                                                        )}
+                                                    </div>
                                                 </div>
 
-                                                <div className="relative text-right text-sm tabular-nums text-muted-foreground">
+                                                <div className={`relative flex min-w-0 items-center ${getColumnAlignmentClasses(FILE_BROWSER_COLUMNS.find((column) => column.id === 'size')?.align)}`}>
                                                     <div className="pointer-events-none absolute bottom-[-12px] right-[-8px] top-[-12px] w-px bg-border/50" />
-                                                    {formatSize(file.size ?? 0)}
+                                                    <div className="text-sm tabular-nums text-muted-foreground">
+                                                        {formatSize(file.size ?? 0)}
+                                                    </div>
                                                 </div>
 
-                                                <div className="relative text-right text-sm tabular-nums text-muted-foreground">
+                                                <div className={`relative flex min-w-0 items-center ${getColumnAlignmentClasses(FILE_BROWSER_COLUMNS.find((column) => column.id === 'modified')?.align)}`}>
                                                     <div className="pointer-events-none absolute bottom-[-12px] right-0 top-[-12px] w-px bg-border/50" />
-                                                    {formatDate(file.modified_at)}
+                                                    <div className="text-sm tabular-nums text-muted-foreground">
+                                                        {formatDate(file.modified_at)}
+                                                    </div>
                                                 </div>
                                             </div>
                                         );

@@ -136,6 +136,71 @@ async def test_refresh_token_persists_new_tokens_and_updates_original_account():
     db.commit.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_refresh_token_marks_account_inactive_for_relink_required_failures():
+    locked_account = _account(provider="google")
+    db = AsyncMock()
+    db.execute.return_value = _ScalarOneResult(locked_account)
+    auth_service = SimpleNamespace(
+        refresh_access_token=AsyncMock(
+            side_effect=TokenRefreshError(
+                "Google token refresh failed with invalid_grant",
+                deactivate_account=True,
+            )
+        )
+    )
+    manager = _manager(db=db, google=auth_service)
+    manager._mark_account_inactive = AsyncMock()
+
+    with patch("backend.security.token_manager.decrypt_token", return_value="refresh-token"):
+        with pytest.raises(TokenRefreshError, match="invalid_grant"):
+            await manager._refresh_token(locked_account, force=True)
+
+    manager._mark_account_inactive.assert_awaited_once_with(locked_account)
+    db.rollback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_rolls_back_but_keeps_account_active_for_transient_failures():
+    locked_account = _account(provider="google")
+    db = AsyncMock()
+    db.execute.return_value = _ScalarOneResult(locked_account)
+    auth_service = SimpleNamespace(
+        refresh_access_token=AsyncMock(
+            side_effect=TokenRefreshError(
+                "Google token refresh failed due to a temporary provider or network issue",
+                deactivate_account=False,
+            )
+        )
+    )
+    manager = _manager(db=db, google=auth_service)
+    manager._mark_account_inactive = AsyncMock()
+
+    with patch("backend.security.token_manager.decrypt_token", return_value="refresh-token"):
+        with pytest.raises(TokenRefreshError, match="temporary provider or network issue"):
+            await manager._refresh_token(locked_account, force=True)
+
+    manager._mark_account_inactive.assert_not_awaited()
+    db.rollback.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_raises_without_deactivating_account_when_service_returns_no_data():
+    locked_account = _account(provider="google")
+    db = AsyncMock()
+    db.execute.return_value = _ScalarOneResult(locked_account)
+    auth_service = SimpleNamespace(refresh_access_token=AsyncMock(return_value=None))
+    manager = _manager(db=db, google=auth_service)
+    manager._mark_account_inactive = AsyncMock()
+
+    with patch("backend.security.token_manager.decrypt_token", return_value="refresh-token"):
+        with pytest.raises(TokenRefreshError, match="google token refresh returned no token data"):
+            await manager._refresh_token(locked_account, force=True)
+
+    manager._mark_account_inactive.assert_not_awaited()
+    db.rollback.assert_awaited_once()
+
+
 def test_auth_service_resolution_and_access_token_shape_checks():
     microsoft_service = AsyncMock()
     google_service = AsyncMock()

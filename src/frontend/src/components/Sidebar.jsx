@@ -109,7 +109,7 @@ function SidebarBody({ location, quickLinks, showQuotaCard, usedPercent, used, t
     );
 }
 
-export default function Sidebar({ mobileOpen = false, onNavigate = null }) {
+export default function Sidebar({ mobileOpen = false, desktopCollapsed = false, onNavigate = null }) {
     const { t } = useTranslation();
     const location = useLocation();
     const showQuotaCard = location.pathname === '/accounts' || location.pathname.startsWith('/drive/');
@@ -142,20 +142,22 @@ export default function Sidebar({ mobileOpen = false, onNavigate = null }) {
 
     return (
         <>
-            <aside className="sticky top-0 hidden h-full w-56 shrink-0 flex-col border-r border-border bg-card lg:flex xl:w-60">
-                <SidebarBody
-                    location={location}
-                    quickLinks={quickLinks}
-                    showQuotaCard={showQuotaCard}
-                    usedPercent={usedPercent}
-                    used={used}
-                    total={total}
-                    isQuotaLoading={isQuotaLoading}
-                    isQuotaError={isQuotaError}
-                    onNavigate={null}
-                    t={t}
-                />
-            </aside>
+            {!desktopCollapsed && (
+                <aside className="sticky top-0 hidden h-full w-56 shrink-0 flex-col border-r border-border bg-card lg:flex xl:w-60">
+                    <SidebarBody
+                        location={location}
+                        quickLinks={quickLinks}
+                        showQuotaCard={showQuotaCard}
+                        usedPercent={usedPercent}
+                        used={used}
+                        total={total}
+                        isQuotaLoading={isQuotaLoading}
+                        isQuotaError={isQuotaError}
+                        onNavigate={null}
+                        t={t}
+                    />
+                </aside>
+            )}
 
             <div
                 className={`layer-overlay fixed inset-0 bg-slate-900/35 transition-opacity duration-200 lg:hidden ${

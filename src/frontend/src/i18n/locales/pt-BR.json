@@ -36,7 +36,9 @@
     "aiExperimental": "IA (Experimental)",
     "admin": "Admin",
     "quota": "Quota",
-    "quotaUsed": "{{percent}}% usado"
+    "quotaUsed": "{{percent}}% usado",
+    "collapse": "Recolher barra lateral",
+    "expand": "Expandir barra lateral"
   },
   "adminTabs": {
     "dashboard": "Painel",

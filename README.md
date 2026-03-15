@@ -177,20 +177,53 @@ docker compose down
 
 ### Local development
 
-Backend:
+Install dependencies once:
 
 ```bash
-uv sync
-uv run alembic upgrade head
-uv run uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+uv sync --project src/backend
+npm.cmd --prefix src/frontend ci --workspaces=false
 ```
 
-Frontend:
+Run backend + frontend in one terminal:
 
 ```bash
-cd src/frontend
-npm.cmd ci --workspaces=false
-npm.cmd run dev --workspaces=false
+uv run scripts/dev.py
+```
+
+By default this launcher starts:
+
+- backend API
+- Vite frontend
+- `worker-light`
+- `worker-default`
+- `worker-heavy`
+
+Redis still needs to be running separately.
+
+Useful flags:
+
+```bash
+uv run scripts/dev.py --skip-migrate
+uv run scripts/dev.py --skip-workers
+uv run scripts/dev.py --with-scheduler
+uv run scripts/dev.py --backend-port 8001 --frontend-port 5174
+uv run scripts/dev.py --dry-run
+```
+
+Manual backend (PowerShell, from repo root):
+
+```powershell
+uv sync --project src/backend
+$env:PYTHONPATH = (Resolve-Path .\src)
+uv run --project src/backend alembic -c src/alembic.ini upgrade head
+uv run --project src/backend uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Manual frontend:
+
+```bash
+npm.cmd --prefix src/frontend ci --workspaces=false
+npm.cmd --prefix src/frontend run dev --workspaces=false
 ```
 
 Workers via Docker Compose:

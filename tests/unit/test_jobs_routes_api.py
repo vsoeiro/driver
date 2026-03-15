@@ -435,6 +435,60 @@ async def test_create_reindex_and_library_chunk_routes(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_create_extract_library_comic_assets_job_chunks_globally_across_accounts(monkeypatch):
+    account_a = UUID("00000000-0000-0000-0000-000000000001")
+    account_b = UUID("00000000-0000-0000-0000-000000000002")
+    enqueue_mock = AsyncMock(side_effect=[
+        SimpleNamespace(id=uuid4()),
+        SimpleNamespace(id=uuid4()),
+    ])
+    monkeypatch.setattr(jobs_routes, "enqueue_job_command", enqueue_mock)
+    monkeypatch.setattr(
+        jobs_routes,
+        "_fetch_rows_with_limit",
+        AsyncMock(return_value=[
+            (account_a, "item-1"),
+            (account_a, "item-2"),
+            (account_a, "item-3"),
+            (account_b, "item-4"),
+        ]),
+    )
+    monkeypatch.setattr(
+        jobs_routes,
+        "_filter_unmapped_comic_items",
+        AsyncMock(return_value={
+            account_a: ["item-1", "item-2", "item-3"],
+            account_b: ["item-4"],
+        }),
+    )
+
+    response = await jobs_routes.create_extract_library_comic_assets_job(
+        JobExtractLibraryComicAssetsRequest(chunk_size=2),
+        db=object(),
+    )
+
+    assert response.total_items == 4
+    assert response.total_jobs == 2
+    first_payload = enqueue_mock.await_args_list[0].kwargs["payload"]
+    second_payload = enqueue_mock.await_args_list[1].kwargs["payload"]
+    assert first_payload == {
+        "indexed_item_groups": [
+            {"account_id": str(account_a), "item_ids": ["item-1", "item-2"]},
+        ],
+        "use_indexed_items": True,
+    }
+    assert second_payload == {
+        "indexed_item_groups": [
+            {"account_id": str(account_a), "item_ids": ["item-3"]},
+            {"account_id": str(account_b), "item_ids": ["item-4"]},
+        ],
+        "use_indexed_items": True,
+    }
+    assert enqueue_mock.await_args_list[0].kwargs["dedupe_key"].startswith("comics-map:")
+    assert enqueue_mock.await_args_list[1].kwargs["dedupe_key"].startswith("comics-map:")
+
+
+@pytest.mark.asyncio
 async def test_create_map_library_books_and_extract_library_delegate(monkeypatch):
     account_id = uuid4()
     enqueue_mock = AsyncMock(side_effect=[

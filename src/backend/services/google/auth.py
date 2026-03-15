@@ -9,9 +9,10 @@ from urllib.parse import urlencode
 import httpx
 import jwt
 
+from backend.core.exceptions import TokenRefreshError
 from backend.core.config import get_settings
 from backend.security.oauth_types import TokenResult
-from backend.services.oauth_http import post_form_with_retry
+from backend.services.oauth_http import OAuthTokenRequestError, post_form_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -65,25 +66,41 @@ class GoogleAuthService:
             "refresh_token": refresh_token,
             "grant_type": "refresh_token",
         }
-        result = await self._token_request(payload)
+        result = await self._token_request(payload, raise_on_failure=True)
         if result and not result.refresh_token:
             result.refresh_token = refresh_token
         return result
 
-    async def _token_request(self, payload: dict) -> TokenResult | None:
-        response = await post_form_with_retry(
-            url=GOOGLE_TOKEN_URL,
-            payload=payload,
-            timeout=GOOGLE_TIMEOUT,
-            provider="Google",
-        )
-        if response is None:
-            return None
+    async def _token_request(
+        self,
+        payload: dict,
+        *,
+        raise_on_failure: bool = False,
+    ) -> TokenResult | None:
+        try:
+            response = await post_form_with_retry(
+                url=GOOGLE_TOKEN_URL,
+                payload=payload,
+                timeout=GOOGLE_TIMEOUT,
+                provider="Google",
+            )
+        except OAuthTokenRequestError as exc:
+            if not raise_on_failure:
+                logger.error(
+                    "Google token request failed during auth flow: status=%s error=%s details=%s",
+                    exc.status_code,
+                    exc.error_code,
+                    exc.details,
+                )
+                return None
+            raise self._build_refresh_error(exc) from exc
 
         data = response.json()
         access_token = data.get("access_token")
         if not access_token:
             logger.error("Google token request did not return access_token: %s", data)
+            if raise_on_failure:
+                raise TokenRefreshError("Google token refresh did not return access_token")
             return None
 
         expires_in = int(data.get("expires_in", 3600))
@@ -107,6 +124,29 @@ class GoogleAuthService:
             expires_at=expires_at,
             id_token_claims=id_token_claims,
         )
+
+    def _build_refresh_error(self, exc: OAuthTokenRequestError) -> TokenRefreshError:
+        detail = (exc.details or "").strip()
+        if exc.error_code == "invalid_grant":
+            suffix = f": {detail}" if detail else ""
+            return TokenRefreshError(
+                f"Google token refresh failed with invalid_grant{suffix}. Re-link the Google account.",
+                deactivate_account=True,
+            )
+
+        if exc.transient:
+            suffix = f": {detail}" if detail else ""
+            return TokenRefreshError(
+                f"Google token refresh failed due to a temporary provider or network issue{suffix}",
+                deactivate_account=False,
+            )
+
+        message = "Google token refresh failed"
+        if exc.error_code:
+            message += f" with {exc.error_code}"
+        if detail:
+            message += f": {detail}"
+        return TokenRefreshError(message, deactivate_account=False)
 
 
 _auth_service: GoogleAuthService | None = None

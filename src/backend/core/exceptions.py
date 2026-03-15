@@ -68,14 +68,23 @@ class AccountNotFoundError(DriveOrganizerError):
 class TokenRefreshError(DriveOrganizerError):
     """Raised when token refresh fails."""
 
-    def __init__(self, message: str = "Failed to refresh access token") -> None:
+    def __init__(
+        self,
+        message: str = "Failed to refresh access token",
+        *,
+        deactivate_account: bool = False,
+    ) -> None:
         """Initialize token refresh error.
 
         Parameters
         ----------
         message : str, optional
             Error message.
+        deactivate_account : bool, optional
+            Whether the linked account should be marked inactive because the
+            refresh token is no longer usable.
         """
+        self.deactivate_account = deactivate_account
         super().__init__(message, status_code=401)
 
 

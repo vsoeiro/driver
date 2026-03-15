@@ -38,7 +38,7 @@ FROM base AS runtime-base
 
 COPY backend ./src/backend
 COPY alembic ./src/alembic
-COPY alembic.ini ./alembic.ini
+COPY alembic.ini ./src/alembic.ini
 
 EXPOSE 8000
 

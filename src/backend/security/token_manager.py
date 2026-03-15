@@ -123,58 +123,71 @@ class TokenManager:
             If refresh fails.
 
         """
-        # Use select with_for_update to lock the row and prevent race conditions
         from sqlalchemy import select
-        
-        # Start a new transaction or use existing one to lock the row
-        # This prevents other concurrent requests from refreshing the same token
+
+        # Lock the row to prevent concurrent refresh attempts for the same account.
         stmt = select(LinkedAccount).where(LinkedAccount.id == account.id).with_for_update()
         result = await self._db.execute(stmt)
         locked_account = result.scalar_one()
 
-        # Check if validity again - maybe another process just refreshed it
+        # Another process may have refreshed the token while we waited on the lock.
         if not force and self._is_token_valid(locked_account):
-             logger.info("Token was already refreshed by another process")
-             token = decrypt_token(locked_account.access_token_encrypted)
-             if token and self._looks_like_valid_access_token(locked_account.provider, token):
-                 # Update the passed account object in memory to match DB
-                 account.access_token_encrypted = locked_account.access_token_encrypted
-                 account.refresh_token_encrypted = locked_account.refresh_token_encrypted
-                 account.token_expires_at = locked_account.token_expires_at
-                 return token
+            logger.info("Token was already refreshed by another process")
+            token = decrypt_token(locked_account.access_token_encrypted)
+            if token and self._looks_like_valid_access_token(locked_account.provider, token):
+                account.access_token_encrypted = locked_account.access_token_encrypted
+                account.refresh_token_encrypted = locked_account.refresh_token_encrypted
+                account.token_expires_at = locked_account.token_expires_at
+                return token
 
         if not locked_account.refresh_token_encrypted:
             logger.error("No refresh token available for account %s", locked_account.id)
             await self._mark_account_inactive(locked_account)
-            raise TokenRefreshError("No refresh token available")
+            raise TokenRefreshError("No refresh token available", deactivate_account=True)
 
         refresh_token = decrypt_token(locked_account.refresh_token_encrypted)
         if not refresh_token:
             logger.error("Failed to decrypt refresh token for account %s", locked_account.id)
             await self._mark_account_inactive(locked_account)
-            raise TokenRefreshError("Failed to decrypt refresh token")
+            raise TokenRefreshError("Failed to decrypt refresh token", deactivate_account=True)
 
         auth_service = self._get_auth_service(locked_account.provider)
-        result = await auth_service.refresh_access_token(refresh_token)
-        if not result:
-            logger.error("Token refresh failed for account %s", locked_account.id)
-            await self._mark_account_inactive(locked_account)
-            raise TokenRefreshError("Token refresh failed")
+        try:
+            refreshed_tokens = await auth_service.refresh_access_token(refresh_token)
+            if not refreshed_tokens:
+                raise TokenRefreshError(
+                    f"{locked_account.provider} token refresh returned no token data"
+                )
 
-        locked_account.access_token_encrypted = encrypt_token(result.access_token)
-        if result.refresh_token:
-            locked_account.refresh_token_encrypted = encrypt_token(result.refresh_token)
-        locked_account.token_expires_at = result.expires_at
+            locked_account.access_token_encrypted = encrypt_token(refreshed_tokens.access_token)
+            if refreshed_tokens.refresh_token:
+                locked_account.refresh_token_encrypted = encrypt_token(
+                    refreshed_tokens.refresh_token
+                )
+            locked_account.token_expires_at = refreshed_tokens.expires_at
 
-        # Update the original object reference too
-        account.access_token_encrypted = locked_account.access_token_encrypted
-        account.refresh_token_encrypted = locked_account.refresh_token_encrypted
-        account.token_expires_at = locked_account.token_expires_at
+            account.access_token_encrypted = locked_account.access_token_encrypted
+            account.refresh_token_encrypted = locked_account.refresh_token_encrypted
+            account.token_expires_at = locked_account.token_expires_at
 
-        await self._db.commit()
-        logger.info("Successfully refreshed token for account %s", locked_account.id)
-
-        return result.access_token
+            await self._db.commit()
+            logger.info("Successfully refreshed token for account %s", locked_account.id)
+            return refreshed_tokens.access_token
+        except TokenRefreshError as exc:
+            logger.error(
+                "Token refresh failed for account %s (provider=%s): %s",
+                locked_account.id,
+                locked_account.provider,
+                exc.message,
+            )
+            if exc.deactivate_account:
+                await self._mark_account_inactive(locked_account)
+            else:
+                await self._db.rollback()
+            raise
+        except Exception:
+            await self._db.rollback()
+            raise
 
     def _looks_like_valid_access_token(self, provider: str, token: str) -> bool:
         value = (token or "").strip()

@@ -21,9 +21,9 @@ const JOB_TABLE_COLUMNS = [
     { id: 'status', width: 104, minWidth: 96, align: 'left' },
     { id: 'jobId', width: 96, minWidth: 90, align: 'left' },
     { id: 'type', width: 280, minWidth: 220, align: 'left' },
-    { id: 'created', width: 116, minWidth: 110, align: 'right' },
-    { id: 'started', width: 116, minWidth: 110, align: 'right' },
-    { id: 'finished', width: 116, minWidth: 110, align: 'right' },
+    { id: 'created', width: 116, minWidth: 110, align: 'left' },
+    { id: 'started', width: 116, minWidth: 110, align: 'left' },
+    { id: 'finished', width: 116, minWidth: 110, align: 'left' },
     { id: 'duration', width: 82, minWidth: 80, align: 'right' },
     { id: 'eta', width: 112, minWidth: 104, align: 'left' },
     { id: 'progress', width: 320, minWidth: 240, align: 'left' },
@@ -31,6 +31,12 @@ const JOB_TABLE_COLUMNS = [
 ];
 const JOB_TABLE_COLUMN_WIDTHS_STORAGE_KEY = 'driver-jobs-table-widths-v1';
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
+
+const getColumnAlignmentClasses = (align) => {
+    if (align === 'right') return 'justify-end text-right';
+    if (align === 'center') return 'justify-center text-center';
+    return 'justify-start text-left';
+};
 
 export default function Jobs() {
     const { t, i18n } = useTranslation();
@@ -156,11 +162,13 @@ export default function Jobs() {
 
     const jobsTableMinWidth = useMemo(() => {
         const selectWidth = 38;
+        const totalColumns = 1 + JOB_TABLE_COLUMNS.length;
+        const gapPx = Math.max(0, totalColumns - 1) * 12; // gap-3
         const dynamicWidth = JOB_TABLE_COLUMNS.reduce(
             (sum, column) => sum + Math.max(column.minWidth, columnWidths[column.id] ?? column.width),
             0
         );
-        return selectWidth + dynamicWidth;
+        return selectWidth + dynamicWidth + gapPx;
     }, [columnWidths]);
 
     const beginResize = (event, column) => {
@@ -741,10 +749,10 @@ export default function Jobs() {
                                     return (
                                         <div
                                             key={column.id}
-                                            className={`relative flex items-center gap-1 ${column.align === 'right' ? 'justify-end text-right' : column.align === 'center' ? 'justify-center text-center' : ''}`}
+                                            className={`relative flex min-w-0 items-center gap-1 ${getColumnAlignmentClasses(column.align)}`}
                                         >
                                             {column.id !== 'actions' && <div className="pointer-events-none absolute bottom-0 right-0 top-0 w-px bg-border/80" />}
-                                            <span className="inline-flex items-center gap-1">
+                                            <span className="inline-flex min-w-0 items-center gap-1">
                                                 {column.id !== 'actions' && <GripVertical size={12} className="opacity-45" />}
                                                 {label}
                                             </span>
@@ -800,48 +808,63 @@ export default function Jobs() {
                                                 aria-label={`${t('jobs.jobId')} ${String(job.id).slice(0, 8)}`}
                                             />
                                         </div>
-                                        <div className="pointer-events-auto relative">
+                                        <div className={`pointer-events-auto relative flex min-w-0 items-center ${getColumnAlignmentClasses('left')}`}>
                                             <div className="pointer-events-none absolute bottom-[-10px] right-[-6px] top-[-10px] w-px bg-border/50" />
                                             <div className={`status-badge ${getStatusTone(job.status)}`}>
                                                 {getStatusIcon(job.status)}
                                                 <span>{formatJobStatus(job.status, t)}</span>
                                             </div>
                                         </div>
-                                        <div className="pointer-events-auto relative font-mono text-xs text-muted-foreground truncate" title={job.id}>
+                                        <div className={`pointer-events-auto relative flex min-w-0 items-center ${getColumnAlignmentClasses('left')}`}>
                                             <div className="pointer-events-none absolute bottom-[-10px] right-[-6px] top-[-10px] w-px bg-border/50" />
-                                            {String(job.id).slice(0, 8)}...
+                                            <div className="min-w-0 truncate font-mono text-xs text-muted-foreground" title={job.id}>
+                                                {String(job.id).slice(0, 8)}...
+                                            </div>
                                         </div>
-                                        <div className="pointer-events-auto relative font-medium text-foreground truncate">
+                                        <div className={`pointer-events-auto relative flex min-w-0 items-center ${getColumnAlignmentClasses('left')}`}>
                                             <div className="pointer-events-none absolute bottom-[-10px] right-[-6px] top-[-10px] w-px bg-border/50" />
-                                            {formatJobType(job.type, t)}
+                                            <div className="min-w-0 truncate font-medium text-foreground">
+                                                {formatJobType(job.type, t)}
+                                            </div>
                                         </div>
-                                        <div className="pointer-events-auto relative text-right text-muted-foreground tabular-nums">
+                                        <div className={`pointer-events-auto relative flex min-w-0 items-center ${getColumnAlignmentClasses(JOB_TABLE_COLUMNS.find((column) => column.id === 'created')?.align)}`}>
                                             <div className="pointer-events-none absolute bottom-[-10px] right-[-6px] top-[-10px] w-px bg-border/50" />
-                                            {formatDate(job.created_at)}
+                                            <div className="text-muted-foreground tabular-nums">
+                                                {formatDate(job.created_at)}
+                                            </div>
                                         </div>
-                                        <div className="pointer-events-auto relative text-right text-muted-foreground tabular-nums">
+                                        <div className={`pointer-events-auto relative flex min-w-0 items-center ${getColumnAlignmentClasses(JOB_TABLE_COLUMNS.find((column) => column.id === 'started')?.align)}`}>
                                             <div className="pointer-events-none absolute bottom-[-10px] right-[-6px] top-[-10px] w-px bg-border/50" />
-                                            {formatDate(job.started_at)}
+                                            <div className="text-muted-foreground tabular-nums">
+                                                {formatDate(job.started_at)}
+                                            </div>
                                         </div>
-                                        <div className="pointer-events-auto relative text-right text-muted-foreground tabular-nums">
+                                        <div className={`pointer-events-auto relative flex min-w-0 items-center ${getColumnAlignmentClasses(JOB_TABLE_COLUMNS.find((column) => column.id === 'finished')?.align)}`}>
                                             <div className="pointer-events-none absolute bottom-[-10px] right-[-6px] top-[-10px] w-px bg-border/50" />
-                                            {formatDate(finishedAt)}
+                                            <div className="text-muted-foreground tabular-nums">
+                                                {formatDate(finishedAt)}
+                                            </div>
                                         </div>
-                                        <div className="pointer-events-auto relative text-right text-muted-foreground tabular-nums font-mono">
+                                        <div className={`pointer-events-auto relative flex min-w-0 items-center ${getColumnAlignmentClasses(JOB_TABLE_COLUMNS.find((column) => column.id === 'duration')?.align)}`}>
                                             <div className="pointer-events-none absolute bottom-[-10px] right-[-6px] top-[-10px] w-px bg-border/50" />
-                                            {duration}
+                                            <div className="font-mono text-muted-foreground tabular-nums">
+                                                {duration}
+                                            </div>
                                         </div>
-                                        <div className="pointer-events-auto relative text-xs text-muted-foreground tabular-nums leading-5">
+                                        <div className={`pointer-events-auto relative flex min-w-0 items-center ${getColumnAlignmentClasses(JOB_TABLE_COLUMNS.find((column) => column.id === 'eta')?.align)}`}>
                                             <div className="pointer-events-none absolute bottom-[-10px] right-[-6px] top-[-10px] w-px bg-border/50" />
-                                            <div>{etaText}</div>
-                                            {isQueued && (
-                                                <div>
-                                                    {t('jobs.started')}: {formatDate(job.estimated_start_at)}
-                                                </div>
-                                            )}
+                                            <div className="min-w-0 text-xs text-muted-foreground tabular-nums leading-5">
+                                                <div>{etaText}</div>
+                                                {isQueued && (
+                                                    <div>
+                                                        {t('jobs.started')}: {formatDate(job.estimated_start_at)}
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
-                                        <div className="pointer-events-auto relative">
+                                        <div className={`pointer-events-auto relative flex min-w-0 items-center ${getColumnAlignmentClasses(JOB_TABLE_COLUMNS.find((column) => column.id === 'progress')?.align)}`}>
                                             <div className="pointer-events-none absolute bottom-[-10px] right-[-6px] top-[-10px] w-px bg-border/50" />
+                                            <div className="min-w-0">
                                             <div className="flex items-center gap-2">
                                                 <div className="h-3 flex-1 overflow-hidden rounded-sm border border-border/60 bg-muted/60">
                                                     <div className="flex h-full">
@@ -880,9 +903,10 @@ export default function Jobs() {
                                                     {hasKnownTotal ? totalItems : '-'}
                                                 </span>
                                             </div>
+                                            </div>
                                         </div>
-                                        <div className="text-right pointer-events-auto">
-                                            <div className="flex items-center justify-end gap-1">
+                                        <div className={`pointer-events-auto relative flex min-w-0 items-center ${getColumnAlignmentClasses(JOB_TABLE_COLUMNS.find((column) => column.id === 'actions')?.align)}`}>
+                                            <div className="flex items-center justify-center gap-1">
                                                 {canUndo && (
                                                     <button
                                                         onClick={() => triggerUndo(job.result.batch_id)}

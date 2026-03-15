@@ -11,6 +11,7 @@ import msal
 from starlette.concurrency import run_in_threadpool
 
 from backend.core.config import get_settings
+from backend.core.exceptions import TokenRefreshError
 from backend.security.oauth_types import TokenResult
 
 logger = logging.getLogger(__name__)
@@ -115,9 +116,18 @@ class MicrosoftAuthService:
         )
 
         if "access_token" not in result:
-            error = result.get("error", "unknown")
-            logger.error("Token refresh failed: %s", error)
-            return None
+            error = str(result.get("error") or "unknown")
+            description = str(result.get("error_description") or "").strip()
+            logger.error("Microsoft token refresh failed: %s - %s", error, description)
+            message = f"Microsoft token refresh failed with {error}"
+            if description:
+                message += f": {description}"
+            if error == "invalid_grant":
+                message += ". Re-link the Microsoft account."
+            raise TokenRefreshError(
+                message,
+                deactivate_account=(error == "invalid_grant"),
+            )
 
         expires_in = result.get("expires_in", 3600)
         expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
