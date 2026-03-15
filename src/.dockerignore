@@ -10,6 +10,7 @@ backend/.mypy_cache
 backend/.coverage
 
 # Frontend build artifacts (not needed for backend images)
+frontend
 frontend/node_modules
 frontend/dist
 

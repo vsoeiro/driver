@@ -4,9 +4,11 @@ FROM node:20-alpine AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm,sharing=locked npm ci
+RUN --mount=type=cache,target=/root/.npm,sharing=locked npm ci --no-audit --no-fund
 
-COPY . .
+COPY index.html nginx.conf postcss.config.js tailwind.config.js vite.config.js ./
+COPY public ./public
+COPY src ./src
 RUN npm run build
 
 FROM nginx:1.27-alpine

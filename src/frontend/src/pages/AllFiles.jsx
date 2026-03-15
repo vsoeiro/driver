@@ -1,4 +1,4 @@
-﻿import { Fragment, useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { Fragment, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -564,7 +564,7 @@ export default function AllFiles() {
                                         filename: item.name,
                                     });
                                 }}
-                                                        title={t('allFiles.previewFile')}
+                                title={t('allFiles.previewFile')}
                             >
                                 {item.name}
                             </button>
@@ -989,22 +989,20 @@ export default function AllFiles() {
                 <button
                     type="button"
                     onClick={() => setActiveTab('library')}
-                    className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                        activeTab === 'library'
+                    className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${activeTab === 'library'
                             ? 'bg-primary text-primary-foreground'
                             : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                    }`}
+                        }`}
                 >
                     {t('allFiles.fileLibrary')}
                 </button>
                 <button
                     type="button"
                     onClick={() => setActiveTab('similar')}
-                    className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                        activeTab === 'similar'
+                    className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${activeTab === 'similar'
                             ? 'bg-primary text-primary-foreground'
                             : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                    }`}
+                        }`}
                 >
                     {t('allFiles.similarFiles')}
                 </button>
@@ -1012,651 +1010,651 @@ export default function AllFiles() {
 
             {activeTab === 'library' ? (
                 <>
-            {/* Unified command bar */}
-            <div className="surface-card relative layer-dropdown mb-4 overflow-visible">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-4 py-3">
-                <div className="flex items-center gap-2">
-                    <button
-                        onClick={clearPathPrefix}
-                        className={`page-title appearance-none border-0 bg-transparent p-0 hover:text-primary transition-colors ${!pathPrefix ? 'text-foreground' : 'text-muted-foreground'}`}
-                    >
-                        {t('allFiles.fileLibrary')}
-                    </button>
-                    {breadcrumbSegments.map((seg) => (
-                        <Fragment key={seg.path}>
-                            <ChevronRight size={16} className="text-muted-foreground" />
-                            <button
-                                onClick={() => {
-                                    setSearchTerm('');
-                                    setCurrentFolderTarget(folderTargetsByPath[seg.path] || null);
-                                    setPathPrefix(seg.path);
-                                    setPage(1);
-                                }}
-                                className={`page-title hover:text-primary transition-colors ${pathPrefix === seg.path ? 'text-foreground' : 'text-muted-foreground'}`}
-                            >
-                                {seg.label}
-                            </button>
-                        </Fragment>
-                    ))}
-                    <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-0.5 rounded-full ml-2">{t('allFiles.itemsCount', { count: total })}</span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                    <select
-                        className="input-shell px-2 py-1.5 text-sm"
-                        value={searchScope}
-                        onChange={(e) => setSearchScope(e.target.value)}
-                    >
-                        <option value="both">{t('allFiles.titlePath')}</option>
-                        <option value="name">{t('allFiles.title')}</option>
-                        <option value="path">{t('allFiles.path')}</option>
-                    </select>
-                    <div className="relative">
-                        <Search className="absolute left-2 top-1.5 text-muted-foreground" size={16} />
-                        <input
-                            type="text"
-                            placeholder={searchPlaceholders[searchScope]}
-                            className="input-shell pl-8 pr-4 py-1.5 text-sm w-64"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); } }}
-                        />
-                    </div>
-                    <FilterBar onFilter={setFilters} filters={filters} accounts={accounts} categories={metaCategories} />
-                    <div className="relative" ref={columnsMenuRef}>
-                        <button
-                            onClick={() => setColumnsMenuOpen((prev) => !prev)}
-                            className="flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium hover:bg-accent"
-                            title={t('allFiles.chooseColumns')}
-                        >
-                            <Columns3 size={16} />
-                            {t('allFiles.columnsTitle')}
-                        </button>
-                        {columnsMenuOpen && (
-                            <div className="menu-popover absolute right-0 top-full mt-2 w-56 p-2 layer-popover space-y-1">
-                                {orderedColumns.map((column) => (
-                                    <label key={column.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent cursor-pointer text-sm">
-                                        <input
-                                            type="checkbox"
-                                            checked={columnVisibility[column.id] !== false}
-                                            onChange={(event) => {
-                                                const nextChecked = event.target.checked;
-                                                setColumnVisibility((prev) => {
-                                                    const next = { ...prev, [column.id]: nextChecked };
-                                                    const visibleCount = Object.values(next).filter(Boolean).length;
-                                                    if (visibleCount === 0) {
-                                                        next[column.id] = true;
-                                                    }
-                                                    return next;
-                                                });
+                    {/* Unified command bar */}
+                    <div className="surface-card relative layer-dropdown mb-4 overflow-visible">
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-4 py-3">
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={clearPathPrefix}
+                                    className={`page-title appearance-none border-0 bg-transparent p-0 hover:text-primary transition-colors ${!pathPrefix ? 'text-foreground' : 'text-muted-foreground'}`}
+                                >
+                                    {t('allFiles.fileLibrary')}
+                                </button>
+                                {breadcrumbSegments.map((seg) => (
+                                    <Fragment key={seg.path}>
+                                        <ChevronRight size={16} className="text-muted-foreground" />
+                                        <button
+                                            onClick={() => {
+                                                setSearchTerm('');
+                                                setCurrentFolderTarget(folderTargetsByPath[seg.path] || null);
+                                                setPathPrefix(seg.path);
+                                                setPage(1);
                                             }}
-                                        />
-                                        <span>{t(`allFiles.columns.${column.id}`)}</span>
-                                    </label>
+                                            className={`page-title hover:text-primary transition-colors ${pathPrefix === seg.path ? 'text-foreground' : 'text-muted-foreground'}`}
+                                        >
+                                            {seg.label}
+                                        </button>
+                                    </Fragment>
                                 ))}
-                            </div>
-                        )}
-                    </div>
-                    {(isComicsLibraryActive || isImagesLibraryActive || isBooksLibraryActive) && (
-                        <div className="relative layer-dropdown" ref={analyzeLibraryMenuRef}>
-                            <button
-                                onClick={() => setAnalyzeLibraryMenuOpen((prev) => !prev)}
-                                disabled={mapLibraryLoading}
-                                className="flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium hover:bg-accent disabled:opacity-50"
-                                title={t('allFiles.mapAllHelp')}
-                            >
-                                {mapLibraryLoading ? <Loader2 size={16} className="animate-spin" /> : <BookOpen size={16} />}
-                                {t('allFiles.mapAllAs')}
-                                <ChevronDown size={14} className={`transition-transform ${analyzeLibraryMenuOpen ? 'rotate-180' : ''}`} />
-                            </button>
-                            {analyzeLibraryMenuOpen && (
-                                <div className="menu-popover absolute right-0 top-full mt-2 w-52 py-1 layer-popover">
-                                    {isComicsLibraryActive && (
-                                        <button
-                                            onClick={executeMapLibraryComics}
-                                            className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2"
-                                            disabled={mapLibraryLoading}
-                                        >
-                                            <BookOpen size={14} />
-                                            {t('allFiles.mapAllComics')}
-                                        </button>
-                                    )}
-                                    {isImagesLibraryActive && (
-                                        <button
-                                            onClick={executeMapLibraryImages}
-                                            className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2"
-                                            disabled={mapLibraryLoading}
-                                        >
-                                            <ImageIcon size={14} />
-                                            {t('allFiles.mapAllImages')}
-                                        </button>
-                                    )}
-                                    {isBooksLibraryActive && (
-                                        <button
-                                            onClick={executeMapLibraryBooks}
-                                            className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2"
-                                            disabled={mapLibraryLoading}
-                                        >
-                                            <BookOpen size={14} />
-                                            {t('allFiles.mapAllBooks')}
-                                        </button>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
-            </div>
-            <div className="px-4 py-2 flex items-center justify-between gap-2 text-sm">
-                <div className="flex items-center gap-2">
-                    <span className="font-medium mr-2 whitespace-nowrap w-24 text-right tabular-nums">{t('allFiles.selectedCount', { count: selectedItems.size })}</span>
-                    <div className="h-4 w-px bg-border mx-2" />
-                    <button
-                        onClick={handleDownload}
-                        disabled={selectedItems.size === 0}
-                        className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title={t('allFiles.download')}
-                    >
-                        <Download size={16} /> <span className="hidden sm:inline">{t('allFiles.download')}</span>
-                    </button>
-                    <button
-                        onClick={() => setMoveModalOpen(true)}
-                        disabled={selectedItems.size !== 1}
-                        className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title={t('allFiles.move')}
-                    >
-                        <ArrowRightLeft size={16} /> <span className="hidden sm:inline">{t('allFiles.move')}</span>
-                    </button>
-                    <button
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={!canUploadToFolder || uploading}
-                        className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title={canUploadToFolder ? t('allFiles.upload') : t('allFiles.selectFolderOrOpenFolderToUpload')}
-                    >
-                        {uploading ? <Loader2 className="animate-spin" size={16} /> : <UploadCloud size={16} />}
-                        <span className="hidden sm:inline">
-                            {uploading ? t('allFiles.uploadingProgress', { progress: uploadProgress }) : t('allFiles.upload')}
-                        </span>
-                    </button>
-                    <input
-                        type="file"
-                        ref={fileInputRef}
-                        className="hidden"
-                        multiple
-                        onChange={(event) => {
-                            handleUploadToSelectedFolder(event.target.files);
-                            event.target.value = '';
-                        }}
-                    />
-                    <div
-                        className={`relative ${selectedItems.size === 0 ? 'pointer-events-none opacity-50' : ''}`}
-                        ref={metadataMenuRef}
-                    >
-                        <button
-                            onClick={() => setMetadataMenuOpen(!metadataMenuOpen)}
-                            disabled={selectedItems.size === 0}
-                            className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:cursor-not-allowed"
-                            title={t('allFiles.metadataActions')}
-                        >
-                            <Database size={16} />
-                            <span className="hidden sm:inline">{t('allFiles.metadata')}</span>
-                            <ChevronDown size={14} className={`transition-transform ${metadataMenuOpen ? 'rotate-180' : ''}`} />
-                        </button>
-
-                        {metadataMenuOpen && (
-                            <div className="absolute top-full left-0 w-52 pt-1 layer-dropdown">
-                                <div className="bg-popover border rounded-md shadow-md py-1">
-                                    <button
-                                        onClick={() => {
-                                            if (selectedItems.size === 1) {
-                                                setMetadataModalOpen(true);
-                                            } else {
-                                                setBatchModalOpen(true);
-                                            }
-                                            setMetadataMenuOpen(false);
-                                        }}
-                                        disabled={selectedItems.size === 0}
-                                        className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
-                                    >
-                                        <Database size={14} /> {t('allFiles.editMetadata')}
-                                    </button>
-                                    <button
-                                        onClick={openRenameModal}
-                                        disabled={selectedItems.size !== 1 || actionLoading}
-                                        className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
-                                    >
-                                        <Pencil size={14} /> {t('allFiles.rename')}
-                                    </button>
-                                    <button
-                                        onClick={() => {
-                                            setRemoveModalOpen(true);
-                                            setMetadataMenuOpen(false);
-                                        }}
-                                        disabled={selectedItems.size === 0}
-                                        className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 text-destructive hover:text-destructive disabled:opacity-50"
-                                    >
-                                        <XCircle size={14} /> {t('allFiles.removeMetadata')}
-                                    </button>
-                                    {(isComicsLibraryActive || isImagesLibraryActive || isBooksLibraryActive) && (
-                                        <>
-                                            <div className="px-4 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                                                {t('allFiles.analyzeAs')}
-                                            </div>
-                                            {isComicsLibraryActive && (
-                                                <button
-                                                    onClick={executeMapComics}
-                                                    disabled={!canMapComics || actionLoading}
-                                                    className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
-                                                >
-                                                    {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
-                                                    {t('allFiles.comics')}
-                                                </button>
-                                            )}
-                                            {isImagesLibraryActive && (
-                                                <button
-                                                    onClick={executeAnalyzeImages}
-                                                    disabled={!canAnalyzeImages || actionLoading}
-                                                    className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
-                                                >
-                                                    {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <ImageIcon size={14} />}
-                                                    {t('allFiles.images')}
-                                                </button>
-                                            )}
-                                            {isBooksLibraryActive && (
-                                                <button
-                                                    onClick={executeMapBooks}
-                                                    disabled={!canMapBooks || actionLoading}
-                                                    className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
-                                                >
-                                                    {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
-                                                    {t('allFiles.books')}
-                                                </button>
-                                            )}
-                                        </>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                    <div className="h-4 w-px bg-border mx-1" />
-                    <button
-                        onClick={() => setDeleteModalOpen(true)}
-                        disabled={selectedItems.size === 0}
-                        className="p-2 hover:bg-destructive/10 text-destructive rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title={t('allFiles.delete')}
-                    >
-                        <Trash2 size={16} /> <span className="hidden sm:inline">{t('allFiles.delete')}</span>
-                    </button>
-
-                </div>
-
-                {/* Pagination */}
-                <div className="flex items-center gap-2">
-                    <label className="flex items-center gap-2 text-muted-foreground">
-                        <span>{t('allFiles.resultsPerPage')}</span>
-                        <select
-                            value={pageSize}
-                            onChange={(event) => {
-                                setPageSize(Number(event.target.value));
-                                setPage(1);
-                            }}
-                            className="rounded-md border bg-background px-2 py-1 text-sm text-foreground"
-                        >
-                            {PAGE_SIZE_OPTIONS.map((option) => (
-                                <option key={option} value={option}>{option}</option>
-                            ))}
-                        </select>
-                    </label>
-                    <span className="text-muted-foreground">{t('allFiles.pageOf', { page, total: totalPages })}</span>
-                    <div className="flex gap-1">
-                        <button
-                            disabled={page <= 1}
-                            onClick={() => setPage(p => p - 1)}
-                            className="p-1 hover:bg-background rounded disabled:opacity-50"
-                        >
-                            <ChevronLeft size={16} />
-                        </button>
-                        <button
-                            disabled={page >= totalPages}
-                            onClick={() => setPage(p => p + 1)}
-                            className="p-1 hover:bg-background rounded disabled:opacity-50"
-                        >
-                            <ChevronRight size={16} />
-                        </button>
-                    </div>
-                </div>
-            </div>
-            </div>
-
-            {/* Path Prefix Breadcrumb */}
-            {pathPrefix && (
-                <div className="mb-4 flex items-center gap-2 rounded-sm border border-border/90 bg-muted/20 px-4 py-2 text-sm">
-                    <FolderOpen size={16} className="text-primary" />
-                    <span className="text-muted-foreground">{t('allFiles.showingFilesIn')}</span>
-                    <span className="font-medium text-foreground">{pathPrefix}</span>
-                    <button onClick={clearPathPrefix} className="ml-auto flex items-center gap-1 text-muted-foreground hover:text-foreground text-xs">
-                        <X size={14} /> {t('allFiles.clear')}
-                    </button>
-                </div>
-            )}
-
-            {/* Content */}
-            <main className="flex-1 overflow-auto">
-                {loading ? (
-                    <div className="flex justify-center p-12">
-                        <Loader2 className="animate-spin text-primary" size={32} />
-                    </div>
-                ) : items.length === 0 ? (
-                    <div className="empty-state">
-                        <div className="empty-state-icon">
-                            <Folder size={26} />
-                        </div>
-                        <div className="empty-state-title">{t('allFiles.noItemsFound')}</div>
-                        <p className="empty-state-text">{t('allFiles.noItemsHelp')}</p>
-                    </div>
-                ) : (
-                    <div className="surface-card overflow-hidden select-none">
-                        <div className="overflow-x-auto">
-                            {/* Header */}
-                            <div
-                                className="sticky top-0 z-20 gap-4 border-b border-border/70 bg-muted/95 p-3 text-xs font-medium uppercase tracking-wider text-muted-foreground shadow-sm backdrop-blur supports-[backdrop-filter]:bg-muted/80 items-center"
-                                style={{ display: 'grid', gridTemplateColumns: dataGridTemplate, minWidth: `${tableMinWidth}px` }}
-                            >
-                                <div className="flex justify-center">
-                                    <button onClick={toggleSelectAll}>
-                                        {selectedItems.size === items.length && items.length > 0 ? <CheckSquare size={16} /> : <Square size={16} />}
-                                    </button>
-                                </div>
-                                <div />
-                                {visibleColumns.map((column) => (
-                                    <div
-                                        key={column.id}
-                                        draggable
-                                        onDragStart={() => setDraggingColumnId(column.id)}
-                                        onDragOver={(event) => event.preventDefault()}
-                                        onDrop={() => handleColumnDrop(column.id)}
-                                        className={`relative flex items-center gap-1 ${column.align === 'right' ? 'justify-end text-right' : ''}`}
-                                    >
-                                        <div className="pointer-events-none absolute bottom-0 right-0 top-0 w-px bg-border/80" />
-                                        <button
-                                            type="button"
-                                            className={`inline-flex items-center gap-1 hover:text-foreground ${column.sortKey ? '' : 'cursor-default'}`}
-                                            onClick={() => column.sortKey && handleSort(column.sortKey)}
-                                        >
-                                            <GripVertical size={12} className="opacity-45" />
-                                            {t(`allFiles.columns.${column.id}`)}
-                                            {column.sortKey ? renderSortIcon(column.sortKey) : null}
-                                        </button>
-                                        <div
-                                            className="absolute right-[-8px] top-0 h-full w-3 cursor-col-resize"
-                                            onMouseDown={(event) => beginResize(event, column)}
-                                        />
-                                    </div>
-                                ))}
+                                <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-0.5 rounded-full ml-2">{t('allFiles.itemsCount', { count: total })}</span>
                             </div>
 
-                            {/* List */}
-                            <div className="divide-y">
-                                {items.map((item, index) => {
-                                    const isFolder = item.item_type === 'folder';
-                                    const isSelected = selectedItems.has(item.id);
-                                    return (
-                                        <div
-                                            key={item.id}
-                                            className={`group gap-4 p-3 items-center hover:bg-accent/35 transition-colors ${isSelected ? 'bg-muted/45' : ''}`}
-                                            style={{ display: 'grid', gridTemplateColumns: dataGridTemplate, minWidth: `${tableMinWidth}px` }}
-                                            onClick={(e) => toggleSelection(item.id, index, !e.altKey, e.shiftKey)}
-                                        >
-                                            <div className="flex justify-center">
-                                                <div className={`cursor-pointer ${isSelected ? 'text-primary' : 'text-muted-foreground/50'}`}>
-                                                    {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
-                                                </div>
-                                            </div>
-                                            <div className="flex justify-center text-muted-foreground">
-                                                {isFolder ? (
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); handleFolderClick(item); }}
-                                                        className="hover:scale-110 transition-transform"
-                                                        title={t('allFiles.showFolderContents')}
-                                                    >
-                                                        <Folder className="text-primary fill-primary/15" size={20} />
-                                                    </button>
-                                                ) : (
-                                                    <File className="text-gray-400" size={20} />
-                                                )}
-                                            </div>
-                                            {visibleColumns.map((column) => (
-                                                <div key={column.id} className="relative">
-                                                    <div className="pointer-events-none absolute bottom-[-12px] right-0 top-[-12px] w-px bg-border/50" />
-                                                    {renderColumnCell(item, column)}
-                                                </div>
+                            <div className="flex items-center gap-2">
+                                <select
+                                    className="input-shell px-2 py-1.5 text-sm"
+                                    value={searchScope}
+                                    onChange={(e) => setSearchScope(e.target.value)}
+                                >
+                                    <option value="both">{t('allFiles.titlePath')}</option>
+                                    <option value="name">{t('allFiles.title')}</option>
+                                    <option value="path">{t('allFiles.path')}</option>
+                                </select>
+                                <div className="relative">
+                                    <Search className="absolute left-2 top-1.5 text-muted-foreground" size={16} />
+                                    <input
+                                        type="text"
+                                        placeholder={searchPlaceholders[searchScope]}
+                                        className="input-shell pl-8 pr-4 py-1.5 text-sm w-64"
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); } }}
+                                    />
+                                </div>
+                                <FilterBar onFilter={setFilters} filters={filters} accounts={accounts} categories={metaCategories} />
+                                <div className="relative" ref={columnsMenuRef}>
+                                    <button
+                                        onClick={() => setColumnsMenuOpen((prev) => !prev)}
+                                        className="flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium hover:bg-accent"
+                                        title={t('allFiles.chooseColumns')}
+                                    >
+                                        <Columns3 size={16} />
+                                        {t('allFiles.columnsTitle')}
+                                    </button>
+                                    {columnsMenuOpen && (
+                                        <div className="menu-popover absolute right-0 top-full mt-2 w-56 p-2 layer-popover space-y-1">
+                                            {orderedColumns.map((column) => (
+                                                <label key={column.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent cursor-pointer text-sm">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={columnVisibility[column.id] !== false}
+                                                        onChange={(event) => {
+                                                            const nextChecked = event.target.checked;
+                                                            setColumnVisibility((prev) => {
+                                                                const next = { ...prev, [column.id]: nextChecked };
+                                                                const visibleCount = Object.values(next).filter(Boolean).length;
+                                                                if (visibleCount === 0) {
+                                                                    next[column.id] = true;
+                                                                }
+                                                                return next;
+                                                            });
+                                                        }}
+                                                    />
+                                                    <span>{t(`allFiles.columns.${column.id}`)}</span>
+                                                </label>
                                             ))}
                                         </div>
-                                    );
-                                })}
+                                    )}
+                                </div>
+                                {(isComicsLibraryActive || isImagesLibraryActive || isBooksLibraryActive) && (
+                                    <div className="relative layer-dropdown" ref={analyzeLibraryMenuRef}>
+                                        <button
+                                            onClick={() => setAnalyzeLibraryMenuOpen((prev) => !prev)}
+                                            disabled={mapLibraryLoading}
+                                            className="flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium hover:bg-accent disabled:opacity-50"
+                                            title={t('allFiles.mapAllHelp')}
+                                        >
+                                            {mapLibraryLoading ? <Loader2 size={16} className="animate-spin" /> : <BookOpen size={16} />}
+                                            {t('allFiles.mapAllAs')}
+                                            <ChevronDown size={14} className={`transition-transform ${analyzeLibraryMenuOpen ? 'rotate-180' : ''}`} />
+                                        </button>
+                                        {analyzeLibraryMenuOpen && (
+                                            <div className="menu-popover absolute right-0 top-full mt-2 w-52 py-1 layer-popover">
+                                                {isComicsLibraryActive && (
+                                                    <button
+                                                        onClick={executeMapLibraryComics}
+                                                        className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2"
+                                                        disabled={mapLibraryLoading}
+                                                    >
+                                                        <BookOpen size={14} />
+                                                        {t('allFiles.mapAllComics')}
+                                                    </button>
+                                                )}
+                                                {isImagesLibraryActive && (
+                                                    <button
+                                                        onClick={executeMapLibraryImages}
+                                                        className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2"
+                                                        disabled={mapLibraryLoading}
+                                                    >
+                                                        <ImageIcon size={14} />
+                                                        {t('allFiles.mapAllImages')}
+                                                    </button>
+                                                )}
+                                                {isBooksLibraryActive && (
+                                                    <button
+                                                        onClick={executeMapLibraryBooks}
+                                                        className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2"
+                                                        disabled={mapLibraryLoading}
+                                                    >
+                                                        <BookOpen size={14} />
+                                                        {t('allFiles.mapAllBooks')}
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        <div className="px-4 py-2 flex items-center justify-between gap-2 text-sm">
+                            <div className="flex items-center gap-2">
+                                <span className="font-medium mr-2 whitespace-nowrap w-24 text-right tabular-nums">{t('allFiles.selectedCount', { count: selectedItems.size })}</span>
+                                <div className="h-4 w-px bg-border mx-2" />
+                                <button
+                                    onClick={handleDownload}
+                                    disabled={selectedItems.size === 0}
+                                    className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title={t('allFiles.download')}
+                                >
+                                    <Download size={16} /> <span className="hidden sm:inline">{t('allFiles.download')}</span>
+                                </button>
+                                <button
+                                    onClick={() => setMoveModalOpen(true)}
+                                    disabled={selectedItems.size !== 1}
+                                    className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title={t('allFiles.move')}
+                                >
+                                    <ArrowRightLeft size={16} /> <span className="hidden sm:inline">{t('allFiles.move')}</span>
+                                </button>
+                                <button
+                                    onClick={() => fileInputRef.current?.click()}
+                                    disabled={!canUploadToFolder || uploading}
+                                    className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title={canUploadToFolder ? t('allFiles.upload') : t('allFiles.selectFolderOrOpenFolderToUpload')}
+                                >
+                                    {uploading ? <Loader2 className="animate-spin" size={16} /> : <UploadCloud size={16} />}
+                                    <span className="hidden sm:inline">
+                                        {uploading ? t('allFiles.uploadingProgress', { progress: uploadProgress }) : t('allFiles.upload')}
+                                    </span>
+                                </button>
+                                <input
+                                    type="file"
+                                    ref={fileInputRef}
+                                    className="hidden"
+                                    multiple
+                                    onChange={(event) => {
+                                        handleUploadToSelectedFolder(event.target.files);
+                                        event.target.value = '';
+                                    }}
+                                />
+                                <div
+                                    className={`relative ${selectedItems.size === 0 ? 'pointer-events-none opacity-50' : ''}`}
+                                    ref={metadataMenuRef}
+                                >
+                                    <button
+                                        onClick={() => setMetadataMenuOpen(!metadataMenuOpen)}
+                                        disabled={selectedItems.size === 0}
+                                        className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:cursor-not-allowed"
+                                        title={t('allFiles.metadataActions')}
+                                    >
+                                        <Database size={16} />
+                                        <span className="hidden sm:inline">{t('allFiles.metadata')}</span>
+                                        <ChevronDown size={14} className={`transition-transform ${metadataMenuOpen ? 'rotate-180' : ''}`} />
+                                    </button>
+
+                                    {metadataMenuOpen && (
+                                        <div className="absolute top-full left-0 w-52 pt-1 layer-dropdown">
+                                            <div className="bg-popover border rounded-md shadow-md py-1">
+                                                <button
+                                                    onClick={() => {
+                                                        if (selectedItems.size === 1) {
+                                                            setMetadataModalOpen(true);
+                                                        } else {
+                                                            setBatchModalOpen(true);
+                                                        }
+                                                        setMetadataMenuOpen(false);
+                                                    }}
+                                                    disabled={selectedItems.size === 0}
+                                                    className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
+                                                >
+                                                    <Database size={14} /> {t('allFiles.editMetadata')}
+                                                </button>
+                                                <button
+                                                    onClick={openRenameModal}
+                                                    disabled={selectedItems.size !== 1 || actionLoading}
+                                                    className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
+                                                >
+                                                    <Pencil size={14} /> {t('allFiles.rename')}
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        setRemoveModalOpen(true);
+                                                        setMetadataMenuOpen(false);
+                                                    }}
+                                                    disabled={selectedItems.size === 0}
+                                                    className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 text-destructive hover:text-destructive disabled:opacity-50"
+                                                >
+                                                    <XCircle size={14} /> {t('allFiles.removeMetadata')}
+                                                </button>
+                                                {(isComicsLibraryActive || isImagesLibraryActive || isBooksLibraryActive) && (
+                                                    <>
+                                                        <div className="px-4 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                                            {t('allFiles.analyzeAs')}
+                                                        </div>
+                                                        {isComicsLibraryActive && (
+                                                            <button
+                                                                onClick={executeMapComics}
+                                                                disabled={!canMapComics || actionLoading}
+                                                                className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
+                                                            >
+                                                                {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
+                                                                {t('allFiles.comics')}
+                                                            </button>
+                                                        )}
+                                                        {isImagesLibraryActive && (
+                                                            <button
+                                                                onClick={executeAnalyzeImages}
+                                                                disabled={!canAnalyzeImages || actionLoading}
+                                                                className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
+                                                            >
+                                                                {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <ImageIcon size={14} />}
+                                                                {t('allFiles.images')}
+                                                            </button>
+                                                        )}
+                                                        {isBooksLibraryActive && (
+                                                            <button
+                                                                onClick={executeMapBooks}
+                                                                disabled={!canMapBooks || actionLoading}
+                                                                className="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50"
+                                                            >
+                                                                {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
+                                                                {t('allFiles.books')}
+                                                            </button>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="h-4 w-px bg-border mx-1" />
+                                <button
+                                    onClick={() => setDeleteModalOpen(true)}
+                                    disabled={selectedItems.size === 0}
+                                    className="p-2 hover:bg-destructive/10 text-destructive rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title={t('allFiles.delete')}
+                                >
+                                    <Trash2 size={16} /> <span className="hidden sm:inline">{t('allFiles.delete')}</span>
+                                </button>
+
+                            </div>
+
+                            {/* Pagination */}
+                            <div className="flex items-center gap-2">
+                                <label className="flex items-center gap-2 text-muted-foreground">
+                                    <span>{t('allFiles.resultsPerPage')}</span>
+                                    <select
+                                        value={pageSize}
+                                        onChange={(event) => {
+                                            setPageSize(Number(event.target.value));
+                                            setPage(1);
+                                        }}
+                                        className="rounded-md border bg-background px-2 py-1 text-sm text-foreground"
+                                    >
+                                        {PAGE_SIZE_OPTIONS.map((option) => (
+                                            <option key={option} value={option}>{option}</option>
+                                        ))}
+                                    </select>
+                                </label>
+                                <span className="text-muted-foreground">{t('allFiles.pageOf', { page, total: totalPages })}</span>
+                                <div className="flex gap-1">
+                                    <button
+                                        disabled={page <= 1}
+                                        onClick={() => setPage(p => p - 1)}
+                                        className="p-1 hover:bg-background rounded disabled:opacity-50"
+                                    >
+                                        <ChevronLeft size={16} />
+                                    </button>
+                                    <button
+                                        disabled={page >= totalPages}
+                                        onClick={() => setPage(p => p + 1)}
+                                        className="p-1 hover:bg-background rounded disabled:opacity-50"
+                                    >
+                                        <ChevronRight size={16} />
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
-                )}
-            </main>
 
-            {batchModalOpen && (
-                <Suspense fallback={null}>
-                    <BatchMetadataModal
-                        isOpen={batchModalOpen}
-                        onClose={() => setBatchModalOpen(false)}
-                        selectedItems={getSelectedObjects()}
-                        showToast={showToast}
-                        onSuccess={() => {
-                            void invalidateItems();
-                            setSelectedItems(new Set());
-                        }}
-                    />
-                </Suspense>
-            )}
+                    {/* Path Prefix Breadcrumb */}
+                    {pathPrefix && (
+                        <div className="mb-4 flex items-center gap-2 rounded-sm border border-border/90 bg-muted/20 px-4 py-2 text-sm">
+                            <FolderOpen size={16} className="text-primary" />
+                            <span className="text-muted-foreground">{t('allFiles.showingFilesIn')}</span>
+                            <span className="font-medium text-foreground">{pathPrefix}</span>
+                            <button onClick={clearPathPrefix} className="ml-auto flex items-center gap-1 text-muted-foreground hover:text-foreground text-xs">
+                                <X size={14} /> {t('allFiles.clear')}
+                            </button>
+                        </div>
+                    )}
 
-            {metadataModalOpen && (
-                <Suspense fallback={null}>
-                    <MetadataModal
-                        isOpen={metadataModalOpen}
-                        onClose={() => setMetadataModalOpen(false)}
-                        item={singleSelectedItem}
-                        accountId={singleSelectedItem?.account_id}
-                        onSuccess={() => {
-                            void invalidateItems();
-                        }}
-                    />
-                </Suspense>
-            )}
+                    {/* Content */}
+                    <main className="flex-1 overflow-auto">
+                        {loading ? (
+                            <div className="flex justify-center p-12">
+                                <Loader2 className="animate-spin text-primary" size={32} />
+                            </div>
+                        ) : items.length === 0 ? (
+                            <div className="empty-state">
+                                <div className="empty-state-icon">
+                                    <Folder size={26} />
+                                </div>
+                                <div className="empty-state-title">{t('allFiles.noItemsFound')}</div>
+                                <p className="empty-state-text">{t('allFiles.noItemsHelp')}</p>
+                            </div>
+                        ) : (
+                            <div className="surface-card overflow-hidden select-none">
+                                <div className="overflow-x-auto">
+                                    {/* Header */}
+                                    <div
+                                        className="sticky top-0 z-20 gap-4 border-b border-border/70 bg-muted/95 p-3 text-xs font-medium uppercase tracking-wider text-muted-foreground shadow-sm backdrop-blur supports-[backdrop-filter]:bg-muted/80 items-center"
+                                        style={{ display: 'grid', gridTemplateColumns: dataGridTemplate, minWidth: `${tableMinWidth}px` }}
+                                    >
+                                        <div className="flex justify-center">
+                                            <button onClick={toggleSelectAll}>
+                                                {selectedItems.size === items.length && items.length > 0 ? <CheckSquare size={16} /> : <Square size={16} />}
+                                            </button>
+                                        </div>
+                                        <div />
+                                        {visibleColumns.map((column) => (
+                                            <div
+                                                key={column.id}
+                                                draggable
+                                                onDragStart={() => setDraggingColumnId(column.id)}
+                                                onDragOver={(event) => event.preventDefault()}
+                                                onDrop={() => handleColumnDrop(column.id)}
+                                                className={`relative flex items-center gap-1 ${column.align === 'right' ? 'justify-end text-right' : ''}`}
+                                            >
+                                                <div className="pointer-events-none absolute bottom-0 right-0 top-0 w-px bg-border/80" />
+                                                <button
+                                                    type="button"
+                                                    className={`inline-flex items-center gap-1 hover:text-foreground ${column.sortKey ? '' : 'cursor-default'}`}
+                                                    onClick={() => column.sortKey && handleSort(column.sortKey)}
+                                                >
+                                                    <GripVertical size={12} className="opacity-45" />
+                                                    {t(`allFiles.columns.${column.id}`)}
+                                                    {column.sortKey ? renderSortIcon(column.sortKey) : null}
+                                                </button>
+                                                <div
+                                                    className="absolute right-[-8px] top-0 h-full w-3 cursor-col-resize"
+                                                    onMouseDown={(event) => beginResize(event, column)}
+                                                />
+                                            </div>
+                                        ))}
+                                    </div>
 
-            {removeModalOpen && (
-                <Suspense fallback={null}>
-                    <RemoveMetadataModal
-                        isOpen={removeModalOpen}
-                        onClose={() => setRemoveModalOpen(false)}
-                        selectedItems={getSelectedObjects()}
-                        showToast={showToast}
-                        onSuccess={() => {
-                            void invalidateItems();
-                            setSelectedItems(new Set());
-                        }}
-                    />
-                </Suspense>
-            )}
-
-            <Modal
-                isOpen={deleteModalOpen}
-                onClose={() => !actionLoading && setDeleteModalOpen(false)}
-                title={t('allFiles.deleteTitle', { count: selectedItems.size })}
-                maxWidthClass="max-w-md"
-            >
-                <div className="space-y-4">
-                    <p className="text-sm text-muted-foreground">
-                        {t('allFiles.deleteConfirm')}
-                    </p>
-                    <div className="flex justify-end gap-2">
-                        <button
-                            type="button"
-                            onClick={() => setDeleteModalOpen(false)}
-                            disabled={actionLoading}
-                            className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
-                        >
-                            {t('common.cancel')}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={executeDelete}
-                            disabled={actionLoading}
-                            className="px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 disabled:opacity-50 flex items-center gap-2"
-                        >
-                            {actionLoading && <Loader2 className="animate-spin" size={14} />}
-                            {t('allFiles.delete')}
-                        </button>
-                    </div>
-                </div>
-            </Modal>
-
-            {moveModalOpen && (
-                <Suspense fallback={null}>
-                    <MoveModal
-                        isOpen={moveModalOpen}
-                        onClose={() => setMoveModalOpen(false)}
-                        item={moveTargetItem}
-                        sourceAccountId={moveTargetItem?.account_id}
-                        onSuccess={() => {
-                            setMoveModalOpen(false);
-                            setSelectedItems(new Set());
-                            void invalidateItems();
-                        }}
-                    />
-                </Suspense>
-            )}
-
-            <Modal
-                isOpen={renameModalOpen}
-                onClose={() => !renameSaving && setRenameModalOpen(false)}
-                title={t('allFiles.renameItem')}
-                maxWidthClass="max-w-md"
-            >
-                <div className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium mb-1">{t('allFiles.newName')}</label>
-                        <input
-                            type="text"
-                            value={renameValue}
-                            onChange={(e) => setRenameValue(e.target.value)}
-                            disabled={renameSaving}
-                            className="w-full border rounded-md p-2 text-sm bg-background"
-                            autoFocus
-                        />
-                    </div>
-                    <div className="flex justify-end gap-2">
-                        <button
-                            type="button"
-                            onClick={() => setRenameModalOpen(false)}
-                            disabled={renameSaving}
-                            className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
-                        >
-                            {t('common.cancel')}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={confirmRenameItem}
-                            disabled={renameSaving}
-                            className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
-                        >
-                            {renameSaving && <Loader2 className="animate-spin" size={14} />}
-                            {t('allFiles.rename')}
-                        </button>
-                    </div>
-                </div>
-            </Modal>
-
-            <Modal
-                isOpen={mapLibraryConfirmOpen}
-                onClose={() => !mapLibraryLoading && setMapLibraryConfirmOpen(false)}
-                title={
-                    mapLibraryMode === 'images'
-                        ? t('allFiles.mapAllImages')
-                        : mapLibraryMode === 'books'
-                            ? t('allFiles.mapAllBooks')
-                            : t('allFiles.mapAllComics')
-                }
-                maxWidthClass="max-w-lg"
-            >
-                <p className="text-sm text-muted-foreground mb-4">
-                    {mapLibraryMode === 'images'
-                        ? (
-                            filters.account_id
-                                ? t('allFiles.mapAllImagesSelectedAccount')
-                                : t('allFiles.mapAllImagesAllAccounts')
-                        )
-                        : mapLibraryMode === 'books'
-                            ? (
-                                filters.account_id
-                                    ? t('allFiles.mapAllBooksSelectedAccount')
-                                    : t('allFiles.mapAllBooksAllAccounts')
-                            )
-                            : (
-                            filters.account_id
-                                ? t('allFiles.mapAllComicsSelectedAccount')
-                                : t('allFiles.mapAllComicsAllAccounts')
+                                    {/* List */}
+                                    <div className="divide-y">
+                                        {items.map((item, index) => {
+                                            const isFolder = item.item_type === 'folder';
+                                            const isSelected = selectedItems.has(item.id);
+                                            return (
+                                                <div
+                                                    key={item.id}
+                                                    className={`group gap-4 p-3 items-center hover:bg-accent/35 transition-colors ${isSelected ? 'bg-muted/45' : ''}`}
+                                                    style={{ display: 'grid', gridTemplateColumns: dataGridTemplate, minWidth: `${tableMinWidth}px` }}
+                                                    onClick={(e) => toggleSelection(item.id, index, !e.altKey, e.shiftKey)}
+                                                >
+                                                    <div className="flex justify-center">
+                                                        <div className={`cursor-pointer ${isSelected ? 'text-primary' : 'text-muted-foreground/50'}`}>
+                                                            {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex justify-center text-muted-foreground">
+                                                        {isFolder ? (
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); handleFolderClick(item); }}
+                                                                className="hover:scale-110 transition-transform"
+                                                                title={t('allFiles.showFolderContents')}
+                                                            >
+                                                                <Folder className="text-primary fill-primary/15" size={20} />
+                                                            </button>
+                                                        ) : (
+                                                            <File className="text-gray-400" size={20} />
+                                                        )}
+                                                    </div>
+                                                    {visibleColumns.map((column) => (
+                                                        <div key={column.id} className="relative">
+                                                            <div className="pointer-events-none absolute bottom-[-12px] right-0 top-[-12px] w-px bg-border/50" />
+                                                            {renderColumnCell(item, column)}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
                         )}
-                </p>
-                <div className="mb-4">
-                    <label className="block text-sm font-medium mb-1">{t('allFiles.chunkSizePerJob')}</label>
-                    <input
-                        type="number"
-                        min={1}
-                        max={5000}
-                        step={1}
-                        value={mapLibraryChunkSize}
-                        onChange={(e) => setMapLibraryChunkSize(e.target.value)}
-                        disabled={mapLibraryLoading}
-                        className="w-full border rounded-md p-2 text-sm bg-background"
-                    />
-                    <p className="mt-1 text-xs text-muted-foreground">
-                        {t('allFiles.chunkSizeHelp')}
-                    </p>
-                </div>
-                <div className="flex justify-end gap-2">
-                    <button
-                        type="button"
-                        onClick={() => setMapLibraryConfirmOpen(false)}
-                        disabled={mapLibraryLoading}
-                        className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
-                    >
-                        {t('common.cancel')}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={
-                            mapLibraryMode === 'images'
-                                ? confirmMapLibraryImages
-                                : mapLibraryMode === 'books'
-                                    ? confirmMapLibraryBooks
-                                    : confirmMapLibraryComics
-                        }
-                        disabled={mapLibraryLoading}
-                        className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
-                    >
-                        {mapLibraryLoading && <Loader2 className="animate-spin" size={14} />}
-                        {t('common.confirm')}
-                    </button>
-                </div>
-            </Modal>
+                    </main>
 
-            {imagePreviewItem && (
-                <Suspense fallback={null}>
-                    <ImagePreviewModal
-                        isOpen={Boolean(imagePreviewItem)}
-                        onClose={() => setImagePreviewItem(null)}
-                        accountId={imagePreviewItem?.accountId}
-                        itemId={imagePreviewItem?.itemId}
-                        filename={imagePreviewItem?.filename}
-                    />
-                </Suspense>
-            )}
+                    {batchModalOpen && (
+                        <Suspense fallback={null}>
+                            <BatchMetadataModal
+                                isOpen={batchModalOpen}
+                                onClose={() => setBatchModalOpen(false)}
+                                selectedItems={getSelectedObjects()}
+                                showToast={showToast}
+                                onSuccess={() => {
+                                    void invalidateItems();
+                                    setSelectedItems(new Set());
+                                }}
+                            />
+                        </Suspense>
+                    )}
+
+                    {metadataModalOpen && (
+                        <Suspense fallback={null}>
+                            <MetadataModal
+                                isOpen={metadataModalOpen}
+                                onClose={() => setMetadataModalOpen(false)}
+                                item={singleSelectedItem}
+                                accountId={singleSelectedItem?.account_id}
+                                onSuccess={() => {
+                                    void invalidateItems();
+                                }}
+                            />
+                        </Suspense>
+                    )}
+
+                    {removeModalOpen && (
+                        <Suspense fallback={null}>
+                            <RemoveMetadataModal
+                                isOpen={removeModalOpen}
+                                onClose={() => setRemoveModalOpen(false)}
+                                selectedItems={getSelectedObjects()}
+                                showToast={showToast}
+                                onSuccess={() => {
+                                    void invalidateItems();
+                                    setSelectedItems(new Set());
+                                }}
+                            />
+                        </Suspense>
+                    )}
+
+                    <Modal
+                        isOpen={deleteModalOpen}
+                        onClose={() => !actionLoading && setDeleteModalOpen(false)}
+                        title={t('allFiles.deleteTitle', { count: selectedItems.size })}
+                        maxWidthClass="max-w-md"
+                    >
+                        <div className="space-y-4">
+                            <p className="text-sm text-muted-foreground">
+                                {t('allFiles.deleteConfirm')}
+                            </p>
+                            <div className="flex justify-end gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setDeleteModalOpen(false)}
+                                    disabled={actionLoading}
+                                    className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
+                                >
+                                    {t('common.cancel')}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={executeDelete}
+                                    disabled={actionLoading}
+                                    className="px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 disabled:opacity-50 flex items-center gap-2"
+                                >
+                                    {actionLoading && <Loader2 className="animate-spin" size={14} />}
+                                    {t('allFiles.delete')}
+                                </button>
+                            </div>
+                        </div>
+                    </Modal>
+
+                    {moveModalOpen && (
+                        <Suspense fallback={null}>
+                            <MoveModal
+                                isOpen={moveModalOpen}
+                                onClose={() => setMoveModalOpen(false)}
+                                item={moveTargetItem}
+                                sourceAccountId={moveTargetItem?.account_id}
+                                onSuccess={() => {
+                                    setMoveModalOpen(false);
+                                    setSelectedItems(new Set());
+                                    void invalidateItems();
+                                }}
+                            />
+                        </Suspense>
+                    )}
+
+                    <Modal
+                        isOpen={renameModalOpen}
+                        onClose={() => !renameSaving && setRenameModalOpen(false)}
+                        title={t('allFiles.renameItem')}
+                        maxWidthClass="max-w-md"
+                    >
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-1">{t('allFiles.newName')}</label>
+                                <input
+                                    type="text"
+                                    value={renameValue}
+                                    onChange={(e) => setRenameValue(e.target.value)}
+                                    disabled={renameSaving}
+                                    className="w-full border rounded-md p-2 text-sm bg-background"
+                                    autoFocus
+                                />
+                            </div>
+                            <div className="flex justify-end gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setRenameModalOpen(false)}
+                                    disabled={renameSaving}
+                                    className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
+                                >
+                                    {t('common.cancel')}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={confirmRenameItem}
+                                    disabled={renameSaving}
+                                    className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
+                                >
+                                    {renameSaving && <Loader2 className="animate-spin" size={14} />}
+                                    {t('allFiles.rename')}
+                                </button>
+                            </div>
+                        </div>
+                    </Modal>
+
+                    <Modal
+                        isOpen={mapLibraryConfirmOpen}
+                        onClose={() => !mapLibraryLoading && setMapLibraryConfirmOpen(false)}
+                        title={
+                            mapLibraryMode === 'images'
+                                ? t('allFiles.mapAllImages')
+                                : mapLibraryMode === 'books'
+                                    ? t('allFiles.mapAllBooks')
+                                    : t('allFiles.mapAllComics')
+                        }
+                        maxWidthClass="max-w-lg"
+                    >
+                        <p className="text-sm text-muted-foreground mb-4">
+                            {mapLibraryMode === 'images'
+                                ? (
+                                    filters.account_id
+                                        ? t('allFiles.mapAllImagesSelectedAccount')
+                                        : t('allFiles.mapAllImagesAllAccounts')
+                                )
+                                : mapLibraryMode === 'books'
+                                    ? (
+                                        filters.account_id
+                                            ? t('allFiles.mapAllBooksSelectedAccount')
+                                            : t('allFiles.mapAllBooksAllAccounts')
+                                    )
+                                    : (
+                                        filters.account_id
+                                            ? t('allFiles.mapAllComicsSelectedAccount')
+                                            : t('allFiles.mapAllComicsAllAccounts')
+                                    )}
+                        </p>
+                        <div className="mb-4">
+                            <label className="block text-sm font-medium mb-1">{t('allFiles.chunkSizePerJob')}</label>
+                            <input
+                                type="number"
+                                min={1}
+                                max={5000}
+                                step={1}
+                                value={mapLibraryChunkSize}
+                                onChange={(e) => setMapLibraryChunkSize(e.target.value)}
+                                disabled={mapLibraryLoading}
+                                className="w-full border rounded-md p-2 text-sm bg-background"
+                            />
+                            <p className="mt-1 text-xs text-muted-foreground">
+                                {t('allFiles.chunkSizeHelp')}
+                            </p>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setMapLibraryConfirmOpen(false)}
+                                disabled={mapLibraryLoading}
+                                className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent disabled:opacity-50"
+                            >
+                                {t('common.cancel')}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={
+                                    mapLibraryMode === 'images'
+                                        ? confirmMapLibraryImages
+                                        : mapLibraryMode === 'books'
+                                            ? confirmMapLibraryBooks
+                                            : confirmMapLibraryComics
+                                }
+                                disabled={mapLibraryLoading}
+                                className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
+                            >
+                                {mapLibraryLoading && <Loader2 className="animate-spin" size={14} />}
+                                {t('common.confirm')}
+                            </button>
+                        </div>
+                    </Modal>
+
+                    {imagePreviewItem && (
+                        <Suspense fallback={null}>
+                            <ImagePreviewModal
+                                isOpen={Boolean(imagePreviewItem)}
+                                onClose={() => setImagePreviewItem(null)}
+                                accountId={imagePreviewItem?.accountId}
+                                itemId={imagePreviewItem?.itemId}
+                                filename={imagePreviewItem?.filename}
+                            />
+                        </Suspense>
+                    )}
                 </>
             ) : (
                 <Suspense fallback={<div className="surface-card p-4 text-sm text-muted-foreground">{t('common.loading')}</div>}>

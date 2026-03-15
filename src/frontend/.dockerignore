@@ -1,6 +1,8 @@
 # Dependencies and build output
 node_modules
 dist
+coverage
+output
 
 # VCS/editor/runtime files
 .git

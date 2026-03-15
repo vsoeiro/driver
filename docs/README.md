@@ -1,6 +1,6 @@
-# API Documentation
+# Driver API Documentation
 
-This folder contains detailed documentation for all Drive Organizer API endpoints.
+This folder contains detailed documentation for Driver API endpoints, grouped by provider and domain area.
 
 ## Endpoints
 
