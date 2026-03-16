@@ -163,7 +163,7 @@ describe('RulesManager page', () => {
 
         expect(await screen.findByText(/rules/i)).toBeInTheDocument();
         expect(await screen.findByText(/no rules yet/i)).toBeInTheDocument();
-        expect(screen.getByText(/create your first rule above/i)).toBeInTheDocument();
+        expect(screen.getAllByText(/create your first rule above/i).length).toBeGreaterThan(0);
     });
 
     it('previews and creates a new rule from the form', async () => {

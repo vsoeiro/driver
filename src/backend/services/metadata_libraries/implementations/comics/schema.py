@@ -34,10 +34,10 @@ COMICS_LIBRARY_FIELDS: list[MetadataLibraryFieldSpec] = [
     MetadataLibraryFieldSpec("month", "Month", "number"),
     MetadataLibraryFieldSpec("publisher", "Publisher", "text"),
     MetadataLibraryFieldSpec("imprint", "Imprint", "text"),
-    MetadataLibraryFieldSpec("writer", "Writer", "text"),
-    MetadataLibraryFieldSpec("penciller", "Penciller", "text"),
-    MetadataLibraryFieldSpec("colorist", "Colorist", "text"),
-    MetadataLibraryFieldSpec("letterer", "Letterer", "text"),
+    MetadataLibraryFieldSpec("writer", "Writer", "tags"),
+    MetadataLibraryFieldSpec("penciller", "Penciller", "tags"),
+    MetadataLibraryFieldSpec("colorist", "Colorist", "tags"),
+    MetadataLibraryFieldSpec("letterer", "Letterer", "tags"),
     MetadataLibraryFieldSpec("genre", "Genre", "text"),
     MetadataLibraryFieldSpec("language", "Language", "text"),
     MetadataLibraryFieldSpec("original_language", "Original Language", "text"),
@@ -49,4 +49,3 @@ COMICS_LIBRARY_FIELDS: list[MetadataLibraryFieldSpec] = [
     MetadataLibraryFieldSpec("page_count", "Page Count", "number"),
     MetadataLibraryFieldSpec("file_format", "File Format", "text"),
 ]
-

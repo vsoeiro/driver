@@ -10,9 +10,13 @@ describe('jobLabels utils', () => {
     });
 
     it('formats job types with translation fallback', () => {
-        const t = (key) => ({ 'jobType.sync_items': 'Sync items translated' }[key] || key);
+        const t = (key) => ({
+            'jobType.sync_items': 'Sync items translated',
+            'jobType.extract_zip_contents': 'Extract ZIP translated',
+        }[key] || key);
 
         expect(formatJobType('sync_items', t)).toBe('Sync items translated');
+        expect(formatJobType('extract_zip_contents', t)).toBe('Extract ZIP translated');
         expect(formatJobType('extract_book_assets')).toBe('Extract Book Assets');
         expect(formatJobType(null)).toBe('Unknown');
     });

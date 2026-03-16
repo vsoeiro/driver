@@ -44,9 +44,9 @@ vi.mock('./Sidebar', () => ({
     ),
 }));
 
-vi.mock('./NotificationBell', () => ({
+vi.mock('./ActivityDrawer', () => ({
     __esModule: true,
-    default: () => <div>Notification Bell</div>,
+    default: () => <div>Activity Drawer</div>,
 }));
 
 vi.mock('./ProviderPickerModal', () => ({
@@ -89,6 +89,7 @@ describe('Layout', () => {
 
         expect(await screen.findByText('Account switcher acc-1')).toBeInTheDocument();
         expect(window.localStorage.getItem('driver-last-account-id')).toBe('acc-1');
+        expect(screen.getByText('Activity Drawer')).toBeInTheDocument();
 
         await user.click(screen.getByText('Account switcher acc-1'));
         expect(navigateMock).toHaveBeenCalledWith('/drive/acc-2');

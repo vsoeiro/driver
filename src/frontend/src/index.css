@@ -4,26 +4,26 @@
 
 @layer base {
     :root {
-        --background: 210 20% 98%;
-        --foreground: 222.2 47.4% 11.2%;
+        --background: 210 24% 97%;
+        --foreground: 220 28% 14%;
         --card: 0 0% 100%;
-        --card-foreground: 214 29% 17%;
+        --card-foreground: 220 26% 15%;
         --popover: 0 0% 100%;
-        --popover-foreground: 214 29% 17%;
-        --primary: 217.2 91.2% 59.8%;
+        --popover-foreground: 220 26% 15%;
+        --primary: 200 82% 43%;
         --primary-foreground: 210 40% 98%;
-        --secondary: 210 40% 96%;
-        --secondary-foreground: 222.2 47.4% 11.2%;
-        --muted: 210 40% 96.1%;
-        --muted-foreground: 215.4 16.3% 46.9%;
-        --accent: 210 40% 96.1%;
-        --accent-foreground: 222.2 47.4% 11.2%;
+        --secondary: 210 32% 95%;
+        --secondary-foreground: 220 28% 14%;
+        --muted: 210 26% 94%;
+        --muted-foreground: 216 13% 43%;
+        --accent: 197 34% 93%;
+        --accent-foreground: 220 28% 14%;
         --destructive: 0 78% 52%;
         --destructive-foreground: 210 40% 98%;
-        --border: 214.3 31.8% 91.4%;
-        --input: 214.3 31.8% 91.4%;
-        --ring: 221.2 83.2% 53.3%;
-        --radius: 0.5rem;
+        --border: 214 24% 88%;
+        --input: 214 24% 88%;
+        --ring: 200 82% 43%;
+        --radius: 0.9rem;
     }
 
     .dark {
@@ -66,8 +66,9 @@
         font-size: 14px;
         line-height: 1.4;
         background-image:
-            radial-gradient(circle at 0% 0%, hsl(var(--primary) / 0.08), transparent 28%),
-            radial-gradient(circle at 100% 100%, hsl(var(--accent) / 0.2), transparent 30%);
+            radial-gradient(circle at 0% 0%, hsl(var(--primary) / 0.1), transparent 26%),
+            radial-gradient(circle at 100% 0%, hsl(189 55% 88% / 0.55), transparent 24%),
+            linear-gradient(180deg, hsl(var(--background)) 0%, hsl(210 26% 96%) 100%);
     }
 
     h1,
@@ -137,6 +138,9 @@
     .app-panel {
         @apply rounded-lg border shadow-sm;
         background-color: hsl(var(--card));
+        box-shadow:
+            0 18px 48px hsl(216 31% 20% / 0.08),
+            0 2px 10px hsl(216 31% 20% / 0.04);
     }
 
     .app-page {
@@ -145,12 +149,14 @@
     }
 
     .page-header {
-        @apply mb-4 rounded-lg border px-4 py-3 md:px-5 md:py-4;
-        background-color: hsl(var(--card));
+        @apply mb-4 rounded-[1.35rem] border px-4 py-3 md:px-5 md:py-4;
+        background:
+            linear-gradient(135deg, hsl(var(--card)) 0%, hsl(197 33% 99%) 100%);
+        box-shadow: 0 14px 32px hsl(216 31% 20% / 0.05);
     }
 
     .page-title {
-        @apply text-[1.2rem] font-semibold tracking-tight;
+        @apply text-[1.28rem] font-semibold tracking-tight;
     }
 
     .page-subtitle {
@@ -158,8 +164,12 @@
     }
 
     .surface-card {
-        @apply rounded-lg border shadow-sm;
-        background-color: hsl(var(--card));
+        @apply rounded-[1.25rem] border shadow-sm;
+        background:
+            linear-gradient(180deg, hsl(var(--card)) 0%, hsl(197 22% 99%) 100%);
+        box-shadow:
+            0 12px 28px hsl(216 31% 20% / 0.05),
+            0 1px 0 hsl(0 0% 100% / 0.65) inset;
     }
 
     .toolbar-surface {
@@ -174,7 +184,7 @@
     }
 
     .status-chip {
-        @apply inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium text-secondary-foreground;
+        @apply inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium text-secondary-foreground;
         border-color: hsl(var(--border) / 0.6);
         background-color: hsl(var(--secondary) / 0.85);
     }
@@ -210,10 +220,11 @@
     }
 
     .btn-minimal {
-        @apply inline-flex items-center justify-center gap-2 rounded-sm border px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50;
+        @apply inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50;
         border-color: hsl(var(--border) / 0.95);
-        background-color: hsl(var(--card));
+        background-color: hsl(var(--card) / 0.95);
         color: hsl(var(--foreground));
+        box-shadow: 0 6px 14px hsl(216 31% 20% / 0.04);
     }
 
     .btn-minimal:hover {
@@ -347,6 +358,117 @@
     .density-compact .clarity-datagrid th,
     .density-compact .clarity-datagrid td {
         @apply px-2 py-1.5;
+    }
+
+    .workspace-context-strip {
+        background:
+            linear-gradient(180deg, hsl(var(--card) / 0.94) 0%, hsl(197 20% 98% / 0.95) 100%);
+        backdrop-filter: blur(16px);
+    }
+
+    .workspace-context-grid {
+        @apply grid gap-3 xl:grid-cols-[minmax(0,1.6fr)_auto] xl:items-center;
+    }
+
+    .workspace-context-kicker {
+        @apply inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground;
+        border-color: hsl(var(--border) / 0.9);
+        background-color: hsl(var(--background) / 0.92);
+    }
+
+    .workspace-context-title {
+        @apply truncate text-lg font-semibold tracking-tight text-foreground;
+    }
+
+    .workspace-context-subtitle {
+        @apply mt-1 text-sm text-muted-foreground;
+    }
+
+    .workspace-context-chip {
+        @apply inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium;
+        border-color: hsl(var(--border) / 0.9);
+        background-color: hsl(var(--background) / 0.92);
+        color: hsl(var(--muted-foreground));
+    }
+
+    .workspace-context-chip-accent {
+        border-color: hsl(var(--primary) / 0.2);
+        background-color: hsl(var(--primary) / 0.08);
+        color: hsl(var(--primary));
+    }
+
+    .workspace-action-button {
+        @apply inline-flex items-center justify-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition-all;
+        border-color: hsl(var(--border) / 0.9);
+        background-color: hsl(var(--background) / 0.94);
+        color: hsl(var(--foreground));
+    }
+
+    .workspace-action-button:hover {
+        border-color: hsl(var(--primary) / 0.18);
+        background-color: hsl(var(--primary) / 0.05);
+        transform: translateY(-1px);
+    }
+
+    .workspace-action-button-primary {
+        border-color: hsl(var(--primary) / 0.24);
+        background:
+            linear-gradient(135deg, hsl(var(--primary) / 0.14) 0%, hsl(var(--primary) / 0.08) 100%);
+        color: hsl(var(--primary));
+    }
+
+    .workspace-hero,
+    .workspace-explorer-banner {
+        @apply rounded-[1.5rem] border px-5 py-5;
+        background:
+            linear-gradient(145deg, hsl(var(--card)) 0%, hsl(194 45% 97%) 45%, hsl(var(--card)) 100%);
+        box-shadow:
+            0 20px 36px hsl(216 31% 20% / 0.06),
+            0 1px 0 hsl(0 0% 100% / 0.65) inset;
+    }
+
+    .workspace-hero {
+        @apply grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(280px,1fr)] xl:items-end;
+    }
+
+    .workspace-hero-title {
+        @apply mt-2 text-[1.9rem] font-semibold tracking-[-0.04em] text-foreground md:text-[2.3rem];
+        font-family: 'Sora', 'Manrope', sans-serif;
+    }
+
+    .workspace-hero-subtitle {
+        @apply mt-2 max-w-2xl text-sm leading-6 text-muted-foreground md:text-base;
+    }
+
+    .workspace-hero-metrics {
+        @apply grid gap-3 sm:grid-cols-3;
+    }
+
+    .workspace-hero-metric {
+        @apply rounded-2xl border px-4 py-3;
+        border-color: hsl(var(--border) / 0.75);
+        background-color: hsl(var(--background) / 0.82);
+    }
+
+    .workspace-hero-metric-label {
+        @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground;
+    }
+
+    .workspace-hero-metric-value {
+        @apply mt-2 text-xl font-semibold text-foreground;
+    }
+
+    .account-workspace-card {
+        @apply rounded-[1.35rem] border p-4;
+        border-color: hsl(var(--border) / 0.75);
+        background:
+            linear-gradient(180deg, hsl(var(--card)) 0%, hsl(197 24% 98%) 100%);
+        box-shadow: 0 12px 30px hsl(216 31% 20% / 0.05);
+    }
+
+    .activity-drawer {
+        background:
+            linear-gradient(180deg, hsl(var(--card)) 0%, hsl(197 26% 98%) 100%);
     }
 }
 

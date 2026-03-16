@@ -26,4 +26,5 @@ src/frontend/.env
 
 # Local tools/runtime
 .tools/
+.playwright-cli/
 *.log

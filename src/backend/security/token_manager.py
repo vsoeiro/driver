@@ -5,9 +5,11 @@ and secure storage/retrieval of encrypted tokens.
 """
 
 import logging
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.core.exceptions import TokenRefreshError
 from backend.core.security import decrypt_token, encrypt_token
@@ -28,16 +30,22 @@ class TokenManager:
     Handles token encryption, decryption, refresh, and validation.
     """
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(
+        self,
+        db: AsyncSession | None,
+        *,
+        session_factory: Callable[[], AsyncIterator[AsyncSession]] | None = None,
+    ) -> None:
         """Initialize the token manager.
 
         Parameters
         ----------
-        db : AsyncSession
-            Database session for token operations.
+        db : AsyncSession | None
+            Database session for loading/syncing caller-side account instances.
 
         """
         self._db = db
+        self._session_factory = session_factory or self._build_session_factory(db)
         self._microsoft_auth_service = get_microsoft_auth_service()
         self._google_auth_service = get_google_auth_service()
         self._dropbox_auth_service = get_dropbox_auth_service()
@@ -123,71 +131,13 @@ class TokenManager:
             If refresh fails.
 
         """
-        from sqlalchemy import select
-
-        # Lock the row to prevent concurrent refresh attempts for the same account.
-        stmt = select(LinkedAccount).where(LinkedAccount.id == account.id).with_for_update()
-        result = await self._db.execute(stmt)
-        locked_account = result.scalar_one()
-
-        # Another process may have refreshed the token while we waited on the lock.
-        if not force and self._is_token_valid(locked_account):
-            logger.info("Token was already refreshed by another process")
-            token = decrypt_token(locked_account.access_token_encrypted)
-            if token and self._looks_like_valid_access_token(locked_account.provider, token):
-                account.access_token_encrypted = locked_account.access_token_encrypted
-                account.refresh_token_encrypted = locked_account.refresh_token_encrypted
-                account.token_expires_at = locked_account.token_expires_at
-                return token
-
-        if not locked_account.refresh_token_encrypted:
-            logger.error("No refresh token available for account %s", locked_account.id)
-            await self._mark_account_inactive(locked_account)
-            raise TokenRefreshError("No refresh token available", deactivate_account=True)
-
-        refresh_token = decrypt_token(locked_account.refresh_token_encrypted)
-        if not refresh_token:
-            logger.error("Failed to decrypt refresh token for account %s", locked_account.id)
-            await self._mark_account_inactive(locked_account)
-            raise TokenRefreshError("Failed to decrypt refresh token", deactivate_account=True)
-
-        auth_service = self._get_auth_service(locked_account.provider)
-        try:
-            refreshed_tokens = await auth_service.refresh_access_token(refresh_token)
-            if not refreshed_tokens:
-                raise TokenRefreshError(
-                    f"{locked_account.provider} token refresh returned no token data"
-                )
-
-            locked_account.access_token_encrypted = encrypt_token(refreshed_tokens.access_token)
-            if refreshed_tokens.refresh_token:
-                locked_account.refresh_token_encrypted = encrypt_token(
-                    refreshed_tokens.refresh_token
-                )
-            locked_account.token_expires_at = refreshed_tokens.expires_at
-
-            account.access_token_encrypted = locked_account.access_token_encrypted
-            account.refresh_token_encrypted = locked_account.refresh_token_encrypted
-            account.token_expires_at = locked_account.token_expires_at
-
-            await self._db.commit()
-            logger.info("Successfully refreshed token for account %s", locked_account.id)
-            return refreshed_tokens.access_token
-        except TokenRefreshError as exc:
-            logger.error(
-                "Token refresh failed for account %s (provider=%s): %s",
-                locked_account.id,
-                locked_account.provider,
-                exc.message,
+        async with self._managed_session() as (session, isolated):
+            return await self._refresh_token_in_session(
+                session,
+                account,
+                force=force,
+                isolated=isolated,
             )
-            if exc.deactivate_account:
-                await self._mark_account_inactive(locked_account)
-            else:
-                await self._db.rollback()
-            raise
-        except Exception:
-            await self._db.rollback()
-            raise
 
     def _looks_like_valid_access_token(self, provider: str, token: str) -> bool:
         value = (token or "").strip()
@@ -215,7 +165,13 @@ class TokenManager:
             return self._dropbox_auth_service
         raise TokenRefreshError(f"Unsupported provider for token refresh: {provider}")
 
-    async def _mark_account_inactive(self, account: LinkedAccount) -> None:
+    async def _mark_account_inactive(
+        self,
+        account: LinkedAccount,
+        *,
+        session: AsyncSession | None = None,
+        persistent_account: LinkedAccount | None = None,
+    ) -> None:
         """Mark an account as inactive due to authentication failure.
 
         Parameters
@@ -224,8 +180,17 @@ class TokenManager:
             The account to mark as inactive.
 
         """
+        session = session or self._db
+        if session is None:
+            raise RuntimeError("TokenManager requires a database session")
+
+        target_account = persistent_account
+        if target_account is None:
+            target_account = await self._load_account_for_write(session, account)
+
+        target_account.is_active = False
         account.is_active = False
-        await self._db.commit()
+        await session.commit()
         logger.warning("Marked account %s as inactive", account.id)
 
     async def store_tokens(
@@ -249,10 +214,152 @@ class TokenManager:
             Token expiration timestamp.
 
         """
-        account.access_token_encrypted = encrypt_token(access_token)
-        if refresh_token:
-            account.refresh_token_encrypted = encrypt_token(refresh_token)
-        account.token_expires_at = expires_at
-        account.is_active = True
-        await self._db.commit()
+        async with self._managed_session() as (session, _):
+            target_account = await self._load_account_for_write(session, account)
+            target_account.access_token_encrypted = encrypt_token(access_token)
+            if refresh_token:
+                target_account.refresh_token_encrypted = encrypt_token(refresh_token)
+            target_account.token_expires_at = expires_at
+            target_account.is_active = True
+            await session.commit()
+            self._sync_account_state(account, target_account)
+
+    def _build_session_factory(
+        self,
+        db: AsyncSession | None,
+    ) -> Callable[[], AsyncIterator[AsyncSession]] | None:
+        if not isinstance(db, AsyncSession):
+            return None
+        bind = getattr(db, "bind", None)
+        if bind is None:
+            return None
+        return async_sessionmaker(
+            bind,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+
+    @asynccontextmanager
+    async def _managed_session(self) -> AsyncIterator[tuple[AsyncSession, bool]]:
+        if self._session_factory is not None:
+            async with self._session_factory() as session:
+                try:
+                    yield session, True
+                except Exception:
+                    if session.in_transaction():
+                        await session.rollback()
+                    raise
+            return
+
+        if self._db is None:
+            raise RuntimeError("TokenManager requires a database session")
+
+        yield self._db, False
+
+    async def _refresh_token_in_session(
+        self,
+        session: AsyncSession,
+        account: LinkedAccount,
+        *,
+        force: bool,
+        isolated: bool,
+    ) -> str:
+        from sqlalchemy import select
+
+        # Lock the row to prevent concurrent refresh attempts for the same account.
+        stmt = select(LinkedAccount).where(LinkedAccount.id == account.id).with_for_update()
+        result = await session.execute(stmt)
+        locked_account = result.scalar_one()
+
+        # Another process may have refreshed the token while we waited on the lock.
+        if not force and self._is_token_valid(locked_account):
+            logger.info("Token was already refreshed by another process")
+            token = decrypt_token(locked_account.access_token_encrypted)
+            if token and self._looks_like_valid_access_token(locked_account.provider, token):
+                self._sync_account_state(account, locked_account)
+                if isolated and session.in_transaction():
+                    await session.rollback()
+                return token
+
+        if not locked_account.refresh_token_encrypted:
+            logger.error("No refresh token available for account %s", locked_account.id)
+            await self._mark_account_inactive(
+                account,
+                session=session,
+                persistent_account=locked_account,
+            )
+            raise TokenRefreshError("No refresh token available", deactivate_account=True)
+
+        refresh_token = decrypt_token(locked_account.refresh_token_encrypted)
+        if not refresh_token:
+            logger.error("Failed to decrypt refresh token for account %s", locked_account.id)
+            await self._mark_account_inactive(
+                account,
+                session=session,
+                persistent_account=locked_account,
+            )
+            raise TokenRefreshError("Failed to decrypt refresh token", deactivate_account=True)
+
+        auth_service = self._get_auth_service(locked_account.provider)
+        try:
+            refreshed_tokens = await auth_service.refresh_access_token(refresh_token)
+            if not refreshed_tokens:
+                raise TokenRefreshError(
+                    f"{locked_account.provider} token refresh returned no token data"
+                )
+
+            locked_account.access_token_encrypted = encrypt_token(refreshed_tokens.access_token)
+            if refreshed_tokens.refresh_token:
+                locked_account.refresh_token_encrypted = encrypt_token(
+                    refreshed_tokens.refresh_token
+                )
+            locked_account.token_expires_at = refreshed_tokens.expires_at
+            locked_account.is_active = True
+
+            await session.commit()
+            self._sync_account_state(account, locked_account)
+            logger.info("Successfully refreshed token for account %s", locked_account.id)
+            return refreshed_tokens.access_token
+        except TokenRefreshError as exc:
+            logger.error(
+                "Token refresh failed for account %s (provider=%s): %s",
+                locked_account.id,
+                locked_account.provider,
+                exc.message,
+            )
+            if exc.deactivate_account:
+                await self._mark_account_inactive(
+                    account,
+                    session=session,
+                    persistent_account=locked_account,
+                )
+            else:
+                await session.rollback()
+            raise
+        except Exception:
+            await session.rollback()
+            raise
+
+    async def _load_account_for_write(
+        self,
+        session: AsyncSession,
+        account: LinkedAccount,
+    ) -> LinkedAccount:
+        if session is self._db:
+            return account
+
+        persistent_account = await session.get(LinkedAccount, account.id)
+        if persistent_account is None:
+            raise TokenRefreshError(f"Linked account {account.id} not found")
+        return persistent_account
+
+    @staticmethod
+    def _sync_account_state(
+        account: LinkedAccount,
+        persistent_account: LinkedAccount,
+    ) -> None:
+        account.access_token_encrypted = persistent_account.access_token_encrypted
+        account.refresh_token_encrypted = persistent_account.refresh_token_encrypted
+        account.token_expires_at = persistent_account.token_expires_at
+        account.is_active = persistent_account.is_active
 

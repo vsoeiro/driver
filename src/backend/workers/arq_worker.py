@@ -26,6 +26,7 @@ from backend.workers.handlers import move as _move_handler  # noqa: F401
 from backend.workers.handlers import rules as _rules_handler  # noqa: F401
 from backend.workers.handlers import sync as _sync_handler  # noqa: F401
 from backend.workers.handlers import upload as _upload_handler  # noqa: F401
+from backend.workers.handlers import zip as _zip_handler  # noqa: F401
 
 # Ensure worker has visible INFO logs even when launched standalone.
 if not logging.getLogger().handlers:

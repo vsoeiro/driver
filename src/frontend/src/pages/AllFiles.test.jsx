@@ -15,6 +15,8 @@ const createExtractBookAssetsJobMock = vi.fn();
 const createExtractLibraryComicAssetsJobMock = vi.fn();
 const createAnalyzeLibraryImageAssetsJobMock = vi.fn();
 const createMapLibraryBooksJobMock = vi.fn();
+const createExtractZipJobMock = vi.fn();
+const renderExtractZipModalMock = vi.fn();
 const uploadFileBackgroundMock = vi.fn();
 const showToastMock = vi.fn();
 
@@ -43,6 +45,7 @@ vi.mock('../services/jobs', () => ({
         createExtractLibraryComicAssetsJob: (...args) => createExtractLibraryComicAssetsJobMock(...args),
         createAnalyzeLibraryImageAssetsJob: (...args) => createAnalyzeLibraryImageAssetsJobMock(...args),
         createMapLibraryBooksJob: (...args) => createMapLibraryBooksJobMock(...args),
+        createExtractZipJob: (...args) => createExtractZipJobMock(...args),
         uploadFileBackground: (...args) => uploadFileBackgroundMock(...args),
     },
 }));
@@ -66,6 +69,23 @@ vi.mock('../components/RemoveMetadataModal', () => ({
 
 vi.mock('../components/MoveModal', () => ({
     default: ({ isOpen }) => (isOpen ? <div>Move Modal</div> : null),
+}));
+
+vi.mock('../components/ExtractZipModal', () => ({
+    default: (props) => {
+        renderExtractZipModalMock(props);
+        return props.isOpen ? (
+            <button
+                type="button"
+                onClick={() => props.onConfirm({
+                    target: { account_id: 'dest-acc', folder_id: 'folder-22', folder_path: 'Root/Extracted' },
+                    deleteSourceAfterExtract: false,
+                })}
+            >
+                Confirm Extract ZIP
+            </button>
+        ) : null;
+    },
 }));
 
 import { renderWithProviders } from '../test/render';
@@ -156,6 +176,8 @@ describe('AllFiles page', () => {
         createExtractLibraryComicAssetsJobMock.mockReset();
         createAnalyzeLibraryImageAssetsJobMock.mockReset();
         createMapLibraryBooksJobMock.mockReset();
+        createExtractZipJobMock.mockReset();
+        renderExtractZipModalMock.mockReset();
         uploadFileBackgroundMock.mockReset();
         showToastMock.mockReset();
 
@@ -180,6 +202,7 @@ describe('AllFiles page', () => {
         createExtractLibraryComicAssetsJobMock.mockResolvedValue({ total_jobs: 2, total_items: 12, chunk_size: 1000 });
         createAnalyzeLibraryImageAssetsJobMock.mockResolvedValue({ total_jobs: 1, total_items: 8, chunk_size: 1000 });
         createMapLibraryBooksJobMock.mockResolvedValue({ total_jobs: 1, total_items: 5, chunk_size: 500 });
+        createExtractZipJobMock.mockResolvedValue({ id: 'job-zip' });
         uploadFileBackgroundMock.mockResolvedValue(undefined);
         window.localStorage.clear();
         window.open = vi.fn();
@@ -213,6 +236,39 @@ describe('AllFiles page', () => {
         await waitFor(() => {
             expect(screen.getByText('/Books')).toBeInTheDocument();
             expect(screen.getByText('issue-01.cbz')).toBeInTheDocument();
+        });
+    }, 15000);
+
+    it('allows uploads after opening a folder path even when the source item has no parent id', async () => {
+        const user = userEvent.setup();
+        useItemsListQueryMock.mockImplementation((params) => ({
+            data: params.path_prefix === '/Books'
+                ? folderItemsResponse
+                : {
+                    ...rootItemsResponse,
+                    items: rootItemsResponse.items.map((item) => (
+                        item.id === 'row-file-1'
+                            ? { ...item, parent_id: null }
+                            : item
+                    )),
+                },
+            isPending: false,
+        }));
+
+        const { container } = renderWithProviders(<AllFiles />);
+
+        await screen.findByText('cover.png');
+        await user.click(screen.getByRole('button', { name: '/Books/cover.png' }));
+
+        const uploadButton = await screen.findByRole('button', { name: /upload/i });
+        await waitFor(() => expect(uploadButton).toBeEnabled());
+
+        const uploadInput = container.querySelector('input[type="file"]');
+        const file = new File(['new issue'], 'issue-02.cbz', { type: 'application/octet-stream' });
+        fireEvent.change(uploadInput, { target: { files: [file] } });
+
+        await waitFor(() => {
+            expect(uploadFileBackgroundMock).toHaveBeenCalledWith('acc-1', 'folder-1', file, expect.any(Function));
         });
     }, 15000);
 
@@ -404,4 +460,88 @@ describe('AllFiles page', () => {
         await user.click(await screen.findByRole('button', { name: /^confirm$/i }));
         await waitFor(() => expect(createMapLibraryBooksJobMock).toHaveBeenCalledWith(null, 1000));
     }, 15000);
+
+    it('queues ZIP extraction jobs for selected zip files', async () => {
+        const user = userEvent.setup();
+        useItemsListQueryMock.mockReturnValue({
+            data: {
+                items: [
+                    {
+                        id: 'row-zip-1',
+                        item_id: 'zip-1',
+                        account_id: 'acc-1',
+                        parent_id: null,
+                        item_type: 'file',
+                        name: 'bundle.zip',
+                        size: 1024,
+                        modified_at: '2026-03-10T12:10:00Z',
+                        path: '/bundle.zip',
+                        metadata: null,
+                    },
+                ],
+                total: 1,
+                total_pages: 1,
+            },
+            isPending: false,
+        });
+
+        renderWithProviders(<AllFiles />);
+
+        await screen.findByText('bundle.zip');
+        await user.click(screen.getByText('bundle.zip').closest('.group'));
+        await user.click(screen.getByRole('button', { name: /extract zip/i }));
+        await user.click(screen.getByRole('button', { name: /confirm extract zip/i }));
+
+        await waitFor(() => {
+            expect(createExtractZipJobMock).toHaveBeenCalledWith(
+                'acc-1',
+                'zip-1',
+                'dest-acc',
+                'folder-22',
+                false,
+            );
+        });
+        expect(showToastMock).toHaveBeenCalledWith('Queued 1 ZIP extraction job(s)', 'success');
+    });
+
+    it('defaults ZIP extraction target to the selected file folder', async () => {
+        const user = userEvent.setup();
+        useItemsListQueryMock.mockReturnValue({
+            data: {
+                items: [
+                    {
+                        id: 'row-zip-1',
+                        item_id: 'zip-1',
+                        account_id: 'acc-1',
+                        parent_id: 'folder-1',
+                        item_type: 'file',
+                        name: 'bundle.zip',
+                        size: 1024,
+                        modified_at: '2026-03-10T12:10:00Z',
+                        path: '/Books/bundle.zip',
+                        metadata: null,
+                    },
+                ],
+                total: 1,
+                total_pages: 1,
+            },
+            isPending: false,
+        });
+
+        renderWithProviders(<AllFiles />);
+
+        await screen.findByText('bundle.zip');
+        await user.click(screen.getByText('bundle.zip').closest('.group'));
+        await user.click(screen.getByRole('button', { name: /extract zip/i }));
+
+        await waitFor(() => {
+            expect(renderExtractZipModalMock).toHaveBeenCalled();
+        });
+        const latestProps = renderExtractZipModalMock.mock.calls.at(-1)?.[0];
+        expect(latestProps.initialTarget).toEqual({
+            account_id: 'acc-1',
+            folder_id: 'folder-1',
+            folder_path: 'Root/Books',
+        });
+    });
 });

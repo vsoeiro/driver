@@ -9,6 +9,7 @@ class JobType(StrEnum):
     SYNC_ITEMS = "sync_items"
     UPLOAD_FILE = "upload_file"
     MOVE_ITEMS = "move_items"
+    EXTRACT_ZIP_CONTENTS = "extract_zip_contents"
     UPDATE_METADATA = "update_metadata"
     APPLY_METADATA_RECURSIVE = "apply_metadata_recursive"
     REMOVE_METADATA_RECURSIVE = "remove_metadata_recursive"

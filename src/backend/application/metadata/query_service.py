@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any
@@ -17,7 +18,13 @@ from backend.core.exceptions import DriveOrganizerError
 from backend.db.models import Item, ItemMetadata, MetadataCategory
 from backend.domain.errors import NotFoundError
 from backend.schemas.items import ItemListResponse, SimilarItemsReportResponse
-from backend.schemas.metadata import SeriesSummaryResponse
+from backend.schemas.metadata import (
+    MetadataCategoryDashboardResponse,
+    MetadataDashboardCard,
+    MetadataDashboardPoint,
+    MetadataDashboardStat,
+    SeriesSummaryResponse,
+)
 
 
 def _parse_positive_int(value: str | None) -> int | None:
@@ -61,6 +68,22 @@ LOW_PRIORITY_PATH_MARKERS = (
     "/__covers__/",
 )
 MAX_SIMILAR_ITEMS_SCAN_ROWS = 200_000
+METADATA_DASHBOARD_BATCH_SIZE = 500
+DASHBOARD_TOP_VALUE_LIMIT = 10
+DASHBOARD_MAX_EXACT_NUMBER_POINTS = 18
+DASHBOARD_EXCLUDED_PLUGIN_FIELD_KEYS = {
+    "cover_item_id",
+    "cover_filename",
+    "cover_account_id",
+}
+EXACT_COUNT_NUMBER_PLUGIN_FIELD_KEYS = {
+    "volume",
+    "year",
+    "month",
+    "published_year",
+    "max_volumes",
+    "max_issues",
+}
 
 
 def _is_low_priority_path(path: str | None) -> tuple[bool, str | None]:
@@ -69,6 +92,367 @@ def _is_low_priority_path(path: str | None) -> tuple[bool, str | None]:
         if marker in normalized:
             return True, marker.strip("/")
     return False, None
+
+
+def _is_dashboard_value_filled(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip() != ""
+    if isinstance(value, list):
+        return len(value) > 0
+    return True
+
+
+def _normalize_dashboard_boolean(value: Any) -> bool | None:
+    if value is True or value == 1 or value == "1":
+        return True
+    if value is False or value == 0 or value == "0":
+        return False
+    normalized = str(value or "").strip().lower()
+    if normalized in {"true", "yes", "on"}:
+        return True
+    if normalized in {"false", "no", "off"}:
+        return False
+    return None
+
+
+def _normalize_dashboard_number(value: Any) -> int | float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed):
+        return None
+    if parsed.is_integer():
+        return int(parsed)
+    return parsed
+
+
+def _normalize_dashboard_date(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _format_dashboard_number_token(value: int | float) -> str:
+    if isinstance(value, bool):
+        return str(value).lower()
+    if isinstance(value, int):
+        return str(value)
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{float(value):g}"
+
+
+def _nice_step(value: float) -> float:
+    if not math.isfinite(value) or value <= 0:
+        return 1.0
+    exponent = math.floor(math.log10(value))
+    fraction = value / (10**exponent)
+    if fraction <= 1:
+        nice_fraction = 1
+    elif fraction <= 2:
+        nice_fraction = 2
+    elif fraction <= 5:
+        nice_fraction = 5
+    else:
+        nice_fraction = 10
+    return float(nice_fraction * (10**exponent))
+
+
+def _should_include_dashboard_attribute(attribute: Any) -> bool:
+    plugin_field_key = str(getattr(attribute, "plugin_field_key", "") or "").strip().lower()
+    return plugin_field_key not in DASHBOARD_EXCLUDED_PLUGIN_FIELD_KEYS
+
+
+def _new_dashboard_state() -> dict[str, Any]:
+    return {
+        "filled_count": 0,
+        "counts": {},
+        "labels": {},
+        "number_sum": 0.0,
+        "number_min": None,
+        "number_max": None,
+        "date_min": None,
+        "date_max": None,
+        "date_month_counts": {},
+        "date_year_counts": {},
+        "date_distinct": set(),
+    }
+
+
+def _increment_counter(mapping: dict[Any, int], key: Any, amount: int = 1) -> None:
+    mapping[key] = int(mapping.get(key, 0)) + int(amount)
+
+
+def _accumulate_dashboard_value(
+    state: dict[str, Any],
+    *,
+    data_type: str,
+    raw_value: Any,
+) -> None:
+    if not _is_dashboard_value_filled(raw_value):
+        return
+
+    state["filled_count"] += 1
+
+    if data_type == "boolean":
+        normalized = _normalize_dashboard_boolean(raw_value)
+        if normalized is None:
+            return
+        key = "true" if normalized else "false"
+        state["labels"].setdefault(key, key)
+        _increment_counter(state["counts"], key)
+        return
+
+    if data_type == "tags":
+        raw_tags = raw_value if isinstance(raw_value, list) else str(raw_value).split(",")
+        unique_tags: dict[str, str] = {}
+        for raw_tag in raw_tags:
+            candidate = str(raw_tag or "").strip()
+            if not candidate:
+                continue
+            normalized_key = candidate.lower()
+            unique_tags.setdefault(normalized_key, candidate)
+        for normalized_key, display_label in unique_tags.items():
+            state["labels"].setdefault(normalized_key, display_label)
+            _increment_counter(state["counts"], normalized_key)
+        return
+
+    if data_type in {"text", "select"}:
+        normalized = str(raw_value or "").strip()
+        if not normalized:
+            return
+        state["labels"].setdefault(normalized, normalized)
+        _increment_counter(state["counts"], normalized)
+        return
+
+    if data_type == "number":
+        parsed = _normalize_dashboard_number(raw_value)
+        if parsed is None:
+            return
+        state["labels"].setdefault(parsed, _format_dashboard_number_token(parsed))
+        _increment_counter(state["counts"], parsed)
+        state["number_sum"] += float(parsed)
+        state["number_min"] = parsed if state["number_min"] is None else min(state["number_min"], parsed)
+        state["number_max"] = parsed if state["number_max"] is None else max(state["number_max"], parsed)
+        return
+
+    if data_type == "date":
+        parsed = _normalize_dashboard_date(raw_value)
+        if parsed is None:
+            return
+        month_key = f"{parsed.year:04d}-{parsed.month:02d}"
+        year_key = f"{parsed.year:04d}"
+        _increment_counter(state["date_month_counts"], month_key)
+        _increment_counter(state["date_year_counts"], year_key)
+        state["date_distinct"].add(parsed.isoformat())
+        state["date_min"] = parsed if state["date_min"] is None else min(state["date_min"], parsed)
+        state["date_max"] = parsed if state["date_max"] is None else max(state["date_max"], parsed)
+
+
+def _build_frequency_points(
+    counts: dict[Any, int],
+    labels: dict[Any, str],
+    *,
+    limit: int | None = None,
+) -> list[MetadataDashboardPoint]:
+    ordered_items = sorted(
+        counts.items(),
+        key=lambda item: (-int(item[1]), str(labels.get(item[0], item[0]))),
+    )
+    if limit is not None and limit > 0:
+        ordered_items = ordered_items[:limit]
+    return [
+        MetadataDashboardPoint(
+            key=str(key),
+            label=str(labels.get(key, key)),
+            count=int(count),
+            value=str(key),
+        )
+        for key, count in ordered_items
+    ]
+
+
+def _build_numeric_count_points(
+    counts: dict[int | float, int],
+) -> list[MetadataDashboardPoint]:
+    ordered_items = sorted(counts.items(), key=lambda item: float(item[0]))
+    return [
+        MetadataDashboardPoint(
+            key=_format_dashboard_number_token(value),
+            label=_format_dashboard_number_token(value),
+            count=int(count),
+            value=_format_dashboard_number_token(value),
+        )
+        for value, count in ordered_items
+    ]
+
+
+def _build_numeric_histogram_points(
+    counts: dict[int | float, int],
+    *,
+    minimum: int | float,
+    maximum: int | float,
+) -> list[MetadataDashboardPoint]:
+    span = float(maximum) - float(minimum)
+    bucket_width = _nice_step(span / 12.0)
+    bucket_origin = math.floor(float(minimum) / bucket_width) * bucket_width
+    max_bucket_index = 0
+    bucket_counts: dict[int, int] = {}
+
+    for value, count in counts.items():
+        numeric_value = float(value)
+        if math.isclose(numeric_value, float(maximum), rel_tol=1e-9, abs_tol=1e-9):
+            bucket_index = max(0, int(math.ceil((numeric_value - bucket_origin) / bucket_width)) - 1)
+        else:
+            bucket_index = max(0, int(math.floor((numeric_value - bucket_origin) / bucket_width)))
+        max_bucket_index = max(max_bucket_index, bucket_index)
+        bucket_counts[bucket_index] = int(bucket_counts.get(bucket_index, 0)) + int(count)
+
+    points: list[MetadataDashboardPoint] = []
+    for bucket_index in sorted(bucket_counts):
+        range_start = bucket_origin + (bucket_index * bucket_width)
+        range_end = float(maximum) if bucket_index == max_bucket_index else range_start + bucket_width
+        label = f"{_format_dashboard_number_token(range_start)} to {_format_dashboard_number_token(range_end)}"
+        points.append(
+            MetadataDashboardPoint(
+                key=str(bucket_index),
+                label=label,
+                count=int(bucket_counts[bucket_index]),
+                range_start=range_start,
+                range_end=range_end,
+            )
+        )
+    return points
+
+
+def _build_date_points(
+    month_counts: dict[str, int],
+    year_counts: dict[str, int],
+    *,
+    earliest: datetime,
+    latest: datetime,
+) -> list[MetadataDashboardPoint]:
+    span_months = ((latest.year - earliest.year) * 12) + (latest.month - earliest.month)
+    if span_months <= 18:
+        return [
+            MetadataDashboardPoint(key=key, label=key, count=int(month_counts[key]), value=key)
+            for key in sorted(month_counts)
+        ]
+    return [
+        MetadataDashboardPoint(key=key, label=key, count=int(year_counts[key]), value=key)
+        for key in sorted(year_counts)
+    ]
+
+
+def _build_dashboard_card(
+    attribute: Any,
+    state: dict[str, Any],
+    *,
+    total_items: int,
+) -> MetadataDashboardCard:
+    filled_count = int(state["filled_count"])
+    fill_rate = round((filled_count / total_items) * 100) if total_items > 0 else 0
+    stats: list[MetadataDashboardStat] = []
+    points: list[MetadataDashboardPoint] = []
+    distinct_count = 0
+    chart_type = "count"
+
+    if attribute.data_type == "boolean":
+        yes_count = int(state["counts"].get("true", 0))
+        no_count = int(state["counts"].get("false", 0))
+        distinct_count = int((1 if yes_count > 0 else 0) + (1 if no_count > 0 else 0))
+        chart_type = "pie"
+        points = [
+            MetadataDashboardPoint(key="true", label="true", count=yes_count, value="true"),
+            MetadataDashboardPoint(key="false", label="false", count=no_count, value="false"),
+        ]
+    elif attribute.data_type == "tags":
+        distinct_count = len(state["counts"])
+        points = _build_frequency_points(
+            state["counts"],
+            state["labels"],
+            limit=DASHBOARD_TOP_VALUE_LIMIT,
+        )
+    elif attribute.data_type == "text":
+        distinct_count = len(state["counts"])
+        points = _build_frequency_points(
+            state["counts"],
+            state["labels"],
+            limit=DASHBOARD_TOP_VALUE_LIMIT,
+        )
+    elif attribute.data_type == "select":
+        distinct_count = len(state["counts"])
+        points = _build_frequency_points(state["counts"], state["labels"])
+    elif attribute.data_type == "date":
+        distinct_count = len(state["date_distinct"])
+        if state["date_min"] is not None and state["date_max"] is not None:
+            points = _build_date_points(
+                state["date_month_counts"],
+                state["date_year_counts"],
+                earliest=state["date_min"],
+                latest=state["date_max"],
+            )
+            stats = [
+                MetadataDashboardStat(key="earliest", value=state["date_min"].isoformat()),
+                MetadataDashboardStat(key="latest", value=state["date_max"].isoformat()),
+            ]
+    elif attribute.data_type == "number":
+        distinct_count = len(state["counts"])
+        minimum = state["number_min"]
+        maximum = state["number_max"]
+        if minimum is not None and maximum is not None and filled_count > 0 and distinct_count > 0:
+            average = state["number_sum"] / max(1, sum(int(count) for count in state["counts"].values()))
+            stats = [
+                MetadataDashboardStat(key="min", value=_format_dashboard_number_token(minimum)),
+                MetadataDashboardStat(key="max", value=_format_dashboard_number_token(maximum)),
+                MetadataDashboardStat(key="average", value=_format_dashboard_number_token(average)),
+            ]
+            numeric_range = float(maximum) - float(minimum)
+            prefers_exact_counts = (
+                (attribute.plugin_field_key or "").strip().lower() in EXACT_COUNT_NUMBER_PLUGIN_FIELD_KEYS
+            )
+            use_exact_counts = (
+                (prefers_exact_counts and distinct_count <= DASHBOARD_MAX_EXACT_NUMBER_POINTS)
+                or distinct_count <= 12
+                or (numeric_range <= 12 and distinct_count <= DASHBOARD_MAX_EXACT_NUMBER_POINTS)
+            )
+            if use_exact_counts:
+                chart_type = "count"
+                points = _build_numeric_count_points(state["counts"])
+            else:
+                chart_type = "histogram"
+                points = _build_numeric_histogram_points(
+                    state["counts"],
+                    minimum=minimum,
+                    maximum=maximum,
+                )
+
+    return MetadataDashboardCard(
+        attribute_id=attribute.id,
+        name=attribute.name,
+        data_type=attribute.data_type,
+        chart_type=chart_type,
+        filled_count=filled_count,
+        fill_rate=fill_rate,
+        distinct_count=distinct_count,
+        stats=stats,
+        points=points,
+    )
 
 
 class MetadataQueryService:
@@ -533,6 +917,107 @@ class MetadataQueryService:
             page=page,
             page_size=page_size,
             total_pages=(total + page_size - 1) // page_size,
+        )
+
+    async def get_category_dashboard(
+        self,
+        *,
+        category_id: UUID,
+    ) -> MetadataCategoryDashboardResponse:
+        category_query = (
+            select(MetadataCategory)
+            .where(MetadataCategory.id == category_id)
+            .options(selectinload(MetadataCategory.attributes))
+        )
+        category_result = await self.session.execute(category_query)
+        category = category_result.scalar_one_or_none()
+        if not category:
+            raise NotFoundError("Category not found")
+
+        dashboard_attributes = [
+            attribute for attribute in category.attributes
+            if _should_include_dashboard_attribute(attribute)
+        ]
+
+        total_query = (
+            select(func.count(ItemMetadata.id))
+            .select_from(ItemMetadata)
+            .join(
+                Item,
+                (Item.account_id == ItemMetadata.account_id)
+                & (Item.item_id == ItemMetadata.item_id),
+            )
+            .where(ItemMetadata.category_id == category_id)
+        )
+        total_items = int((await self.session.execute(total_query)).scalar() or 0)
+
+        attribute_types_by_id = {
+            str(attribute.id): attribute.data_type
+            for attribute in dashboard_attributes
+        }
+        states_by_attribute_id = {
+            str(attribute.id): _new_dashboard_state()
+            for attribute in dashboard_attributes
+        }
+
+        offset = 0
+        while True:
+            batch_query = (
+                select(ItemMetadata.values)
+                .select_from(ItemMetadata)
+                .join(
+                    Item,
+                    (Item.account_id == ItemMetadata.account_id)
+                    & (Item.item_id == ItemMetadata.item_id),
+                )
+                .where(ItemMetadata.category_id == category_id)
+                .order_by(ItemMetadata.id.asc())
+                .offset(offset)
+                .limit(METADATA_DASHBOARD_BATCH_SIZE)
+            )
+            rows = (await self.session.execute(batch_query)).all()
+            if not rows:
+                break
+
+            for (values,) in rows:
+                if not isinstance(values, dict):
+                    continue
+                for attribute_id, raw_value in values.items():
+                    normalized_attribute_id = str(attribute_id)
+                    state = states_by_attribute_id.get(normalized_attribute_id)
+                    data_type = attribute_types_by_id.get(normalized_attribute_id)
+                    if state is None or data_type is None:
+                        continue
+                    _accumulate_dashboard_value(
+                        state,
+                        data_type=data_type,
+                        raw_value=raw_value,
+                    )
+
+            offset += len(rows)
+
+        cards = [
+            _build_dashboard_card(
+                attribute,
+                states_by_attribute_id[str(attribute.id)],
+                total_items=total_items,
+            )
+            for attribute in dashboard_attributes
+        ]
+        average_coverage = (
+            round(sum(card.fill_rate for card in cards) / len(cards))
+            if cards
+            else 0
+        )
+        fields_with_gaps = sum(
+            1 for card in cards if card.filled_count < total_items
+        ) if total_items > 0 else 0
+
+        return MetadataCategoryDashboardResponse(
+            total_items=total_items,
+            average_coverage=average_coverage,
+            fields_with_gaps=fields_with_gaps,
+            cards=cards,
         )
 
     async def get_category_series_summary(

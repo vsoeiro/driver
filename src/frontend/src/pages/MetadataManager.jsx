@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { useLocation } from 'react-router-dom';
 import { metadataService } from '../services/metadata';
 import { itemsService } from '../services/items';
 import { accountsService } from '../services/accounts';
@@ -16,17 +17,19 @@ import {
 } from '../utils/metadata';
 import {
     Plus, Trash2, ChevronRight, ChevronDown, ChevronLeft,
-    Database, Loader2, Tag, Hash, ArrowLeft,
+    Database, Loader2, Tag, Hash, ArrowLeft, BarChart3,
     File, Folder, ArrowUpDown, ArrowUp, ArrowDown,
     CheckSquare, Square, Eye, Search, Filter, User, Pencil, BookOpen, Power, Columns3, GripVertical,
     Download, ArrowRightLeft, XCircle, Check, X
 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
+import { useWorkspacePage } from '../contexts/WorkspaceContext';
 import Modal from '../components/Modal';
 import BatchMetadataModal from '../components/BatchMetadataModal';
 import RemoveMetadataModal from '../components/RemoveMetadataModal';
 import MetadataModal from '../components/MetadataModal';
 import MoveModal from '../components/MoveModal';
+import MetadataDashboardSurface from '../components/MetadataDashboardSurface';
 import MetadataLayoutBuilderModal from '../components/MetadataLayoutBuilderModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
@@ -82,6 +85,80 @@ const getColumnAlignmentClasses = (align) => {
 };
 
 
+
+
+const CategoryDashboardView = ({ category, onBack, onOpenItems }) => {
+    const { t, i18n } = useTranslation();
+
+    useWorkspacePage(useMemo(() => ({
+        title: t('metadataManager.dashboard.title'),
+        subtitle: t('metadataManager.dashboard.sectionSubtitle', { name: category.name }),
+        entityType: 'metadata',
+        entityId: `${category.id}:dashboard`,
+        sourceRoute: '/metadata',
+        metrics: [
+            t('metadataManager.itemsCount', { count: category.item_count || 0 }),
+            t('metadataManager.attrsCount', { count: category.attributes?.length || 0 }),
+        ],
+    }), [category.attributes?.length, category.id, category.item_count, category.name, t]));
+
+    const dashboardQuery = useQuery({
+        queryKey: ['metadata-category-dashboard', category.id],
+        queryFn: () => metadataService.getCategoryDashboard(category.id),
+        staleTime: 30000,
+    });
+    const metadataDashboard = dashboardQuery.data || {
+        total_items: 0,
+        average_coverage: 0,
+        fields_with_gaps: 0,
+        cards: [],
+    };
+
+    return (
+        <div className="app-page space-y-4">
+            <div className="surface-card p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                        <button
+                            type="button"
+                            onClick={onBack}
+                            className="ghost-icon-button"
+                            title={t('metadataManager.backToCategories')}
+                        >
+                            <ArrowLeft size={18} />
+                        </button>
+                        <div className="min-w-0">
+                            <h1 className="text-lg font-semibold text-foreground">{category.name}</h1>
+                            <p className="text-sm text-muted-foreground">
+                                {t('metadataManager.dashboard.sectionSubtitle', { name: category.name })}
+                            </p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={onOpenItems}
+                            className="btn-minimal-primary h-9 px-3 text-xs"
+                        >
+                            <Eye size={14} />
+                            <span>{t('metadataManager.viewItemsInCategory')}</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <MetadataDashboardSurface
+                category={category}
+                dashboardQuery={dashboardQuery}
+                metadataDashboard={metadataDashboard}
+                t={t}
+                language={i18n.language}
+            />
+        </div>
+    );
+};
+
+
 // -- Category Items Table --
 const CategoryItemsTable = ({ category, onBack }) => {
     const { t, i18n } = useTranslation();
@@ -131,6 +208,30 @@ const CategoryItemsTable = ({ category, onBack }) => {
         item_type: '',
         attributes: {}
     });
+
+    useWorkspacePage(useMemo(() => ({
+        title: category.name,
+        subtitle: t('workspace.metadataCategorySubtitle', { defaultValue: 'Edicao e leitura operacional dos itens desta categoria.' }),
+        entityType: 'metadata',
+        entityId: category.id,
+        sourceRoute: '/metadata',
+        selectedIds: Array.from(selectedItems),
+        activeFilters: [
+            searchTerm ? t('workspace.filterSearch', { value: searchTerm, defaultValue: `Busca: ${searchTerm}` }) : '',
+            filters.account_id ? t('workspace.filterAccount', { value: filters.account_id, defaultValue: `Conta: ${filters.account_id}` }) : '',
+            filters.item_type ? t('workspace.filterType', { value: filters.item_type, defaultValue: `Tipo: ${filters.item_type}` }) : '',
+        ].filter(Boolean),
+        metrics: [
+            t('metadataManager.itemsCount', { count: total }),
+            t('workspace.pageMetric', { page, total: totalPages, defaultValue: `Pagina ${page} de ${totalPages}` }),
+        ],
+        suggestedPrompts: [
+            t('workspace.aiPrompts.metadataCoverage', { defaultValue: 'Onde a cobertura de metadata esta fraca?' }),
+            t('workspace.aiPrompts.metadataLayout', { defaultValue: 'Como simplificar a leitura e edicao desta categoria?' }),
+            t('workspace.aiPrompts.recommend', { defaultValue: 'Sugira as proximas acoes com maior impacto.' }),
+        ],
+    }), [category.id, category.name, filters.account_id, filters.item_type, page, searchTerm, selectedItems, t, total, totalPages]));
+
     const libraryView = getCategoryLibraryView(category);
     const supportsGallery = !!libraryView?.modes?.includes('gallery');
     const supportsSeriesTracker = !!libraryView?.modes?.includes('series_tracker');
@@ -166,6 +267,48 @@ const CategoryItemsTable = ({ category, onBack }) => {
         queryFn: accountsService.getAccounts,
         staleTime: 60000,
     });
+
+    const metadataFilters = useMemo(() => {
+        const normalizedFilters = {};
+        Object.entries(filters.attributes || {}).forEach(([attrId, config]) => {
+            if (config === null || config === undefined) return;
+
+            if (typeof config === 'object' && !Array.isArray(config)) {
+                const normalized = {};
+                if (config.op !== undefined && config.op !== null && config.op !== '') {
+                    normalized.op = config.op;
+                }
+                if (config.value !== undefined && config.value !== null && config.value !== '') {
+                    normalized.value = config.value;
+                }
+                if (config.min !== undefined && config.min !== null && config.min !== '') {
+                    normalized.min = config.min;
+                }
+                if (config.max !== undefined && config.max !== null && config.max !== '') {
+                    normalized.max = config.max;
+                }
+                if (Object.keys(normalized).length > 0) {
+                    normalizedFilters[attrId] = normalized;
+                }
+                return;
+            }
+
+            if (config !== '' && config !== null && config !== undefined) {
+                normalizedFilters[attrId] = config;
+            }
+        });
+        return normalizedFilters;
+    }, [filters.attributes]);
+
+    const baseListParams = useMemo(() => ({
+        category_id: category.id,
+        has_metadata: true,
+        q: debouncedSearchTerm,
+        search_fields: searchScope,
+        account_id: filters.account_id || undefined,
+        item_type: filters.item_type || undefined,
+        metadata: metadataFilters,
+    }), [category.id, debouncedSearchTerm, searchScope, filters.account_id, filters.item_type, metadataFilters]);
 
     useEffect(() => {
         function handleClickOutside(event) {
@@ -418,44 +561,12 @@ const CategoryItemsTable = ({ category, onBack }) => {
         try {
             const effectivePage = overridePage ?? page;
             const isSeriesTrackerMode = supportsSeriesTracker && viewMode === 'series_tracker';
-            const metadataFilters = {};
-            Object.entries(filters.attributes || {}).forEach(([attrId, config]) => {
-                if (config === null || config === undefined) return;
-
-                if (typeof config === 'object' && !Array.isArray(config)) {
-                    const normalized = {};
-                    if (config.op !== undefined && config.op !== null && config.op !== '') {
-                        normalized.op = config.op;
-                    }
-                    if (config.value !== undefined && config.value !== null && config.value !== '') {
-                        normalized.value = config.value;
-                    }
-                    if (config.min !== undefined && config.min !== null && config.min !== '') {
-                        normalized.min = config.min;
-                    }
-                    if (config.max !== undefined && config.max !== null && config.max !== '') {
-                        normalized.max = config.max;
-                    }
-                    if (Object.keys(normalized).length > 0) {
-                        metadataFilters[attrId] = normalized;
-                    }
-                } else if (config !== '' && config !== null && config !== undefined) {
-                    metadataFilters[attrId] = config;
-                }
-            });
-
             const baseParams = {
+                ...baseListParams,
                 sort_by: selectedMetadataSort ? 'modified_at' : sort.by,
                 sort_order: sort.order,
                 metadata_sort_attribute_id: selectedMetadataSort?.attributeId,
                 metadata_sort_data_type: selectedMetadataSort?.dataType,
-                category_id: category.id,
-                has_metadata: true,
-                q: debouncedSearchTerm,
-                search_fields: searchScope,
-                account_id: filters.account_id || undefined,
-                item_type: filters.item_type || undefined,
-                metadata: metadataFilters
             };
 
             if (isSeriesTrackerMode) {
@@ -491,7 +602,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
         } finally {
             setLoading(false);
         }
-    }, [page, pageSize, sort.by, sort.order, selectedMetadataSort, category.id, supportsSeriesTracker, viewMode, debouncedSearchTerm, searchScope, filters]);
+    }, [page, pageSize, sort.by, sort.order, selectedMetadataSort, category.id, supportsSeriesTracker, viewMode, debouncedSearchTerm, searchScope, filters, baseListParams, metadataFilters]);
 
     useEffect(() => {
         fetchItems();
@@ -1969,9 +2080,11 @@ const CategoryItemsTable = ({ category, onBack }) => {
 
 // -- Main Page --
 export default function MetadataManager() {
+    const location = useLocation();
     const [activeView, setActiveView] = useState('metadata');
     const [expandedCategory, setExpandedCategory] = useState(null);
     const [viewingCategory, setViewingCategory] = useState(null);
+    const [dashboardCategory, setDashboardCategory] = useState(null);
     const [togglingLibraryKey, setTogglingLibraryKey] = useState(null);
     const { t } = useTranslation();
     const { showToast } = useToast();
@@ -2198,6 +2311,44 @@ export default function MetadataManager() {
         setExpandedCategory(expandedCategory === id ? null : id);
     };
 
+    useWorkspacePage(useMemo(() => ((viewingCategory || dashboardCategory) ? null : {
+        title: t('metadataManager.title'),
+        subtitle: activeView === 'metadata'
+            ? t('workspace.metadataSubtitle', { defaultValue: 'Categorias, bibliotecas e layouts conectados ao restante da plataforma.' })
+            : t('workspace.metadataLibrariesSubtitle', { defaultValue: 'Bibliotecas gerenciadas e configuracao operacional por dominio.' }),
+        entityType: 'metadata',
+        entityId: activeView,
+        sourceRoute: location.pathname,
+        metrics: [
+            t('metadataManager.categoriesCount', { count: categories.length }),
+            t('metadataManager.librariesCount', { count: knownLibraries.length }),
+        ],
+        activeFilters: [
+            activeView === 'metadata' ? t('metadataManager.metadataTab') : t('metadataManager.librariesTab'),
+        ],
+        suggestedPrompts: [
+            t('workspace.aiPrompts.metadataCoverage', { defaultValue: 'Onde a cobertura de metadata esta fraca?' }),
+            t('workspace.aiPrompts.metadataLayout', { defaultValue: 'Como simplificar a leitura e edicao desta categoria?' }),
+            t('workspace.aiPrompts.summarize', { defaultValue: 'Resuma o contexto atual e destaque riscos.' }),
+        ],
+    }), [activeView, categories.length, dashboardCategory, knownLibraries.length, location.pathname, t, viewingCategory]));
+
+    if (dashboardCategory) {
+        return (
+            <CategoryDashboardView
+                category={dashboardCategory}
+                onBack={() => {
+                    setDashboardCategory(null);
+                    refetchCategories();
+                }}
+                onOpenItems={() => {
+                    setViewingCategory(dashboardCategory);
+                    setDashboardCategory(null);
+                }}
+            />
+        );
+    }
+
     // If viewing a specific category's items
     if (viewingCategory) {
         return (
@@ -2365,9 +2516,21 @@ export default function MetadataManager() {
                                                 </span>
                                             </div>
                                             <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setDashboardCategory(cat);
+                                                }}
+                                                className="p-2 hover:bg-primary/10 text-muted-foreground hover:text-primary rounded-md transition-colors"
+                                                title={t('metadataManager.viewDashboard')}
+                                                aria-label={t('metadataManager.viewDashboard')}
+                                            >
+                                                <BarChart3 size={18} />
+                                            </button>
+                                            <button
                                                 onClick={(e) => { e.stopPropagation(); setViewingCategory(cat); }}
                                                 className="p-2 hover:bg-primary/10 text-muted-foreground hover:text-primary rounded-md transition-colors"
                                                 title={t('metadataManager.viewItemsInCategory')}
+                                                aria-label={t('metadataManager.viewItemsInCategory')}
                                             >
                                                 <Eye size={18} />
                                             </button>

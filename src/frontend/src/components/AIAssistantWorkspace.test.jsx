@@ -83,6 +83,7 @@ describe('AIAssistantWorkspace', () => {
         const user = userEvent.setup();
         renderWithProviders(<AIAssistantWorkspace />);
 
+        expect(screen.queryByText('Current context')).not.toBeInTheDocument();
         const composer = await screen.findByPlaceholderText('Type your message...');
         await waitFor(() => expect(composer).not.toBeDisabled());
 

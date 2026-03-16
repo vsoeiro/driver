@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Loader2, RefreshCw, RotateCcw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useLocation } from 'react-router-dom';
 import { settingsService } from '../services/settings';
 import { jobsService } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
+import { useWorkspacePage } from '../contexts/WorkspaceContext';
 import AdminTabs from '../components/AdminTabs';
 import { useObservabilityQuery } from '../hooks/useAppQueries';
 import { queryKeys } from '../lib/queryKeys';
@@ -47,6 +49,7 @@ function MiniBars({ items, max }) {
 
 export default function AdminDashboard() {
     const { t, i18n } = useTranslation();
+    const location = useLocation();
     const { showToast } = useToast();
     const [refreshing, setRefreshing] = useState(false);
     const [period, setPeriod] = useState('24h');
@@ -152,6 +155,24 @@ export default function AdminDashboard() {
 
     const successRateWindow = snapshot?.success_rate_window ?? snapshot?.success_rate_last_24h ?? 0;
     const deadLetterWindow = snapshot?.dead_letter_jobs_window ?? snapshot?.dead_letter_jobs_24h ?? 0;
+
+    useWorkspacePage(useMemo(() => ({
+        title: t('adminDashboard.title'),
+        subtitle: t('workspace.adminSubtitle', { defaultValue: 'Saude operacional, gargalos e telemetria em um unico lugar.' }),
+        entityType: 'admin',
+        entityId: 'dashboard',
+        sourceRoute: location.pathname,
+        activeFilters: [windowLabel],
+        metrics: [
+            t('workspace.queueDepthMetric', { value: snapshot?.queue_depth ?? 0, defaultValue: `Fila ${snapshot?.queue_depth ?? 0}` }),
+            t('workspace.deadLetterMetric', { value: deadLetterWindow, defaultValue: `Dead letters ${deadLetterWindow}` }),
+        ],
+        suggestedPrompts: [
+            t('workspace.aiPrompts.jobReview', { defaultValue: 'Explique o que aconteceu nestes jobs e o que fazer agora.' }),
+            t('workspace.aiPrompts.recommend', { defaultValue: 'Sugira as proximas acoes com maior impacto.' }),
+            t('workspace.aiPrompts.summarize', { defaultValue: 'Resuma o contexto atual e destaque riscos.' }),
+        ],
+    }), [deadLetterWindow, location.pathname, snapshot?.queue_depth, t, windowLabel]));
 
     const handleReprocess = useCallback(async (jobId) => {
         setReprocessingJobId(jobId);

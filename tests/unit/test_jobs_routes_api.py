@@ -20,6 +20,7 @@ from backend.schemas.jobs import (
     JobExtractComicAssetsRequest,
     JobExtractLibraryBookAssetsRequest,
     JobExtractLibraryComicAssetsRequest,
+    JobExtractZipRequest,
     JobMapLibraryBooksRequest,
     JobMetadataUpdateRequest,
     JobMoveRequest,
@@ -153,6 +154,18 @@ async def test_filter_helpers_exclude_mapped_and_conflicting_items():
             ),
             lambda session: {"job_service": SimpleNamespace(session=session)},
             "move_items",
+        ),
+        (
+            jobs_routes.create_extract_zip_job,
+            lambda: JobExtractZipRequest(
+                source_account_id=uuid4(),
+                source_item_id="item-zip-1",
+                destination_account_id=uuid4(),
+                destination_folder_id="folder-zip-1",
+                delete_source_after_extract=True,
+            ),
+            lambda session: {"job_service": SimpleNamespace(session=session)},
+            "extract_zip_contents",
         ),
         (
             jobs_routes.create_metadata_update_job,

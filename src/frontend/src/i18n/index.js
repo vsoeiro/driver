@@ -7,6 +7,8 @@ const LANGUAGE_STORAGE_KEY = 'driver-language';
 const SUPPORTED_LANGUAGES = ['pt-BR', 'en'];
 
 const detectLanguage = () => {
+    if (import.meta.env.MODE === 'test') return 'en';
+
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem(LANGUAGE_STORAGE_KEY) : null;
     if (saved && SUPPORTED_LANGUAGES.includes(saved)) return saved;
 

@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useRef, useState, useMemo, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useDrive } from '../hooks/useDrive';
 import { useUpload } from '../hooks/useUpload';
@@ -8,11 +8,12 @@ import { batchDeleteMetadata } from '../services/metadata';
 import { jobsService } from '../services/jobs';
 import {
     Folder, File, Download, Trash2,
-    UploadCloud, FolderPlus, Loader2, ArrowRightLeft, Database, XCircle, CheckSquare, Square, Search, X, ChevronDown, BookOpen, RefreshCw, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, GripVertical, Image as ImageIcon
+    UploadCloud, FolderPlus, Loader2, ArrowRightLeft, Database, XCircle, CheckSquare, Square, Search, X, ChevronDown, BookOpen, RefreshCw, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, GripVertical, Image as ImageIcon, Archive
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import { useToast } from '../contexts/ToastContext';
-import { useMetadataLibrariesQuery } from '../hooks/useAppQueries';
+import { useWorkspacePage } from '../contexts/WorkspaceContext';
+import { useAccountsQuery, useMetadataLibrariesQuery } from '../hooks/useAppQueries';
 import { isPreviewableFileName } from '../utils/imagePreview';
 import { formatDateTime } from '../utils/dateTime';
 
@@ -20,14 +21,17 @@ const { getDownloadUrl } = driveService;
 const MetadataModal = lazy(() => import('../components/MetadataModal'));
 const BatchMetadataModal = lazy(() => import('../components/BatchMetadataModal'));
 const MoveModal = lazy(() => import('../components/MoveModal'));
+const ExtractZipModal = lazy(() => import('../components/ExtractZipModal'));
 const ImagePreviewModal = lazy(() => import('../components/ImagePreviewModal'));
 let metadataModulePromise;
 let batchMetadataModulePromise;
 let moveModalModulePromise;
+let extractZipModalModulePromise;
 let imagePreviewModulePromise;
 const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'cbw', 'pdf', 'epub', 'cbr', 'rar', 'cb7', '7z', 'cbt', 'tar']);
 const BOOK_MAPPABLE_EXTS = new Set(['pdf', 'epub']);
 const IMAGE_ANALYZABLE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'tiff', 'tif', 'heic', 'avif']);
+const ZIP_EXTRACTABLE_EXTS = new Set(['zip']);
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 const FILE_BROWSER_COLUMNS = [
     { id: 'name', width: 320, minWidth: 180, align: 'left' },
@@ -54,6 +58,10 @@ function preloadMoveModal() {
     moveModalModulePromise ||= import('../components/MoveModal');
 }
 
+function preloadExtractZipModal() {
+    extractZipModalModulePromise ||= import('../components/ExtractZipModal');
+}
+
 function preloadImagePreviewModal() {
     imagePreviewModulePromise ||= import('../components/ImagePreviewModal');
 }
@@ -62,6 +70,7 @@ export default function FileBrowser() {
     const { t, i18n } = useTranslation();
     const { showToast } = useToast();
     const { accountId, folderId } = useParams();
+    const location = useLocation();
     const [pageSize, setPageSize] = useState(50);
     const {
         files,
@@ -110,6 +119,7 @@ export default function FileBrowser() {
     // Modal State
     const [deleteModal, setDeleteModal] = useState({ isOpen: false });
     const [moveModal, setMoveModal] = useState({ isOpen: false });
+    const [extractZipModalOpen, setExtractZipModalOpen] = useState(false);
     const [metadataModalOpen, setMetadataModalOpen] = useState(false);
     const [batchMetadataModalOpen, setBatchMetadataModalOpen] = useState(false);
     const [removeMetadataModal, setRemoveMetadataModal] = useState(false);
@@ -119,6 +129,7 @@ export default function FileBrowser() {
     const navDragCounterRef = useRef(0);
     const [newFolderName, setNewFolderName] = useState('');
     const [actionLoading, setActionLoading] = useState(false);
+    const [extractZipSubmitting, setExtractZipSubmitting] = useState(false);
     const [syncing, setSyncing] = useState(false);
     const [sortBy, setSortBy] = useState('name');
     const [sortOrder, setSortOrder] = useState('asc');
@@ -143,6 +154,7 @@ export default function FileBrowser() {
             return defaults;
         }
     });
+    const { data: accounts = [] } = useAccountsQuery();
     const { data: metadataLibraries = [] } = useMetadataLibrariesQuery();
     const isComicsLibraryActive = Boolean(metadataLibraries.find((library) => library.key === 'comics_core')?.is_active);
     const isImagesLibraryActive = Boolean(metadataLibraries.find((library) => library.key === 'images_core')?.is_active);
@@ -376,6 +388,51 @@ export default function FileBrowser() {
         }
     };
 
+    const queueExtractZipJobs = async ({ target, deleteSourceAfterExtract }) => {
+        if (!canExtractZips || selectedItemsForZipExtraction.length === 0) {
+            showToast(t('fileBrowser.extractZipAvailability'), 'error');
+            return;
+        }
+        setExtractZipSubmitting(true);
+        try {
+            const results = await Promise.allSettled(
+                selectedItemsForZipExtraction.map((item) =>
+                    jobsService.createExtractZipJob(
+                        item.account_id,
+                        item.item_id,
+                        target.account_id,
+                        target.folder_id,
+                        deleteSourceAfterExtract,
+                    )
+                )
+            );
+            const successCount = results.filter((result) => result.status === 'fulfilled').length;
+            if (successCount === selectedItemsForZipExtraction.length) {
+                showToast(t('fileBrowser.zipJobsQueued', { count: successCount }), 'success');
+                setExtractZipModalOpen(false);
+                setSelectedItems(new Set());
+                return;
+            }
+            if (successCount > 0) {
+                showToast(
+                    t('fileBrowser.zipJobsQueuedPartial', {
+                        success: successCount,
+                        total: selectedItemsForZipExtraction.length,
+                    }),
+                    'warning',
+                );
+                setExtractZipModalOpen(false);
+                setSelectedItems(new Set());
+                return;
+            }
+            showToast(t('fileBrowser.failedQueueZipJobs'), 'error');
+        } catch (e) {
+            showToast(`${t('fileBrowser.failedQueueZipJobs')}: ${e.message}`, 'error');
+        } finally {
+            setExtractZipSubmitting(false);
+        }
+    };
+
     const executeCreateFolder = async (e) => {
         e.preventDefault();
         if (!newFolderName.trim()) return;
@@ -478,6 +535,12 @@ export default function FileBrowser() {
             item_id: file.id,
             path: file.path || `${currentFolderPath}/${file.name}`.replace('//', '/'),
         }));
+    const selectedItemsForZipExtraction = selectedItemsForBatchEdit.filter((file) => {
+        const dotIndex = file.name.lastIndexOf('.');
+        if (dotIndex < 0) return false;
+        const ext = file.name.slice(dotIndex + 1).toLowerCase();
+        return file.item_type === 'file' && ZIP_EXTRACTABLE_EXTS.has(ext);
+    });
 
     const canMapComics = useMemo(() => {
         if (selectedItems.size === 0) return false;
@@ -514,10 +577,53 @@ export default function FileBrowser() {
             return BOOK_MAPPABLE_EXTS.has(ext);
         });
     }, [selectedItems, sortedFiles]);
+    const canExtractZips = useMemo(() => {
+        if (selectedItems.size === 0) return false;
+        const selected = sortedFiles.filter((file) => selectedItems.has(file.id));
+        return selected.every((item) => {
+            if (item.item_type !== 'file') return false;
+            const dotIndex = item.name.lastIndexOf('.');
+            if (dotIndex < 0) return false;
+            const ext = item.name.slice(dotIndex + 1).toLowerCase();
+            return ZIP_EXTRACTABLE_EXTS.has(ext);
+        });
+    }, [selectedItems, sortedFiles]);
+    const extractZipInitialTarget = useMemo(() => ({
+        account_id: accountId || '',
+        folder_id: folderId || 'root',
+        folder_path: currentFolderPath || t('folderPicker.root'),
+    }), [accountId, currentFolderPath, folderId, t]);
+
+    const activeAccount = accounts.find((account) => account.id === accountId) || null;
+    const folderLabel = breadcrumbs.length > 0 ? breadcrumbs[breadcrumbs.length - 1]?.name : t('fileBrowser.root');
+    const workspaceFilters = useMemo(() => {
+        const labels = [];
+        if (searchQuery) labels.push(t('workspace.filterSearch', { value: searchQuery, defaultValue: `Busca: ${searchQuery}` }));
+        labels.push(t('workspace.filterSort', { value: `${sortBy} / ${sortOrder}`, defaultValue: `Ordenacao: ${sortBy} / ${sortOrder}` }));
+        return labels;
+    }, [searchQuery, sortBy, sortOrder, t]);
+
+    useWorkspacePage(useMemo(() => ({
+        title: folderLabel,
+        subtitle: activeAccount?.email || accountId || '',
+        entityType: folderId ? 'folder' : 'account',
+        entityId: folderId || accountId || '',
+        sourceRoute: location.pathname,
+        selectedIds: Array.from(selectedItems),
+        activeFilters: workspaceFilters,
+        metrics: [
+            t('fileBrowser.items', { count: files.length }),
+            t('workspace.pageMetric', { page, defaultValue: `Pagina ${page}` }),
+        ],
+        suggestedPrompts: [
+            t('workspace.aiPrompts.accountCleanup', { defaultValue: 'Como organizar melhor esta conta e reduzir ruido?' }),
+            t('workspace.aiPrompts.driveGaps', { defaultValue: 'Quais lacunas de classificacao ou organizacao existem aqui?' }),
+            t('workspace.aiPrompts.summarize', { defaultValue: 'Resuma o contexto atual e destaque riscos.' }),
+        ],
+    }), [accountId, activeAccount?.email, files.length, folderId, folderLabel, location.pathname, page, selectedItems, t, workspaceFilters]));
 
     return (
         <div className="app-page density-compact">
-            {/* Unified command bar */}
             <div className="surface-card mb-4 overflow-hidden">
             <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-4 py-3">
                 <div
@@ -690,6 +796,19 @@ export default function FileBrowser() {
                         title={t('fileBrowser.move')}
                     >
                         <ArrowRightLeft size={16} /> <span className="hidden sm:inline">{t('fileBrowser.move')}</span>
+                    </button>
+
+                    <button
+                        onClick={() => {
+                            if (!canExtractZips) return;
+                            preloadExtractZipModal();
+                            setExtractZipModalOpen(true);
+                        }}
+                        disabled={!canExtractZips}
+                        className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={canExtractZips ? t('fileBrowser.extractZip') : t('fileBrowser.extractZipAvailability')}
+                    >
+                        <Archive size={16} /> <span className="hidden sm:inline">{t('fileBrowser.extractZip')}</span>
                     </button>
 
                     <div
@@ -1036,6 +1155,19 @@ export default function FileBrowser() {
                             setSelectedItems(new Set());
                             void refresh();
                         }}
+                    />
+                </Suspense>
+            )}
+
+            {extractZipModalOpen && (
+                <Suspense fallback={null}>
+                    <ExtractZipModal
+                        isOpen={extractZipModalOpen}
+                        onClose={() => !extractZipSubmitting && setExtractZipModalOpen(false)}
+                        onConfirm={queueExtractZipJobs}
+                        selectedItems={selectedItemsForZipExtraction}
+                        initialTarget={extractZipInitialTarget}
+                        submitting={extractZipSubmitting}
                     />
                 </Suspense>
             )}

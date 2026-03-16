@@ -17,6 +17,23 @@ export const createMoveJob = async (sourceAccountId, sourceItemId, destinationAc
     return response.data;
 };
 
+export const createExtractZipJob = async (
+    sourceAccountId,
+    sourceItemId,
+    destinationAccountId,
+    destinationFolderId = 'root',
+    deleteSourceAfterExtract = false,
+) => {
+    const response = await api.post('/jobs/zip/extract', {
+        source_account_id: sourceAccountId,
+        source_item_id: sourceItemId,
+        destination_account_id: destinationAccountId,
+        destination_folder_id: destinationFolderId,
+        delete_source_after_extract: deleteSourceAfterExtract,
+    });
+    return response.data;
+};
+
 export const getJobs = async (limit = 50, offset = 0, statuses = [], filters = {}, options = {}) => {
     const safeLimit = Number.isFinite(Number(limit)) ? Math.max(1, Math.floor(Number(limit))) : 50;
     const safeOffset = Number.isFinite(Number(offset)) ? Math.max(0, Math.floor(Number(offset))) : 0;
@@ -219,6 +236,7 @@ export const createRemoveDuplicatesJob = async (payload) => {
 
 export const jobsService = {
     createMoveJob,
+    createExtractZipJob,
     getJobs,
     cancelJob,
     reprocessJob,

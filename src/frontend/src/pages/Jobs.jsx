@@ -2,9 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw, CheckCircle, XCircle, Clock, PlayCircle, Eye, AlertTriangle, Undo2, Trash2, Square, RotateCcw, ChevronLeft, ChevronRight, GripVertical } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { cancelJob, createMetadataUndoJob, deleteJob, getJobAttempts, getJobs, reprocessJob } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
+import { useWorkspacePage } from '../contexts/WorkspaceContext';
 import Modal from '../components/Modal';
+import { getJobCrossLinkTarget } from '../lib/workspace';
 import { formatJobStatus, formatJobType } from '../utils/jobLabels';
 import { queryKeys } from '../lib/queryKeys';
 import { formatDateTime } from '../utils/dateTime';
@@ -26,7 +29,7 @@ const JOB_TABLE_COLUMNS = [
     { id: 'finished', width: 116, minWidth: 110, align: 'left' },
     { id: 'duration', width: 82, minWidth: 80, align: 'right' },
     { id: 'eta', width: 112, minWidth: 104, align: 'left' },
-    { id: 'progress', width: 320, minWidth: 240, align: 'left' },
+    { id: 'progress', width: 420, minWidth: 320, align: 'left' },
     { id: 'actions', width: 106, minWidth: 88, align: 'center' },
 ];
 const JOB_TABLE_COLUMN_WIDTHS_STORAGE_KEY = 'driver-jobs-table-widths-v1';
@@ -40,6 +43,8 @@ const getColumnAlignmentClasses = (align) => {
 
 export default function Jobs() {
     const { t, i18n } = useTranslation();
+    const navigate = useNavigate();
+    const location = useLocation();
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(50);
     const [selectedJob, setSelectedJob] = useState(null);
@@ -90,6 +95,7 @@ export default function Jobs() {
         { value: 'sync_items', label: t('jobs.typeOptions.sync_items') },
         { value: 'move_items', label: t('jobs.typeOptions.move_items') },
         { value: 'upload_file', label: t('jobs.typeOptions.upload_file') },
+        { value: 'extract_zip_contents', label: t('jobs.typeOptions.extract_zip_contents') },
         { value: 'update_metadata', label: t('jobs.typeOptions.update_metadata') },
         { value: 'apply_metadata_recursive', label: t('jobs.typeOptions.apply_metadata_recursive') },
         { value: 'remove_metadata_recursive', label: t('jobs.typeOptions.remove_metadata_recursive') },
@@ -436,6 +442,12 @@ export default function Jobs() {
         return `${secs}s`;
     };
 
+    const statusSummary = useMemo(() => ({
+        active: jobs.filter((job) => LIVE_JOB_STATUSES.has(job.status)).length,
+        failed: jobs.filter((job) => ['FAILED', 'DEAD_LETTER'].includes(job.status)).length,
+        completed: jobs.filter((job) => job.status === 'COMPLETED').length,
+    }), [jobs]);
+
     const pickMetricNumber = (source, keys) => {
         if (!source || typeof source !== 'object') return null;
         for (const key of keys) {
@@ -446,6 +458,30 @@ export default function Jobs() {
         }
         return null;
     };
+
+    useWorkspacePage(useMemo(() => ({
+        title: t('jobs.title'),
+        subtitle: t('workspace.jobsSubtitle'),
+        entityType: 'jobs',
+        entityId: 'queue',
+        sourceRoute: location.pathname,
+        selectedIds: Array.from(selectedJobIds),
+        activeFilters: [
+            statusFilter !== 'ALL' ? t('workspace.filterStatus', { value: statusFilter }) : '',
+            typeFilter !== 'ALL' ? t('workspace.filterType', { value: typeFilter }) : '',
+            dateRangeFilter !== 'ALL' ? t('workspace.filterWindow', { value: dateRangeFilter }) : '',
+        ].filter(Boolean),
+        metrics: [
+            t('jobs.selectedCount', { count: selectedJobIds.size }),
+            t('workspace.jobMetricActive', { count: statusSummary.active }),
+            t('workspace.jobMetricFailed', { count: statusSummary.failed }),
+        ],
+        suggestedPrompts: [
+            t('workspace.aiPrompts.jobReview'),
+            t('workspace.aiPrompts.recommend'),
+            t('workspace.aiPrompts.summarize'),
+        ],
+    }), [dateRangeFilter, location.pathname, selectedJobIds, statusFilter, statusSummary.active, statusSummary.failed, t, typeFilter]));
 
     const getMetricSummary = (job) => {
         const metrics = job?.metrics && typeof job.metrics === 'object' ? job.metrics : {};
@@ -684,6 +720,29 @@ export default function Jobs() {
                 </div>
             </div>
 
+            <div className="mb-4 grid gap-3 md:grid-cols-3 xl:grid-cols-4">
+                <div className="surface-card p-4">
+                    <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{t('workspace.jobMetricActive', { count: statusSummary.active })}</div>
+                    <div className="mt-2 text-2xl font-semibold">{statusSummary.active}</div>
+                    <div className="mt-1 text-sm text-muted-foreground">{t('jobs.status')}</div>
+                </div>
+                <div className="surface-card p-4">
+                    <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{t('workspace.jobMetricFailed', { count: statusSummary.failed })}</div>
+                    <div className="mt-2 text-2xl font-semibold">{statusSummary.failed}</div>
+                    <div className="mt-1 text-sm text-muted-foreground">{t('jobs.failed')}</div>
+                </div>
+                <div className="surface-card p-4">
+                    <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{t('jobs.selectedCount', { count: selectedJobIds.size })}</div>
+                    <div className="mt-2 text-2xl font-semibold">{selectedJobIds.size}</div>
+                    <div className="mt-1 text-sm text-muted-foreground">{t('jobs.actions')}</div>
+                </div>
+                <div className="surface-card p-4">
+                    <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{t('jobStatus.COMPLETED')}</div>
+                    <div className="mt-2 text-2xl font-semibold">{statusSummary.completed}</div>
+                    <div className="mt-1 text-sm text-muted-foreground">{t('jobs.refresh')}</div>
+                </div>
+            </div>
+
             <div className="flex-1 overflow-auto">
                 {loading && jobs.length === 0 ? (
                     <div className="surface-card p-4 space-y-3">
@@ -864,45 +923,45 @@ export default function Jobs() {
                                         </div>
                                         <div className={`pointer-events-auto relative flex min-w-0 items-center ${getColumnAlignmentClasses(JOB_TABLE_COLUMNS.find((column) => column.id === 'progress')?.align)}`}>
                                             <div className="pointer-events-none absolute bottom-[-10px] right-[-6px] top-[-10px] w-px bg-border/50" />
-                                            <div className="min-w-0">
-                                            <div className="flex items-center gap-2">
-                                                <div className="h-3 flex-1 overflow-hidden rounded-sm border border-border/60 bg-muted/60">
-                                                    <div className="flex h-full">
-                                                        {breakdownTotal > 0 ? (
-                                                            <>
-                                                                <div className="h-full bg-emerald-500" style={{ width: `${successWidth}%` }} />
-                                                                <div className="h-full bg-destructive" style={{ width: `${failedWidth}%` }} />
-                                                                <div className="h-full bg-amber-400" style={{ width: `${skippedWidth}%` }} />
-                                                            </>
-                                                        ) : (
-                                                            <div
-                                                                className={`h-full ${job.status === 'FAILED' || job.status === 'DEAD_LETTER' ? 'bg-destructive' : 'bg-primary'}`}
-                                                                style={{ width: `${normalizedProgressPercent}%` }}
-                                                            />
-                                                        )}
+                                            <div className="min-w-0 w-full">
+                                                <div className="flex w-full items-center gap-3">
+                                                    <div className="h-4 flex-1 overflow-hidden rounded-md border border-border/60 bg-muted/60">
+                                                        <div className="flex h-full">
+                                                            {breakdownTotal > 0 ? (
+                                                                <>
+                                                                    <div className="h-full bg-emerald-500" style={{ width: `${successWidth}%` }} />
+                                                                    <div className="h-full bg-destructive" style={{ width: `${failedWidth}%` }} />
+                                                                    <div className="h-full bg-amber-400" style={{ width: `${skippedWidth}%` }} />
+                                                                </>
+                                                            ) : (
+                                                                <div
+                                                                    className={`h-full ${job.status === 'FAILED' || job.status === 'DEAD_LETTER' ? 'bg-destructive' : 'bg-primary'}`}
+                                                                    style={{ width: `${normalizedProgressPercent}%` }}
+                                                                />
+                                                            )}
+                                                        </div>
                                                     </div>
+                                                    <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
+                                                        {completionPercent}%
+                                                    </span>
                                                 </div>
-                                                <span className="w-10 text-right text-[11px] tabular-nums text-muted-foreground">
-                                                    {completionPercent}%
-                                                </span>
-                                            </div>
-                                            <div className="mt-1.5 flex items-center gap-3 overflow-hidden whitespace-nowrap text-[11px] tabular-nums text-muted-foreground">
-                                                <span className="inline-flex items-center gap-1" title={`${t('jobs.success')}: ${metricSummary.success}`}>
-                                                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                                                    {metricSummary.success}
-                                                </span>
-                                                <span className="inline-flex items-center gap-1" title={`${t('jobs.failed')}: ${metricSummary.failed}`}>
-                                                    <span className={`h-2 w-2 rounded-full ${metricSummary.failed > 0 ? 'bg-destructive' : 'bg-muted-foreground/35'}`} />
-                                                    {metricSummary.failed}
-                                                </span>
-                                                <span className="inline-flex items-center gap-1" title={`${t('jobs.skipped')}: ${metricSummary.skipped}`}>
-                                                    <span className="h-2 w-2 rounded-full bg-amber-400" />
-                                                    {metricSummary.skipped}
-                                                </span>
-                                                <span title={`${t('jobs.total')}: ${hasKnownTotal ? totalItems : '-'}`}>
-                                                    {hasKnownTotal ? totalItems : '-'}
-                                                </span>
-                                            </div>
+                                                <div className="mt-1.5 flex items-center gap-3 overflow-hidden whitespace-nowrap text-[11px] tabular-nums text-muted-foreground">
+                                                    <span className="inline-flex items-center gap-1" title={`${t('jobs.success')}: ${metricSummary.success}`}>
+                                                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                                                        {metricSummary.success}
+                                                    </span>
+                                                    <span className="inline-flex items-center gap-1" title={`${t('jobs.failed')}: ${metricSummary.failed}`}>
+                                                        <span className={`h-2 w-2 rounded-full ${metricSummary.failed > 0 ? 'bg-destructive' : 'bg-muted-foreground/35'}`} />
+                                                        {metricSummary.failed}
+                                                    </span>
+                                                    <span className="inline-flex items-center gap-1" title={`${t('jobs.skipped')}: ${metricSummary.skipped}`}>
+                                                        <span className="h-2 w-2 rounded-full bg-amber-400" />
+                                                        {metricSummary.skipped}
+                                                    </span>
+                                                    <span title={`${t('jobs.total')}: ${hasKnownTotal ? totalItems : '-'}`}>
+                                                        {hasKnownTotal ? totalItems : '-'}
+                                                    </span>
+                                                </div>
                                             </div>
                                         </div>
                                         <div className={`pointer-events-auto relative flex min-w-0 items-center ${getColumnAlignmentClasses(JOB_TABLE_COLUMNS.find((column) => column.id === 'actions')?.align)}`}>
@@ -1056,6 +1115,46 @@ export default function Jobs() {
                                     </div>
                                 </div>
                             )}
+                        </div>
+
+                        <div className="rounded-2xl border border-border/70 bg-background/80 p-3">
+                            <div className="text-sm font-medium">{t('jobs.relatedWorkspace')}</div>
+                            <p className="mt-1 text-sm text-muted-foreground">{t('jobs.relatedWorkspaceHelp')}</p>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                                <button
+                                    type="button"
+                                    className="workspace-action-button"
+                                    onClick={() => {
+                                        const target = getJobCrossLinkTarget(selectedJob, t);
+                                        navigate(target.to, { state: target.state || null });
+                                        setSelectedJob(null);
+                                    }}
+                                >
+                                    {getJobCrossLinkTarget(selectedJob, t).label}
+                                </button>
+                                <button
+                                    type="button"
+                                    className="workspace-action-button workspace-action-button-primary"
+                                    onClick={() => {
+                                        navigate('/ai', {
+                                            state: {
+                                                assistantContext: {
+                                                    title: formatJobType(selectedJob.type, t),
+                                                    description: t('jobs.relatedWorkspaceHelp'),
+                                                    entityType: 'jobs',
+                                                    entityId: selectedJob.id,
+                                                    selectedIds: [selectedJob.id],
+                                                    activeFilters: [formatJobStatus(selectedJob.status, t)],
+                                                    suggestedPrompts: [t('workspace.aiPrompts.jobReview')],
+                                                },
+                                            },
+                                        });
+                                        setSelectedJob(null);
+                                    }}
+                                >
+                                    {t('jobs.askAi')}
+                                </button>
+                            </div>
                         </div>
 
                         <div>

@@ -129,6 +129,11 @@ export const getSeriesSummary = async (categoryId, params = {}) => {
     return response.data;
 };
 
+export const getCategoryDashboard = async (categoryId) => {
+    const response = await api.get(`/metadata/categories/${categoryId}/dashboard`);
+    return response.data;
+};
+
 export const listMetadataLibraries = async (options = {}) => {
     const response = await api.get('/metadata/libraries', {
         signal: options.signal,
@@ -154,6 +159,7 @@ export const metadataService = {
     getFormLayout,
     saveFormLayout,
     getSeriesSummary,
+    getCategoryDashboard,
     listMetadataLibraries,
     activateMetadataLibrary,
     deactivateMetadataLibrary,

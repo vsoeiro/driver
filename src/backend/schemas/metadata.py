@@ -238,6 +238,42 @@ class SeriesSummaryResponse(BaseModel):
     total_pages: int
 
 
+class MetadataDashboardStat(BaseModel):
+    key: str = Field(
+        ...,
+        pattern="^(average|min|max|earliest|latest)$",
+    )
+    value: str
+
+
+class MetadataDashboardPoint(BaseModel):
+    key: str
+    label: str
+    count: int = Field(ge=0)
+    value: str | None = None
+    range_start: float | None = None
+    range_end: float | None = None
+
+
+class MetadataDashboardCard(BaseModel):
+    attribute_id: UUID
+    name: str
+    data_type: str = Field(..., pattern="^(text|number|date|boolean|select|tags)$")
+    chart_type: str = Field(..., pattern="^(count|histogram|pie)$")
+    filled_count: int = Field(ge=0)
+    fill_rate: int = Field(ge=0, le=100)
+    distinct_count: int = Field(ge=0)
+    stats: list[MetadataDashboardStat] = Field(default_factory=list)
+    points: list[MetadataDashboardPoint] = Field(default_factory=list)
+
+
+class MetadataCategoryDashboardResponse(BaseModel):
+    total_items: int = Field(ge=0)
+    average_coverage: int = Field(ge=0, le=100)
+    fields_with_gaps: int = Field(ge=0)
+    cards: list[MetadataDashboardCard] = Field(default_factory=list)
+
+
 class MetadataFormLayoutItem(BaseModel):
     item_type: str = Field(default="attribute", pattern="^(attribute|section)$")
     item_id: str | None = Field(default=None, min_length=1, max_length=120)

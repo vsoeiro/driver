@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 
 import '../i18n';
 import { ToastProvider } from '../contexts/ToastContext';
+import { WorkspaceProvider } from '../contexts/WorkspaceContext';
 
 export function createTestQueryClient() {
     return new QueryClient({
@@ -24,7 +25,9 @@ export function renderWithProviders(ui, { route = '/', queryClient = createTestQ
         ...render(
             <QueryClientProvider client={queryClient}>
                 <MemoryRouter initialEntries={[route]}>
-                    <ToastProvider>{ui}</ToastProvider>
+                    <ToastProvider>
+                        <WorkspaceProvider>{ui}</WorkspaceProvider>
+                    </ToastProvider>
                 </MemoryRouter>
             </QueryClientProvider>,
         ),

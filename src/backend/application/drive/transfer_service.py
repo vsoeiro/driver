@@ -22,6 +22,8 @@ class DriveTransferService:
         local_path: str,
         filename: str,
         folder_id: str = "root",
+        conflict_behavior: str = "rename",
+        force_resumable: bool = False,
     ) -> str | None:
         """Upload a local file using small/resumable flow according to size policy."""
         file_size = os.path.getsize(local_path)
@@ -33,6 +35,8 @@ class DriveTransferService:
                 file_size=file_size,
                 filename=filename,
                 folder_id=folder_id,
+                conflict_behavior=conflict_behavior,
+                force_resumable=force_resumable,
             )
 
     async def upload_file_object(
@@ -43,6 +47,8 @@ class DriveTransferService:
         file_obj: BinaryIO,
         filename: str,
         folder_id: str = "root",
+        conflict_behavior: str = "rename",
+        force_resumable: bool = False,
     ) -> str | None:
         """Upload a file-like object while keeping large uploads out of RAM."""
         safe_filename = Path(filename or "upload.bin").name
@@ -67,6 +73,8 @@ class DriveTransferService:
                     local_path=temp_path,
                     filename=safe_filename,
                     folder_id=folder_id,
+                    conflict_behavior=conflict_behavior,
+                    force_resumable=force_resumable,
                 )
             finally:
                 try:
@@ -110,6 +118,7 @@ class DriveTransferService:
                 local_path=temp_path,
                 filename=upload_name,
                 folder_id=destination_folder_id,
+                conflict_behavior="rename",
             )
             await source_client.delete_item(source_account, source_item_id)
             return uploaded_item_id
@@ -132,12 +141,19 @@ class DriveTransferService:
         file_size: int,
         filename: str,
         folder_id: str,
+        conflict_behavior: str,
+        force_resumable: bool,
     ) -> str | None:
-        if not is_large_upload(file_size):
+        if not force_resumable and not is_large_upload(file_size):
             uploaded = await client.upload_small_file(account, filename, handle.read(), folder_id)
             return uploaded.id
 
-        session_data = await client.create_upload_session(account, filename, folder_id)
+        session_data = await client.create_upload_session(
+            account,
+            filename,
+            folder_id,
+            conflict_behavior=conflict_behavior,
+        )
         upload_url = session_data["upload_url"]
         uploaded_item_id: str | None = None
         offset = 0

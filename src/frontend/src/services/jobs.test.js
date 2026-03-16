@@ -17,6 +17,7 @@ import {
     createExtractComicAssetsJob,
     createExtractLibraryBookAssetsJob,
     createExtractLibraryComicAssetsJob,
+    createExtractZipJob,
     createMapLibraryBooksJob,
     createMetadataUndoJob,
     createMetadataUpdateJob,
@@ -37,6 +38,7 @@ describe('jobs service', () => {
         api.get.mockResolvedValue({ data: { jobs: [] } });
 
         await createMoveJob('src', 'item', 'dest');
+        await createExtractZipJob('src', 'zip-1', 'dest', 'folder-9', true);
         await getJobs('7.9', '-1', [' queued ', 'done'], { types: ['SYNC_ITEMS ', ''], createdAfter: ' 2026-03-10 ' }, { includeEstimates: false, signal: 'signal' });
 
         expect(api.post).toHaveBeenNthCalledWith(1, '/jobs/move', {
@@ -44,6 +46,13 @@ describe('jobs service', () => {
             source_item_id: 'item',
             destination_account_id: 'dest',
             destination_folder_id: 'root',
+        });
+        expect(api.post).toHaveBeenNthCalledWith(2, '/jobs/zip/extract', {
+            source_account_id: 'src',
+            source_item_id: 'zip-1',
+            destination_account_id: 'dest',
+            destination_folder_id: 'folder-9',
+            delete_source_after_extract: true,
         });
         expect(api.get).toHaveBeenCalledWith('/jobs/', {
             params: {

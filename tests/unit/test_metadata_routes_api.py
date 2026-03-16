@@ -196,6 +196,24 @@ async def test_list_and_get_metadata_form_layouts(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_category_dashboard_delegates_to_query_service(monkeypatch):
+    category_id = uuid4()
+    response = SimpleNamespace(
+        total_items=12,
+        average_coverage=80,
+        fields_with_gaps=1,
+        cards=[],
+    )
+    service = SimpleNamespace(get_category_dashboard=AsyncMock(return_value=response))
+    monkeypatch.setattr(metadata_routes, "MetadataQueryService", lambda session: service)
+
+    result = await metadata_routes.get_category_dashboard(category_id=category_id, session=object())
+
+    assert result is response
+    service.get_category_dashboard.assert_awaited_once_with(category_id=category_id)
+
+
+@pytest.mark.asyncio
 async def test_upsert_metadata_form_layout_validates_category_and_saves(monkeypatch):
     category_id = uuid4()
     attr_id = uuid4()

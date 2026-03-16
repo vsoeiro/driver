@@ -23,7 +23,7 @@ function formatSize(bytes) {
     return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
 }
 
-function SidebarBody({ location, quickLinks, showQuotaCard, usedPercent, used, total, isQuotaLoading, isQuotaError, onNavigate, t }) {
+function SidebarBody({ location, sections, showQuotaCard, usedPercent, used, total, isQuotaLoading, isQuotaError, onNavigate, t }) {
     return (
         <>
             <div className="flex h-14 items-center justify-between border-b border-border px-3">
@@ -48,34 +48,40 @@ function SidebarBody({ location, quickLinks, showQuotaCard, usedPercent, used, t
             </div>
 
             <div className="flex min-h-0 flex-1 flex-col px-2 py-3">
-                <div className="mb-2 px-2 py-1.5 text-xs font-semibold tracking-wide text-muted-foreground">
-                    {t('sidebar.navigation')}
-                </div>
-                <nav className="space-y-1">
-                    {quickLinks.map(({ to, label, icon: Icon }) => (
-                        <NavLink
-                            key={to}
-                            to={to}
-                            title={label}
-                            onClick={onNavigate || undefined}
-                            className={({ isActive }) => {
-                                const activeByDrive = to === '/accounts' && location.pathname.startsWith('/drive/');
-                                const isLinkActive = isActive || activeByDrive;
-                                return `
-                                    group flex items-center rounded-sm border px-2.5 py-1.5 text-sm font-medium transition-all
-                                    gap-2
-                                    ${isLinkActive
-                                        ? 'border-primary/35 bg-primary/10 text-primary'
-                                        : 'border-transparent text-muted-foreground hover:bg-accent/70 hover:text-foreground'
-                                    }
-                                `;
-                            }}
-                        >
-                            <Icon size={15} className="shrink-0" />
-                            <span className="truncate">{label}</span>
-                        </NavLink>
+                <div className="space-y-4">
+                    {sections.map((section) => (
+                        <div key={section.id}>
+                            <div className="mb-2 px-2 py-1.5 text-xs font-semibold tracking-wide text-muted-foreground">
+                                {section.label}
+                            </div>
+                            <nav className="space-y-1">
+                                {section.links.map(({ to, label, icon: Icon }) => (
+                                    <NavLink
+                                        key={to}
+                                        to={to}
+                                        title={label}
+                                        onClick={onNavigate || undefined}
+                                        className={({ isActive }) => {
+                                            const activeByDrive = to === '/accounts' && location.pathname.startsWith('/drive/');
+                                            const isLinkActive = isActive || activeByDrive;
+                                            return `
+                                                group flex items-center rounded-2xl border px-3 py-2 text-sm font-medium transition-all
+                                                gap-2
+                                                ${isLinkActive
+                                                    ? 'border-primary/25 bg-primary/10 text-primary shadow-sm shadow-primary/10'
+                                                    : 'border-transparent text-muted-foreground hover:bg-accent/70 hover:text-foreground'
+                                                }
+                                            `;
+                                        }}
+                                    >
+                                        <Icon size={15} className="shrink-0" />
+                                        <span className="truncate">{label}</span>
+                                    </NavLink>
+                                ))}
+                            </nav>
+                        </div>
                     ))}
-                </nav>
+                </div>
                 {showQuotaCard && (
                     <div className="mt-auto border-t border-border px-2 pt-3">
                         <div className="rounded-sm border border-border bg-background px-3 py-2.5">
@@ -130,14 +136,32 @@ export default function Sidebar({ mobileOpen = false, desktopCollapsed = false, 
     const total = Number(quota?.total || 0);
     const usedPercent = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0;
 
-    const quickLinks = [
-        { to: '/accounts', label: t('sidebar.accounts'), icon: HardDrive },
-        { to: '/all-files', label: t('sidebar.files'), icon: FileText },
-        { to: '/metadata', label: t('sidebar.metadata'), icon: Database },
-        { to: '/rules', label: t('sidebar.rules'), icon: Wand2 },
-        { to: '/jobs', label: t('sidebar.jobs'), icon: Activity },
-        { to: '/ai', label: t('sidebar.aiExperimental'), icon: Bot },
-        { to: '/admin/dashboard', label: t('sidebar.admin'), icon: Settings },
+    const sections = [
+        {
+            id: 'workspace',
+            label: t('sidebar.workspace'),
+            links: [
+                { to: '/accounts', label: t('sidebar.home'), icon: HardDrive },
+                { to: '/all-files', label: t('sidebar.library'), icon: FileText },
+                { to: '/metadata', label: t('sidebar.metadata'), icon: Database },
+            ],
+        },
+        {
+            id: 'automation',
+            label: t('sidebar.automation'),
+            links: [
+                { to: '/rules', label: t('sidebar.rules'), icon: Wand2 },
+                { to: '/jobs', label: t('sidebar.jobs'), icon: Activity },
+            ],
+        },
+        {
+            id: 'intelligence',
+            label: t('sidebar.intelligence'),
+            links: [
+                { to: '/ai', label: t('sidebar.aiExperimental'), icon: Bot },
+                { to: '/admin/dashboard', label: t('sidebar.admin'), icon: Settings },
+            ],
+        },
     ];
 
     return (
@@ -146,7 +170,7 @@ export default function Sidebar({ mobileOpen = false, desktopCollapsed = false, 
                 <aside className="sticky top-0 hidden h-full w-56 shrink-0 flex-col border-r border-border bg-card lg:flex xl:w-60">
                     <SidebarBody
                         location={location}
-                        quickLinks={quickLinks}
+                        sections={sections}
                         showQuotaCard={showQuotaCard}
                         usedPercent={usedPercent}
                         used={used}
@@ -174,7 +198,7 @@ export default function Sidebar({ mobileOpen = false, desktopCollapsed = false, 
             >
                 <SidebarBody
                     location={location}
-                    quickLinks={quickLinks}
+                    sections={sections}
                     showQuotaCard={showQuotaCard}
                     usedPercent={usedPercent}
                     used={used}

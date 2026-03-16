@@ -42,6 +42,7 @@ from backend.schemas.jobs import (
     JobExtractLibraryBookAssetsResponse,
     JobExtractLibraryComicAssetsRequest,
     JobExtractLibraryComicAssetsResponse,
+    JobExtractZipRequest,
     JobMetadataUpdateRequest,
     JobMoveRequest,
     JobReindexComicCoversRequest,
@@ -398,6 +399,21 @@ async def create_move_job(
     return await enqueue_job_command(
         job_service.session,
         job_type="move_items",
+        payload=payload,
+    )
+
+
+@router.post("/zip/extract", response_model=Job, status_code=status.HTTP_201_CREATED)
+async def create_extract_zip_job(
+    request: JobExtractZipRequest,
+    job_service: JobServiceDep,
+) -> Job:
+    """Create a new job to extract one ZIP into a selected destination folder."""
+
+    payload = request.model_dump(mode="json")
+    return await enqueue_job_command(
+        job_service.session,
+        job_type="extract_zip_contents",
         payload=payload,
     )
 

@@ -54,7 +54,7 @@ describe('Sidebar', () => {
             route: '/all-files',
         });
 
-        expect((await screen.findAllByRole('link', { name: /files/i })).length).toBeGreaterThan(0);
+        expect((await screen.findAllByRole('link', { name: /biblioteca|library|files/i })).length).toBeGreaterThan(0);
         expect(screen.queryByText(/25% used/i)).not.toBeInTheDocument();
         expect(screen.queryByText(/quota/i)).not.toBeInTheDocument();
     });

@@ -171,6 +171,7 @@ describe('Jobs page', () => {
         const { container } = renderWithProviders(<Jobs />);
 
         const [statusSelect, typeSelect, rangeSelect, pageSizeSelect] = await screen.findAllByRole('combobox');
+        expect(screen.getByRole('option', { name: /extract zip contents/i })).toBeInTheDocument();
         await user.selectOptions(statusSelect, 'RUNNING');
         await user.selectOptions(typeSelect, 'sync_items');
         await user.selectOptions(rangeSelect, '24h');

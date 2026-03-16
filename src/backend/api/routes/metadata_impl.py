@@ -15,6 +15,7 @@ from backend.api.dependencies import get_session
 from backend.application.metadata.item_metadata_command_service import (
     ItemMetadataCommandService,
 )
+from backend.application.metadata.query_service import MetadataQueryService
 from backend.application.metadata.rules_service import MetadataRulesService
 from backend.application.metadata.rule_preview_service import RulePreviewService
 from backend.application.metadata.series_query_service import SeriesQueryService
@@ -36,6 +37,7 @@ from backend.schemas.metadata import (
     MetadataAttributeCreate,
     MetadataAttributeUpdate,
     MetadataCategoryCreate,
+    MetadataCategoryDashboardResponse,
     MetadataFormLayout,
     MetadataFormLayoutUpdate,
     MetadataRuleCreate,
@@ -773,6 +775,22 @@ async def upsert_metadata_form_layout(
     await _save_form_layouts(session, layouts)
 
     return _to_form_layout_response(category_id, normalized)
+
+
+@router.get(
+    "/categories/{category_id}/dashboard",
+    response_model=MetadataCategoryDashboardResponse,
+)
+async def get_category_dashboard(
+    category_id: UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    """Return aggregated dashboard data for every metadata field in a category."""
+    service = MetadataQueryService(session)
+    try:
+        return await service.get_category_dashboard(category_id=category_id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=exc.message) from exc
 
 
 @router.get(

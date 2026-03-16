@@ -11,6 +11,7 @@ const createAttributeMock = vi.fn();
 const updateAttributeMock = vi.fn();
 const deleteAttributeMock = vi.fn();
 const getSeriesSummaryMock = vi.fn();
+const getCategoryDashboardMock = vi.fn();
 const updateItemMetadataFieldMock = vi.fn();
 const listItemsMock = vi.fn();
 const getAccountsMock = vi.fn();
@@ -24,6 +25,7 @@ let categoriesState = [];
 let librariesState = [];
 let itemsState = [];
 let seriesRowsState = [];
+let dashboardState = null;
 let accountsState = [];
 
 function clone(value) {
@@ -89,6 +91,7 @@ vi.mock('../services/metadata', () => ({
         updateAttribute: (...args) => updateAttributeMock(...args),
         deleteAttribute: (...args) => deleteAttributeMock(...args),
         getSeriesSummary: (...args) => getSeriesSummaryMock(...args),
+        getCategoryDashboard: (...args) => getCategoryDashboardMock(...args),
         updateItemMetadataField: (...args) => updateItemMetadataFieldMock(...args),
     },
 }));
@@ -148,6 +151,12 @@ describe('MetadataManager page', () => {
         ];
         itemsState = [];
         seriesRowsState = [];
+        dashboardState = {
+            total_items: 0,
+            average_coverage: 0,
+            fields_with_gaps: 0,
+            cards: [],
+        };
         accountsState = [
             { id: 'acc-1', email: 'reader@example.com', display_name: 'Reader' },
             { id: 'acc-2', email: 'second@example.com', display_name: 'Second' },
@@ -163,6 +172,7 @@ describe('MetadataManager page', () => {
         updateAttributeMock.mockReset();
         deleteAttributeMock.mockReset();
         getSeriesSummaryMock.mockReset();
+        getCategoryDashboardMock.mockReset();
         updateItemMetadataFieldMock.mockReset();
         listItemsMock.mockReset();
         getAccountsMock.mockReset();
@@ -236,6 +246,7 @@ describe('MetadataManager page', () => {
             total: seriesRowsState.length,
             total_pages: 1,
         }));
+        getCategoryDashboardMock.mockImplementation(async () => clone(dashboardState));
         updateItemMetadataFieldMock.mockImplementation(async (accountId, itemId, attributeId, payload) => {
             let nextMetadata = null;
             itemsState = itemsState.map((item) => {
@@ -477,7 +488,7 @@ describe('MetadataManager page', () => {
         });
 
         await user.click(screen.getByRole('button', { name: /series/i }));
-        expect(await screen.findByText('Saga')).toBeInTheDocument();
+        expect((await within(screen.getByRole('main')).findAllByText('Saga')).length).toBeGreaterThan(0);
         expect(await screen.findByText(/duplicate/i)).toBeInTheDocument();
         await waitFor(() => {
             expect(getSeriesSummaryMock).toHaveBeenCalledWith('cat-1', expect.objectContaining({
@@ -486,6 +497,193 @@ describe('MetadataManager page', () => {
                 sort_by: 'series',
             }));
         });
+    }, 15000);
+
+    it('renders a metadata dashboard with smart summaries for the current category', async () => {
+        const user = userEvent.setup();
+        categoriesState = [buildCategory({
+            attributes: [
+                buildAttribute({ id: 'attr-title', name: 'Title', data_type: 'text', options: null }),
+                buildAttribute({ id: 'attr-genre', name: 'Genre', data_type: 'select', options: { options: ['Sci-Fi', 'Drama', 'Fantasy'] } }),
+                buildAttribute({ id: 'attr-pages', name: 'Pages', data_type: 'number', options: null }),
+                buildAttribute({ id: 'attr-read', name: 'Read', data_type: 'boolean', options: null }),
+                buildAttribute({ id: 'attr-tags', name: 'Tags', data_type: 'tags', options: null }),
+                buildAttribute({ id: 'attr-release', name: 'Release Date', data_type: 'date', options: null }),
+                buildAttribute({ id: 'attr-cover-item', name: 'Cover Item ID', data_type: 'text', plugin_key: 'comics_core', plugin_field_key: 'cover_item_id', options: null }),
+            ],
+        })];
+        itemsState = [
+            buildItem({
+                metadata: {
+                    version: 1,
+                    values: {
+                        'attr-genre': 'Sci-Fi',
+                        'attr-pages': 24,
+                        'attr-read': true,
+                        'attr-tags': ['space', 'award'],
+                        'attr-release': '2026-01-02',
+                    },
+                },
+            }),
+            buildItem({
+                id: 'row-2',
+                item_id: 'item-2',
+                name: 'Comic Two.cbz',
+                metadata: {
+                    version: 1,
+                    values: {
+                        'attr-genre': 'Drama',
+                        'attr-pages': 30,
+                        'attr-read': false,
+                        'attr-tags': ['space'],
+                        'attr-release': '2026-02-10',
+                    },
+                },
+            }),
+            buildItem({
+                id: 'row-3',
+                item_id: 'item-3',
+                name: 'Comic Three.cbz',
+                metadata: {
+                    version: 1,
+                    values: {
+                        'attr-genre': 'Sci-Fi',
+                        'attr-pages': 30,
+                        'attr-read': true,
+                        'attr-tags': ['award'],
+                        'attr-release': '2026-02-18',
+                    },
+                },
+            }),
+        ];
+        dashboardState = {
+            total_items: 3,
+            average_coverage: 100,
+            fields_with_gaps: 0,
+            cards: [
+                {
+                    attribute_id: 'attr-title',
+                    name: 'Title',
+                    data_type: 'text',
+                    chart_type: 'count',
+                    filled_count: 18,
+                    fill_rate: 100,
+                    distinct_count: 18,
+                    stats: [],
+                    points: Array.from({ length: 10 }, (_, index) => ({
+                        key: `title-${index + 1}`,
+                        label: `Title ${String(index + 1).padStart(2, '0')}`,
+                        count: 18 - index,
+                        value: `Title ${String(index + 1).padStart(2, '0')}`,
+                    })),
+                },
+                {
+                    attribute_id: 'attr-genre',
+                    name: 'Genre',
+                    data_type: 'select',
+                    chart_type: 'count',
+                    filled_count: 3,
+                    fill_rate: 100,
+                    distinct_count: 2,
+                    stats: [],
+                    points: [
+                        { key: 'Sci-Fi', label: 'Sci-Fi', count: 2, value: 'Sci-Fi' },
+                        { key: 'Drama', label: 'Drama', count: 1, value: 'Drama' },
+                    ],
+                },
+                {
+                    attribute_id: 'attr-pages',
+                    name: 'Pages',
+                    data_type: 'number',
+                    chart_type: 'histogram',
+                    filled_count: 3,
+                    fill_rate: 100,
+                    distinct_count: 2,
+                    stats: [
+                        { key: 'min', value: '24' },
+                        { key: 'max', value: '30' },
+                        { key: 'average', value: '28' },
+                    ],
+                    points: [
+                        { key: '0', label: '24 to 27', count: 1, range_start: 24, range_end: 27 },
+                        { key: '1', label: '27 to 30', count: 2, range_start: 27, range_end: 30 },
+                    ],
+                },
+                {
+                    attribute_id: 'attr-read',
+                    name: 'Read',
+                    data_type: 'boolean',
+                    chart_type: 'pie',
+                    filled_count: 3,
+                    fill_rate: 100,
+                    distinct_count: 2,
+                    stats: [],
+                    points: [
+                        { key: 'true', label: 'true', count: 2, value: 'true' },
+                        { key: 'false', label: 'false', count: 1, value: 'false' },
+                    ],
+                },
+                {
+                    attribute_id: 'attr-tags',
+                    name: 'Tags',
+                    data_type: 'tags',
+                    chart_type: 'count',
+                    filled_count: 3,
+                    fill_rate: 100,
+                    distinct_count: 2,
+                    stats: [],
+                    points: [
+                        { key: 'space', label: 'space', count: 2, value: 'space' },
+                        { key: 'award', label: 'award', count: 2, value: 'award' },
+                    ],
+                },
+                {
+                    attribute_id: 'attr-release',
+                    name: 'Release Date',
+                    data_type: 'date',
+                    chart_type: 'count',
+                    filled_count: 3,
+                    fill_rate: 100,
+                    distinct_count: 3,
+                    stats: [
+                        { key: 'earliest', value: '2026-01-02T00:00:00+00:00' },
+                        { key: 'latest', value: '2026-02-18T00:00:00+00:00' },
+                    ],
+                    points: [
+                        { key: '2026-01', label: '2026-01', count: 1, value: '2026-01' },
+                        { key: '2026-02', label: '2026-02', count: 2, value: '2026-02' },
+                    ],
+                },
+            ],
+        };
+
+        renderWithProviders(<MetadataManager />);
+
+        await screen.findByText('Comics');
+        await user.click(screen.getByRole('button', { name: /view metadata dashboard/i }));
+
+        const dashboard = await screen.findByRole('region', { name: /metadata dashboard/i });
+        expect(within(dashboard).getByText('Items in scope')).toBeInTheDocument();
+        expect(within(dashboard).getByText('Average coverage')).toBeInTheDocument();
+        expect(within(dashboard).getByText('6 field(s) tracked')).toBeInTheDocument();
+        expect(within(dashboard).getByText('Title')).toBeInTheDocument();
+        expect(within(dashboard).getByText('Genre')).toBeInTheDocument();
+        expect(within(dashboard).getByText('Pages')).toBeInTheDocument();
+        expect(within(dashboard).getByText('Release Date')).toBeInTheDocument();
+        expect(within(dashboard).getByText('Sci-Fi')).toBeInTheDocument();
+        expect(within(dashboard).getByText('space')).toBeInTheDocument();
+        expect(within(dashboard).getByText('Showing top 10 values.')).toBeInTheDocument();
+        expect(within(dashboard).getByLabelText(/boolean value distribution/i)).toBeInTheDocument();
+        expect(within(dashboard).getAllByLabelText(/horizontal value distribution bar chart/i).length).toBeGreaterThan(0);
+        expect(within(dashboard).getAllByLabelText(/value distribution bar chart/i).length).toBeGreaterThan(0);
+        expect(within(dashboard).getByText('24 to 27')).toBeInTheDocument();
+        expect(within(dashboard).queryByText('Cover Item ID')).not.toBeInTheDocument();
+        await waitFor(() => expect(getCategoryDashboardMock).toHaveBeenCalledWith('cat-1'));
+        expect(listItemsMock).not.toHaveBeenCalled();
+
+        await user.click(screen.getByRole('button', { name: /view items in this category/i }));
+        expect(await screen.findByText('Comic One.cbz')).toBeInTheDocument();
+        expect(screen.queryByRole('region', { name: /metadata dashboard/i })).not.toBeInTheDocument();
     }, 15000);
 
     it('filters, renames, downloads, deletes and edits metadata from the category table', async () => {
@@ -547,7 +745,7 @@ describe('MetadataManager page', () => {
         expect(showToastMock).toHaveBeenCalledWith('Renamed successfully', 'success');
         expect(await screen.findByText('Renamed Comic.cbz')).toBeInTheDocument();
 
-        await user.click(screen.getByText('Sci-Fi'));
+        await user.click(within(screen.getByRole('main')).getByText('Sci-Fi'));
         const genreEditors = screen.getAllByRole('combobox');
         const inlineEditor = genreEditors[genreEditors.length - 1];
         await user.selectOptions(inlineEditor, 'Drama');

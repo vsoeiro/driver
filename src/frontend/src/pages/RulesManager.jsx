@@ -2,11 +2,13 @@
 import { Fragment, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { PlayCircle, Trash2, Plus, Eye, Loader2, Folder, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { metadataService } from '../services/metadata';
 import { accountsService } from '../services/accounts';
 import { getFiles, getFolderFiles, createFolder, getPath } from '../services/drive';
 import { jobsService } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
+import { useWorkspacePage } from '../contexts/WorkspaceContext';
 import { getSelectOptions, parseTagsInput, tagsToInputValue } from '../utils/metadata';
 
 const DEFAULT_FORM = {
@@ -100,6 +102,8 @@ const normalizePreviewResponse = (data) => ({
 
 export default function RulesManager() {
     const { t } = useTranslation();
+    const navigate = useNavigate();
+    const location = useLocation();
     const { showToast } = useToast();
     const [rules, setRules] = useState([]);
     const [categories, setCategories] = useState([]);
@@ -638,11 +642,53 @@ export default function RulesManager() {
         return '-';
     };
 
+    const builderActionCount = Number(Boolean(form.apply_metadata)) + Number(Boolean(form.apply_remove_metadata)) + Number(Boolean(form.apply_rename)) + Number(Boolean(form.apply_move));
+
+    useWorkspacePage(useMemo(() => ({
+        title: t('rules.title'),
+        subtitle: t('workspace.automationSubtitle', { defaultValue: 'Regras com preview, impacto e conexoes para biblioteca, jobs e IA.' }),
+        entityType: 'automation',
+        entityId: 'rules',
+        sourceRoute: location.pathname,
+        activeFilters: [
+            form.target_category_id ? t('workspace.filterCategory', { value: selectedCategory?.name || form.target_category_id, defaultValue: `Categoria: ${selectedCategory?.name || form.target_category_id}` }) : '',
+            form.account_id ? t('workspace.filterAccount', { value: form.account_id, defaultValue: `Conta: ${form.account_id}` }) : '',
+        ].filter(Boolean),
+        metrics: [
+            t('workspace.ruleCount', { count: rules.length, defaultValue: `${rules.length} regra(s)` }),
+            t('rules.filtersCount', { count: normalizedFilters.length }),
+            t('workspace.actionsSelected', { count: builderActionCount, defaultValue: `${builderActionCount} acao(oes)` }),
+        ],
+        suggestedPrompts: [
+            t('workspace.aiPrompts.ruleReview', { defaultValue: 'Revise esta automacao e aponte riscos ou melhorias.' }),
+            t('workspace.aiPrompts.recommend', { defaultValue: 'Sugira as proximas acoes com maior impacto.' }),
+            t('workspace.aiPrompts.summarize', { defaultValue: 'Resuma o contexto atual e destaque riscos.' }),
+        ],
+    }), [builderActionCount, form.account_id, form.target_category_id, location.pathname, normalizedFilters.length, rules.length, selectedCategory?.name, t]));
+
     return (
         <div className="app-page">
             <div className="page-header">
                 <h1 className="page-title">{t('rules.title')}</h1>
                 <p className="page-subtitle">{t('rules.subtitle')}</p>
+            </div>
+
+            <div className="mb-4 grid gap-3 md:grid-cols-3">
+                <div className="surface-card p-4">
+                    <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{t('rules.rule')}</div>
+                    <div className="mt-2 text-2xl font-semibold">{rules.length}</div>
+                    <div className="mt-1 text-sm text-muted-foreground">{t('rules.noRulesHelp')}</div>
+                </div>
+                <div className="surface-card p-4">
+                    <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{t('rules.filters')}</div>
+                    <div className="mt-2 text-2xl font-semibold">{normalizedFilters.length}</div>
+                    <div className="mt-1 text-sm text-muted-foreground">{t('rules.filtersCount', { count: normalizedFilters.length })}</div>
+                </div>
+                <div className="surface-card p-4">
+                    <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{t('rules.actions')}</div>
+                    <div className="mt-2 text-2xl font-semibold">{builderActionCount}</div>
+                    <div className="mt-1 text-sm text-muted-foreground">{t('workspace.actionsSelected', { count: builderActionCount, defaultValue: `${builderActionCount} acao(oes)` })}</div>
+                </div>
             </div>
 
             <div className="surface-card mb-4 p-4">
@@ -827,9 +873,56 @@ export default function RulesManager() {
                     </div>
                 </form>
                 {preview && (
-                    <div ref={previewRef} className="mt-3 text-sm rounded-lg border border-border/70 p-3 bg-background">
-                        <div className="font-medium mb-1">{previewLabel || t('rules.preview')}</div>
-                        <div className="text-muted-foreground">{t('rules.previewLine', { matches: preview.total_matches, change: preview.to_change, compliant: preview.already_compliant })}</div>
+                    <div ref={previewRef} className="mt-3 rounded-2xl border border-border/70 bg-background p-4 text-sm">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                                <div className="font-medium">{previewLabel || t('rules.preview')}</div>
+                                <div className="mt-1 text-muted-foreground">{t('rules.previewLine', { matches: preview.total_matches, change: preview.to_change, compliant: preview.already_compliant })}</div>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                <span className="workspace-context-chip workspace-context-chip-accent">{t('rules.previewMatches', { count: preview.total_matches, defaultValue: `${preview.total_matches} impactos` })}</span>
+                                <span className="workspace-context-chip">{t('rules.previewChanges', { count: preview.to_change, defaultValue: `${preview.to_change} alteracoes` })}</span>
+                            </div>
+                        </div>
+                        {preview.sample_item_ids.length > 0 && (
+                            <div className="mt-3 space-y-2">
+                                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                                    {t('rules.sampleImpacts', { defaultValue: 'Amostra de impactos' })}
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                    {preview.sample_item_ids.slice(0, 6).map((itemId) => (
+                                        <span key={itemId} className="workspace-context-chip">{itemId}</span>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                        <div className="mt-4 flex flex-wrap gap-2">
+                            <button type="button" onClick={() => navigate('/all-files')} className="workspace-action-button">
+                                {t('rules.openLibrary', { defaultValue: 'Abrir biblioteca' })}
+                            </button>
+                            <button type="button" onClick={() => navigate('/metadata')} className="workspace-action-button">
+                                {t('rules.openMetadata', { defaultValue: 'Abrir metadata' })}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => navigate('/ai', {
+                                    state: {
+                                        assistantContext: {
+                                            title: previewLabel || t('rules.preview'),
+                                            description: t('rules.previewLine', { matches: preview.total_matches, change: preview.to_change, compliant: preview.already_compliant }),
+                                            entityType: 'automation',
+                                            entityId: form.target_category_id || 'rules-preview',
+                                            selectedIds: preview.sample_item_ids,
+                                            activeFilters: [t('rules.filtersCount', { count: normalizedFilters.length })],
+                                            suggestedPrompts: [t('workspace.aiPrompts.ruleReview', { defaultValue: 'Revise esta automacao e aponte riscos ou melhorias.' })],
+                                        },
+                                    },
+                                })}
+                                className="workspace-action-button workspace-action-button-primary"
+                            >
+                                {t('rules.askAiAboutPreview', { defaultValue: 'Perguntar para a IA' })}
+                            </button>
+                        </div>
                     </div>
                 )}
             </div>

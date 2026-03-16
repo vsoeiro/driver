@@ -55,11 +55,13 @@ describe('metadata service', () => {
         await metadataService.getFormLayout('cat-1');
         await metadataService.saveFormLayout('cat-1', { columns: 12 });
         await metadataService.getSeriesSummary('cat-1', { account_id: 'acc-1', filters: { source: 'ai' }, tags: ['x'] });
+        await metadataService.getCategoryDashboard('cat-1');
         await metadataService.listMetadataLibraries({ signal: 'signal' });
         await metadataService.activateMetadataLibrary('lib-1');
         await metadataService.deactivateMetadataLibrary('lib-1');
 
         expect(api.get).toHaveBeenCalledWith('/metadata/categories/cat-1/series-summary?account_id=acc-1&filters=%7B%22source%22%3A%22ai%22%7D&tags=x');
+        expect(api.get).toHaveBeenCalledWith('/metadata/categories/cat-1/dashboard');
         expect(api.get).toHaveBeenCalledWith('/metadata/libraries', { signal: 'signal' });
         expect(api.put).toHaveBeenCalledWith('/metadata/layouts/cat-1', { columns: 12 });
         expect(api.post).toHaveBeenCalledWith('/metadata/libraries/lib-1/deactivate');

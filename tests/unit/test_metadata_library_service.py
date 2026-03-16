@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.exc import OperationalError
 
-from backend.db.models import MetadataAttribute, MetadataCategory, MetadataPlugin
+from backend.db.models import ItemMetadata, MetadataAttribute, MetadataCategory, MetadataPlugin
 from backend.services.metadata_libraries.implementations.books.schema import (
     BOOKS_LIBRARY_FIELDS,
     BOOKS_LIBRARY_KEY,
@@ -197,6 +197,7 @@ async def test_ensure_comics_category_updates_existing_fields_and_removes_stale_
         execute_plan=[
             _Result(scalar=category),
             _Result(scalars=[existing_attr, stale_attr]),
+            _Result(scalars=[]),
             _refreshed_category,
         ]
     )
@@ -219,6 +220,54 @@ async def test_ensure_comics_category_updates_existing_fields_and_removes_stale_
         if isinstance(instance, MetadataAttribute) and instance.category_id == category.id
     ]
     assert created_attributes
+
+
+@pytest.mark.asyncio
+async def test_ensure_comics_category_migrates_existing_creator_values_to_tags():
+    category = _category(uuid4(), name="Comics", plugin_key=COMICS_LIBRARY_KEY, is_active=True)
+    writer_spec = next(spec for spec in COMICS_LIBRARY_FIELDS if spec.key == "writer")
+    writer_attr = MetadataAttribute(
+        id=uuid4(),
+        category_id=category.id,
+        name="Writer",
+        data_type="text",
+        options=None,
+        is_required=False,
+        managed_by_plugin=True,
+        plugin_key=COMICS_LIBRARY_KEY,
+        plugin_field_key="writer",
+        is_locked=True,
+    )
+    metadata_row = ItemMetadata(
+        id=uuid4(),
+        account_id=uuid4(),
+        item_id="item-1",
+        category_id=category.id,
+        values={
+            str(writer_attr.id): "Alan Moore, Dave Gibbons, alan moore",
+        },
+        version=1,
+    )
+
+    def _refreshed_category(_session):
+        category.attributes = [writer_attr]
+        return _Result(scalar=category)
+
+    session = _FakeSession(
+        execute_plan=[
+            _Result(scalar=category),
+            _Result(scalars=[writer_attr]),
+            _Result(scalars=[metadata_row]),
+            _refreshed_category,
+        ]
+    )
+
+    service = MetadataLibraryService(session)
+    loaded_category = await service._ensure_comics_category()
+
+    assert loaded_category is category
+    assert writer_attr.data_type == writer_spec.data_type == "tags"
+    assert metadata_row.values[str(writer_attr.id)] == ["Alan Moore", "Dave Gibbons"]
 
 
 @pytest.mark.asyncio

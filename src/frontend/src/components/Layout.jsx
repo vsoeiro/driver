@@ -1,18 +1,18 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { Bell, Bot, ChevronLeft, ChevronRight, Link2, Menu, Settings, X } from 'lucide-react';
+import { Bot, ChevronLeft, ChevronRight, Link2, Menu, Settings, X } from 'lucide-react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { WorkspaceProvider } from '../contexts/WorkspaceContext';
+import ActivityDrawer from './ActivityDrawer';
 const LAST_ACCOUNT_STORAGE_KEY = 'driver-last-account-id';
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'driver-sidebar-collapsed-v1';
 const AccountSwitcher = lazy(() => import('./AccountSwitcher'));
 const Sidebar = lazy(() => import('./Sidebar'));
-const NotificationBell = lazy(() => import('./NotificationBell'));
 const ProviderPickerModal = lazy(() => import('./ProviderPickerModal'));
 const AIAssistantWorkspace = lazy(() => import('./AIAssistantWorkspace'));
 let sidebarModulePromise;
 let quickAiModulePromise;
 let providerPickerPromise;
-let notificationBellPromise;
 
 function preloadSidebar() {
     sidebarModulePromise ||= import('./Sidebar');
@@ -29,11 +29,6 @@ function preloadProviderPicker() {
     return providerPickerPromise;
 }
 
-function preloadNotificationBell() {
-    notificationBellPromise ||= import('./NotificationBell');
-    return notificationBellPromise;
-}
-
 export default function Layout() {
     const navigate = useNavigate();
     const location = useLocation();
@@ -47,7 +42,6 @@ export default function Layout() {
         return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === '1';
     });
     const [quickAiRequested, setQuickAiRequested] = useState(false);
-    const [notificationsReady, setNotificationsReady] = useState(false);
 
     const selectedAccountId = useMemo(() => {
         const match = location.pathname.match(/^\/drive\/([^/]+)/);
@@ -92,23 +86,6 @@ export default function Layout() {
         return () => window.clearTimeout(timeoutId);
     }, [sidebarReady]);
 
-    useEffect(() => {
-        if (notificationsReady) return undefined;
-        if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-            const idleId = window.requestIdleCallback(() => {
-                preloadNotificationBell();
-                setNotificationsReady(true);
-            }, { timeout: 1500 });
-            return () => window.cancelIdleCallback(idleId);
-        }
-
-        const timeoutId = window.setTimeout(() => {
-            preloadNotificationBell();
-            setNotificationsReady(true);
-        }, 250);
-        return () => window.clearTimeout(timeoutId);
-    }, [notificationsReady]);
-
     const openQuickAi = () => {
         setQuickAiRequested(true);
         preloadQuickAiWorkspace();
@@ -124,6 +101,7 @@ export default function Layout() {
     };
 
     return (
+        <WorkspaceProvider>
         <div className="app-shell">
             <div className="min-h-screen">
                 <div className="app-panel flex min-h-screen overflow-hidden rounded-none shadow-none lg:h-screen">
@@ -139,9 +117,9 @@ export default function Layout() {
                         <aside className="hidden h-full w-56 shrink-0 border-r border-border bg-card lg:flex xl:w-60" aria-hidden="true" />
                     ) : null}
                     <div className="flex flex-1 min-w-0 min-h-0 flex-col">
-                        <header className="layer-overlay relative border-b border-border px-3 py-2 md:px-4 lg:h-14 lg:py-0">
-                            <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between lg:h-full">
-                                <div className="flex min-w-0 items-center gap-2">
+                        <header className="layer-overlay relative border-b border-border/80 px-3 py-2 md:px-4 lg:h-16 lg:py-0">
+                            <div className="flex w-full flex-col gap-3 lg:h-full lg:flex-row lg:items-center lg:justify-between">
+                                <div className="flex min-w-0 items-center gap-2 lg:flex-1">
                                     <button
                                         type="button"
                                         onClick={() => {
@@ -202,32 +180,7 @@ export default function Layout() {
                                     )}
                                 </div>
                                 <div className="flex items-center justify-end gap-1.5 sm:justify-normal">
-                                    {notificationsReady ? (
-                                        <Suspense fallback={<button type="button" className="btn-minimal" disabled aria-hidden="true"><Bell size={16} /></button>}>
-                                            <NotificationBell />
-                                        </Suspense>
-                                    ) : (
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                preloadNotificationBell();
-                                                setNotificationsReady(true);
-                                            }}
-                                            onMouseEnter={() => {
-                                                preloadNotificationBell();
-                                                setNotificationsReady(true);
-                                            }}
-                                            onFocus={() => {
-                                                preloadNotificationBell();
-                                                setNotificationsReady(true);
-                                            }}
-                                            className="btn-minimal"
-                                            title={t('notifications.title')}
-                                            aria-label={t('notifications.title')}
-                                        >
-                                            <Bell size={16} />
-                                        </button>
-                                    )}
+                                    <ActivityDrawer />
                                     <button
                                         type="button"
                                         onClick={() => {
@@ -305,5 +258,6 @@ export default function Layout() {
                 </>
             )}
         </div>
+        </WorkspaceProvider>
     );
 }

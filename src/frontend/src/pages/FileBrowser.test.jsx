@@ -3,6 +3,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react';
 
 const useDriveMock = vi.fn();
 const useUploadMock = vi.fn();
+const useAccountsQueryMock = vi.fn();
 const useMetadataLibrariesQueryMock = vi.fn();
 const getDownloadUrlMock = vi.fn();
 const showToastMock = vi.fn();
@@ -12,6 +13,7 @@ const createSyncJobMock = vi.fn();
 const createExtractComicAssetsJobMock = vi.fn();
 const createExtractBookAssetsJobMock = vi.fn();
 const createAnalyzeImageAssetsJobMock = vi.fn();
+const createExtractZipJobMock = vi.fn();
 const createMetadataUpdateJobMock = vi.fn();
 const applyMetadataRecursiveMock = vi.fn();
 
@@ -32,6 +34,7 @@ vi.mock('../hooks/useUpload', () => ({
 }));
 
 vi.mock('../hooks/useAppQueries', () => ({
+    useAccountsQuery: (...args) => useAccountsQueryMock(...args),
     useMetadataLibrariesQuery: (...args) => useMetadataLibrariesQueryMock(...args),
 }));
 
@@ -60,6 +63,7 @@ vi.mock('../services/jobs', () => ({
         createExtractComicAssetsJob: (...args) => createExtractComicAssetsJobMock(...args),
         createExtractBookAssetsJob: (...args) => createExtractBookAssetsJobMock(...args),
         createAnalyzeImageAssetsJob: (...args) => createAnalyzeImageAssetsJobMock(...args),
+        createExtractZipJob: (...args) => createExtractZipJobMock(...args),
         createMetadataUpdateJob: (...args) => createMetadataUpdateJobMock(...args),
         applyMetadataRecursive: (...args) => applyMetadataRecursiveMock(...args),
     },
@@ -100,6 +104,40 @@ vi.mock('../components/MoveModal', () => ({
     default: ({ isOpen }) => (isOpen ? <div>Move Modal</div> : null),
 }));
 
+vi.mock('../components/ExtractZipModal', () => ({
+    __esModule: true,
+    default: ({ isOpen, onConfirm }) => (
+        isOpen ? (
+            <button
+                type="button"
+                onClick={() => onConfirm({
+                    target: { account_id: 'dest-acc', folder_id: 'folder-9', folder_path: 'Root/Extracted' },
+                    deleteSourceAfterExtract: true,
+                })}
+            >
+                Confirm Extract ZIP
+            </button>
+        ) : null
+    ),
+}));
+
+vi.mock('../components/ExtractZipModal.jsx', () => ({
+    __esModule: true,
+    default: ({ isOpen, onConfirm }) => (
+        isOpen ? (
+            <button
+                type="button"
+                onClick={() => onConfirm({
+                    target: { account_id: 'dest-acc', folder_id: 'folder-9', folder_path: 'Root/Extracted' },
+                    deleteSourceAfterExtract: true,
+                })}
+            >
+                Confirm Extract ZIP
+            </button>
+        ) : null
+    ),
+}));
+
 import { renderWithProviders } from '../test/render';
 import FileBrowser from './FileBrowser';
 
@@ -133,6 +171,7 @@ describe('FileBrowser page', () => {
         createExtractComicAssetsJobMock.mockReset();
         createExtractBookAssetsJobMock.mockReset();
         createAnalyzeImageAssetsJobMock.mockReset();
+        createExtractZipJobMock.mockReset();
         createMetadataUpdateJobMock.mockReset();
         applyMetadataRecursiveMock.mockReset();
         getDownloadUrlMock.mockReset();
@@ -141,12 +180,16 @@ describe('FileBrowser page', () => {
             uploading: false,
             progress: 0,
         });
+        useAccountsQueryMock.mockReturnValue({
+            data: [{ id: 'acc-1', email: 'reader@example.com' }],
+        });
         batchDeleteMetadataMock.mockResolvedValue(undefined);
         batchUpdateMetadataMock.mockResolvedValue(undefined);
         createSyncJobMock.mockResolvedValue({ id: 'job-sync' });
         createExtractComicAssetsJobMock.mockResolvedValue({ id: 'job-comics' });
         createExtractBookAssetsJobMock.mockResolvedValue({ id: 'job-books' });
         createAnalyzeImageAssetsJobMock.mockResolvedValue({ id: 'job-images' });
+        createExtractZipJobMock.mockResolvedValue({ id: 'job-zip' });
         createMetadataUpdateJobMock.mockResolvedValue({ id: 'job-metadata' });
         applyMetadataRecursiveMock.mockResolvedValue({ id: 'job-recursive' });
         getDownloadUrlMock.mockResolvedValue('https://example.test/download');
@@ -402,6 +445,43 @@ describe('FileBrowser page', () => {
         await waitFor(() => {
             expect(createExtractBookAssetsJobMock).toHaveBeenCalledWith('acc-1', ['book-1']);
         });
+    });
+
+    it('enables ZIP extraction only for selected .zip files', async () => {
+        const user = userEvent.setup();
+
+        useDriveMock.mockReturnValue(
+            makeDriveState({
+                files: [
+                    {
+                        id: 'zip-1',
+                        name: 'bundle.zip',
+                        item_type: 'file',
+                        size: 4096,
+                        modified_at: '2026-03-10T12:10:00Z',
+                    },
+                    {
+                        id: 'text-1',
+                        name: 'notes.txt',
+                        item_type: 'file',
+                        size: 2048,
+                        modified_at: '2026-03-10T12:12:00Z',
+                    },
+                ],
+            }),
+        );
+
+        renderWithProviders(<FileBrowser />);
+
+        const extractZipButton = screen.getByRole('button', { name: /extract zip/i });
+        expect(extractZipButton).toBeDisabled();
+
+        await user.click(screen.getByText('4 KB'));
+        expect(extractZipButton).toBeEnabled();
+
+        await user.click(screen.getByText('2 KB'));
+        expect(extractZipButton).toBeDisabled();
+        expect(createExtractZipJobMock).not.toHaveBeenCalled();
     });
 
     it('surfaces sync, folder, delete and metadata action failures', async () => {

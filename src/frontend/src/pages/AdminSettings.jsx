@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2, RefreshCw, Save, Search } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useLocation } from 'react-router-dom';
 import { settingsService } from '../services/settings';
 import { useToast } from '../contexts/ToastContext';
+import { useWorkspacePage } from '../contexts/WorkspaceContext';
 import FolderTargetPickerModal from '../components/FolderTargetPickerModal';
 import { accountsService } from '../services/accounts';
 import { jobsService } from '../services/jobs';
@@ -15,6 +17,7 @@ function PluginField({ field, onChange, onOpenFolderPicker, accountLabelById, t 
         number: () => (
             <input
                 type="number"
+                autoComplete="off"
                 className={inputClass}
                 value={field.value ?? ''}
                 min={field.minimum ?? undefined}
@@ -25,6 +28,7 @@ function PluginField({ field, onChange, onOpenFolderPicker, accountLabelById, t 
         text: () => (
             <input
                 type="text"
+                autoComplete="off"
                 className={inputClass}
                 value={field.value ?? ''}
                 placeholder={field.placeholder || ''}
@@ -59,6 +63,7 @@ function PluginField({ field, onChange, onOpenFolderPicker, accountLabelById, t 
         <div className="space-y-2">
             <input
                 type="text"
+                autoComplete="off"
                 className={inputClass}
                 value={typeof field.value === 'string' ? field.value : JSON.stringify(field.value ?? '')}
                 onChange={(e) => onChange(field.key, e.target.value)}
@@ -72,6 +77,7 @@ function PluginField({ field, onChange, onOpenFolderPicker, accountLabelById, t 
 
 export default function AdminSettings() {
     const { t, i18n } = useTranslation();
+    const location = useLocation();
     const { showToast } = useToast();
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -243,6 +249,25 @@ export default function AdminSettings() {
 
     const selectedGroup = groups.find((group) => group.id === activeGroupId);
 
+    useWorkspacePage(useMemo(() => ({
+        title: t('adminSettings.title'),
+        subtitle: t('workspace.settingsSubtitle', { defaultValue: 'Configuracoes de runtime com organizacao por dominio.' }),
+        entityType: 'admin',
+        entityId: activeGroupId,
+        sourceRoute: location.pathname,
+        activeFilters: [selectedGroup?.title || ''],
+        metrics: [
+            t('workspace.settingsSectionsMetric', { count: groups.length, defaultValue: `${groups.length} secoes` }),
+            form.plugin_settings.length > 0
+                ? t('workspace.settingsLibrariesMetric', { count: form.plugin_settings.length, defaultValue: `${form.plugin_settings.length} bibliotecas` })
+                : '',
+        ].filter(Boolean),
+        suggestedPrompts: [
+            t('workspace.aiPrompts.recommend', { defaultValue: 'Sugira as proximas acoes com maior impacto.' }),
+            t('workspace.aiPrompts.summarize', { defaultValue: 'Resuma o contexto atual e destaque riscos.' }),
+        ],
+    }), [activeGroupId, form.plugin_settings.length, groups.length, location.pathname, selectedGroup?.title, t]));
+
     const updatePluginField = (pluginKey, fieldKey, value) => {
         setForm((prev) => ({
             ...prev,
@@ -353,6 +378,7 @@ export default function AdminSettings() {
                         <label className="block text-sm font-medium mb-1">{t('adminSettings.cronExpression')}</label>
                         <input
                             type="text"
+                            autoComplete="off"
                             className="w-full border rounded-md p-2 bg-background text-sm"
                             value={form.daily_sync_cron}
                             onChange={(e) =>
@@ -384,6 +410,7 @@ export default function AdminSettings() {
                         <input
                             type="number"
                             min="1"
+                            autoComplete="off"
                             className="w-full border rounded-md p-2 bg-background text-sm"
                             value={form.worker_job_timeout_seconds}
                             onChange={(e) =>
@@ -433,6 +460,7 @@ export default function AdminSettings() {
                         <label className="block text-sm font-medium mb-1">{t('adminSettings.defaultAiModel')}</label>
                         <input
                             type="text"
+                            autoComplete="off"
                             className="w-full border rounded-md p-2 bg-background text-sm"
                             value={form.ai_model_default}
                             onChange={(e) =>
@@ -456,6 +484,7 @@ export default function AdminSettings() {
                         <label className="block text-sm font-medium mb-1">{t('adminSettings.baseUrl')}</label>
                         <input
                             type="text"
+                            autoComplete="url"
                             className="w-full border rounded-md p-2 bg-background text-sm"
                             value={form.ai_base_url_remote}
                             onChange={(e) =>
@@ -558,6 +587,7 @@ export default function AdminSettings() {
                                 value={groupFilter}
                                 onChange={(e) => setGroupFilter(e.target.value)}
                                 placeholder={t('adminSettings.searchPlaceholder')}
+                                autoComplete="off"
                                 className="input-shell w-full pl-8 pr-2 py-1.5 text-sm"
                             />
                         </div>

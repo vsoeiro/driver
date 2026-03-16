@@ -12,6 +12,7 @@ DEFAULT_JOB_QUEUE_ALIAS_BY_TYPE: dict[str, str] = {
     JobType.SYNC_ITEMS.value: "sync",
     JobType.UPLOAD_FILE.value: "io",
     JobType.MOVE_ITEMS.value: "io",
+    JobType.EXTRACT_ZIP_CONTENTS.value: "io",
     JobType.UPDATE_METADATA.value: "metadata",
     JobType.APPLY_METADATA_RECURSIVE.value: "metadata",
     JobType.REMOVE_METADATA_RECURSIVE.value: "metadata",
@@ -30,6 +31,7 @@ DEFAULT_JOB_MAX_RETRIES_BY_TYPE: dict[str, int] = {
     JobType.SYNC_ITEMS.value: 2,
     JobType.UPLOAD_FILE.value: 4,
     JobType.MOVE_ITEMS.value: 3,
+    JobType.EXTRACT_ZIP_CONTENTS.value: 1,
     JobType.UPDATE_METADATA.value: 2,
     JobType.APPLY_METADATA_RECURSIVE.value: 2,
     JobType.REMOVE_METADATA_RECURSIVE.value: 2,
@@ -46,6 +48,13 @@ DEFAULT_JOB_MAX_RETRIES_BY_TYPE: dict[str, int] = {
 
 DEFAULT_JOB_DEDUPE_KEYS_BY_TYPE: dict[str, tuple[str, ...]] = {
     JobType.SYNC_ITEMS.value: ("account_id",),
+    JobType.EXTRACT_ZIP_CONTENTS.value: (
+        "source_account_id",
+        "source_item_id",
+        "destination_account_id",
+        "destination_folder_id",
+        "delete_source_after_extract",
+    ),
     JobType.UPDATE_METADATA.value: ("account_id", "root_item_id", "category_name"),
     JobType.APPLY_METADATA_RECURSIVE.value: ("account_id", "path_prefix", "category_id"),
     JobType.REMOVE_METADATA_RECURSIVE.value: ("account_id", "path_prefix"),

@@ -7,7 +7,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from backend.db.models import MetadataAttribute, MetadataCategory, MetadataPlugin
+from backend.db.models import ItemMetadata, MetadataAttribute, MetadataCategory, MetadataPlugin
 from backend.services.metadata_libraries.implementations.books.schema import (
     BOOKS_LIBRARY_FIELDS,
     BOOKS_LIBRARY_KEY,
@@ -33,6 +33,27 @@ def _build_images_field_index() -> dict[str, MetadataLibraryFieldSpec]:
 
 def _build_books_field_index() -> dict[str, MetadataLibraryFieldSpec]:
     return {field.key: field for field in BOOKS_LIBRARY_FIELDS}
+
+
+_COMICS_MULTI_VALUE_FIELD_KEYS = {"writer", "penciller", "colorist", "letterer"}
+
+
+def _normalize_tag_values(value):
+    if value is None:
+        return None
+    raw_values = value if isinstance(value, list) else str(value).split(",")
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_value in raw_values:
+        candidate = str(raw_value or "").strip()
+        if not candidate:
+            continue
+        key = candidate.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(candidate)
+    return normalized or None
 
 
 class MetadataLibraryService:
@@ -304,6 +325,7 @@ class MetadataLibraryService:
             if attr.plugin_field_key
         }
         specs = _build_field_index()
+        tag_attrs: list[MetadataAttribute] = []
         for field_key, spec in specs.items():
             db_attr = existing_by_key.get(field_key)
             if db_attr is None:
@@ -328,6 +350,8 @@ class MetadataLibraryService:
                 db_attr.plugin_key = COMICS_LIBRARY_KEY
                 db_attr.plugin_field_key = field_key
                 db_attr.is_locked = True
+            if field_key in _COMICS_MULTI_VALUE_FIELD_KEYS:
+                tag_attrs.append(db_attr)
 
         valid_keys = set(specs.keys())
         for db_attr in category_attrs:
@@ -341,6 +365,17 @@ class MetadataLibraryService:
 
         await self.session.flush()
 
+        tag_field_attr_ids = {
+            str(attr.id)
+            for attr in tag_attrs
+            if getattr(attr, "id", None) is not None
+        }
+        if tag_field_attr_ids:
+            await self._normalize_comics_tag_metadata_values(
+                category_id=category.id,
+                attribute_ids=tag_field_attr_ids,
+            )
+
         refreshed_stmt = (
             select(MetadataCategory)
             .where(MetadataCategory.id == category.id)
@@ -351,6 +386,32 @@ class MetadataLibraryService:
         if category_loaded is None:
             raise ValueError("Failed to load metadata library category")
         return category_loaded
+
+    async def _normalize_comics_tag_metadata_values(
+        self,
+        *,
+        category_id,
+        attribute_ids: set[str],
+    ) -> None:
+        stmt = select(ItemMetadata).where(ItemMetadata.category_id == category_id)
+        result = await self.session.execute(stmt)
+        rows = result.scalars().all()
+
+        for row in rows:
+            if not isinstance(row.values, dict):
+                continue
+            next_values = None
+            for attribute_id in attribute_ids:
+                if attribute_id not in row.values:
+                    continue
+                normalized_value = _normalize_tag_values(row.values.get(attribute_id))
+                if normalized_value == row.values.get(attribute_id):
+                    continue
+                if next_values is None:
+                    next_values = dict(row.values)
+                next_values[attribute_id] = normalized_value
+            if next_values is not None:
+                row.values = next_values
 
     async def _ensure_images_category(self) -> MetadataCategory:
         stmt = (

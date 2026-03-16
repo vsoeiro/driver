@@ -96,6 +96,16 @@ class JobMoveRequest(BaseModel):
     destination_folder_id: str = "root"
 
 
+class JobExtractZipRequest(BaseModel):
+    """Schema for ZIP extraction job request."""
+
+    source_account_id: UUID
+    source_item_id: str
+    destination_account_id: UUID
+    destination_folder_id: str = "root"
+    delete_source_after_extract: bool = False
+
+
 class JobUploadRequest(BaseModel):
     """Schema for upload job request (internal payload)."""
 

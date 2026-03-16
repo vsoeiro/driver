@@ -2,13 +2,15 @@ import { Fragment, useState, useEffect, useMemo, useCallback, useRef } from 'rea
 import { useQueryClient } from '@tanstack/react-query';
 import { Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useLocation } from 'react-router-dom';
 import { jobsService } from '../services/jobs';
 import { driveService } from '../services/drive';
 import { useToast } from '../contexts/ToastContext';
+import { useWorkspacePage } from '../contexts/WorkspaceContext';
 import {
     File, Folder, FolderOpen, Search, Filter, Database, CheckSquare, Square,
     Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, X, Trash2, ChevronDown, BookOpen, Pencil, Columns3, GripVertical,
-    Download, ArrowRightLeft, XCircle, UploadCloud, Image as ImageIcon
+    Download, ArrowRightLeft, XCircle, UploadCloud, Image as ImageIcon, Archive
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import ProviderIcon from '../components/ProviderIcon';
@@ -22,12 +24,14 @@ const MetadataModal = lazy(() => import('../components/MetadataModal'));
 const BatchMetadataModal = lazy(() => import('../components/BatchMetadataModal'));
 const RemoveMetadataModal = lazy(() => import('../components/RemoveMetadataModal'));
 const MoveModal = lazy(() => import('../components/MoveModal'));
+const ExtractZipModal = lazy(() => import('../components/ExtractZipModal'));
 const SimilarFilesReportTab = lazy(() => import('../components/SimilarFilesReportTab'));
 const ImagePreviewModal = lazy(() => import('../components/ImagePreviewModal'));
 
 const COMIC_MAPPABLE_EXTS = new Set(['cbz', 'zip', 'cbw', 'pdf', 'epub', 'cbr', 'rar', 'cb7', '7z', 'cbt', 'tar']);
 const BOOK_MAPPABLE_EXTS = new Set(['pdf', 'epub']);
 const IMAGE_ANALYZABLE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'tiff', 'tif', 'heic', 'avif']);
+const ZIP_EXTRACTABLE_EXTS = new Set(['zip']);
 const ALL_FILES_COLUMNS_STORAGE_KEY = 'driver-all-files-columns-v1';
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 const ALL_FILES_COLUMNS = [
@@ -87,6 +91,67 @@ const loadAllFilesColumnPreferences = () => {
     } catch {
         return defaults;
     }
+};
+
+const getExtractZipParentPath = (itemPath) => {
+    if (!itemPath || itemPath === '/') return '/';
+    const normalized = String(itemPath).replace(/\/+$/, '');
+    const lastSlash = normalized.lastIndexOf('/');
+    if (lastSlash <= 0) return '/';
+    return normalized.slice(0, lastSlash);
+};
+
+const normalizeFolderPath = (value) => {
+    if (!value || value === '/') return '/';
+
+    const normalized = String(value)
+        .replace(/\\/g, '/')
+        .replace(/\/+/g, '/')
+        .replace(/^\/+/, '')
+        .replace(/\/+$/, '');
+
+    return normalized ? `/${normalized}` : '/';
+};
+
+const hasFolderTargetIdentity = (target) => Boolean(target?.account_id && target?.item_id);
+
+const inferFolderTargetFromItems = (pathPrefix, items, preferredAccountId) => {
+    const normalizedPath = normalizeFolderPath(pathPrefix);
+    if (normalizedPath === '/' || !Array.isArray(items) || items.length === 0) return null;
+
+    const candidates = items.reduce((acc, item) => {
+        if (!item?.account_id || !item?.parent_id) return acc;
+        const key = `${item.account_id}:${item.parent_id}`;
+        if (!acc.some((candidate) => candidate.key === key)) {
+            acc.push({
+                key,
+                account_id: item.account_id,
+                item_id: item.parent_id,
+                path: normalizedPath,
+            });
+        }
+        return acc;
+    }, []);
+
+    if (candidates.length === 0) return null;
+
+    const preferredCandidates = preferredAccountId
+        ? candidates.filter((candidate) => candidate.account_id === preferredAccountId)
+        : candidates;
+
+    const resolved = preferredCandidates.length === 1
+        ? preferredCandidates[0]
+        : candidates.length === 1
+            ? candidates[0]
+            : null;
+
+    if (!resolved) return null;
+
+    return {
+        account_id: resolved.account_id,
+        item_id: resolved.item_id,
+        path: resolved.path,
+    };
 };
 
 const getColumnAlignmentClasses = (align) => {
@@ -244,6 +309,7 @@ const FilterBar = ({ onFilter, filters, accounts, categories }) => {
 
 export default function AllFiles() {
     const { t, i18n } = useTranslation();
+    const location = useLocation();
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(50);
     const [activeTab, setActiveTab] = useState('library');
@@ -271,8 +337,10 @@ export default function AllFiles() {
     const [removeModalOpen, setRemoveModalOpen] = useState(false);
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
     const [moveModalOpen, setMoveModalOpen] = useState(false);
+    const [extractZipModalOpen, setExtractZipModalOpen] = useState(false);
     const [metadataMenuOpen, setMetadataMenuOpen] = useState(false);
     const [actionLoading, setActionLoading] = useState(false);
+    const [extractZipSubmitting, setExtractZipSubmitting] = useState(false);
     const [mapLibraryLoading, setMapLibraryLoading] = useState(false);
     const [mapLibraryConfirmOpen, setMapLibraryConfirmOpen] = useState(false);
     const [mapLibraryMode, setMapLibraryMode] = useState('comics');
@@ -329,6 +397,12 @@ export default function AllFiles() {
     }, []);
 
     useEffect(() => {
+        if (location.state?.focusTab === 'similar') {
+            setActiveTab('similar');
+        }
+    }, [location.state]);
+
+    useEffect(() => {
         if (typeof window === 'undefined') return;
         const payload = {
             order: columnOrder,
@@ -362,6 +436,7 @@ export default function AllFiles() {
     const items = useMemo(() => itemsResponse?.items || [], [itemsResponse?.items]);
     const total = itemsResponse?.total || 0;
     const totalPages = itemsResponse?.total_pages || 1;
+    const normalizedPathPrefix = useMemo(() => normalizeFolderPath(pathPrefix), [pathPrefix]);
 
     const invalidateItems = useCallback(async () => {
         await queryClient.invalidateQueries({ queryKey: queryKeys.items.listRoot() });
@@ -423,17 +498,77 @@ export default function AllFiles() {
         const selectedId = Array.from(selectedItems)[0];
         return items.find((i) => i.id === selectedId) || null;
     }, [selectedItems, items]);
+    const selectedItemsForZipExtraction = useMemo(
+        () => getSelectedObjects().filter((item) => {
+            if (item.item_type !== 'file') return false;
+            const dotIndex = item.name.lastIndexOf('.');
+            if (dotIndex < 0) return false;
+            const ext = item.name.slice(dotIndex + 1).toLowerCase();
+            return ZIP_EXTRACTABLE_EXTS.has(ext);
+        }),
+        [items, selectedItems],
+    );
     const moveTargetItem = singleSelectedItem
         ? { ...singleSelectedItem, id: singleSelectedItem.item_id }
         : null;
     const selectedFolderTarget = singleSelectedItem?.item_type === 'folder'
         ? singleSelectedItem
         : null;
-    const contextualFolderTarget = pathPrefix && currentFolderTarget?.path === pathPrefix
-        ? currentFolderTarget
-        : null;
+    const contextualFolderTarget = useMemo(() => {
+        if (!pathPrefix) return null;
+
+        const explicitTarget = currentFolderTarget?.path
+            && normalizeFolderPath(currentFolderTarget.path) === normalizedPathPrefix
+            ? { ...currentFolderTarget, path: normalizedPathPrefix }
+            : null;
+        if (hasFolderTargetIdentity(explicitTarget)) {
+            return explicitTarget;
+        }
+
+        const cachedTarget = folderTargetsByPath[normalizedPathPrefix];
+        if (hasFolderTargetIdentity(cachedTarget)) {
+            return { ...cachedTarget, path: normalizedPathPrefix };
+        }
+
+        return inferFolderTargetFromItems(
+            normalizedPathPrefix,
+            items,
+            explicitTarget?.account_id || cachedTarget?.account_id || filters.account_id || null,
+        );
+    }, [currentFolderTarget, filters.account_id, folderTargetsByPath, items, normalizedPathPrefix, pathPrefix]);
     const uploadTargetFolder = selectedFolderTarget || contextualFolderTarget;
     const canUploadToFolder = Boolean(uploadTargetFolder?.account_id && uploadTargetFolder?.item_id);
+
+    useEffect(() => {
+        if (!pathPrefix || !contextualFolderTarget) return;
+
+        const normalizedTargetPath = normalizeFolderPath(contextualFolderTarget.path);
+        const sameCurrentTarget = currentFolderTarget
+            && normalizeFolderPath(currentFolderTarget.path) === normalizedTargetPath
+            && currentFolderTarget.account_id === contextualFolderTarget.account_id
+            && currentFolderTarget.item_id === contextualFolderTarget.item_id;
+
+        if (!sameCurrentTarget) {
+            setCurrentFolderTarget(contextualFolderTarget);
+        }
+
+        setFolderTargetsByPath((prev) => {
+            const cachedTarget = prev[normalizedTargetPath];
+            if (
+                cachedTarget
+                && cachedTarget.account_id === contextualFolderTarget.account_id
+                && cachedTarget.item_id === contextualFolderTarget.item_id
+                && normalizeFolderPath(cachedTarget.path) === normalizedTargetPath
+            ) {
+                return prev;
+            }
+
+            return {
+                ...prev,
+                [normalizedTargetPath]: { ...contextualFolderTarget, path: normalizedTargetPath },
+            };
+        });
+    }, [contextualFolderTarget, currentFolderTarget, pathPrefix]);
 
     const canMapComics = useMemo(() => {
         if (selectedItems.size === 0) return false;
@@ -470,6 +605,49 @@ export default function AllFiles() {
             return BOOK_MAPPABLE_EXTS.has(ext);
         });
     }, [selectedItems, items]);
+    const canExtractZips = useMemo(() => {
+        if (selectedItems.size === 0) return false;
+        const selected = items.filter((item) => selectedItems.has(item.id));
+        return selected.every((item) => {
+            if (item.item_type !== 'file') return false;
+            const dotIndex = item.name.lastIndexOf('.');
+            if (dotIndex < 0) return false;
+            const ext = item.name.slice(dotIndex + 1).toLowerCase();
+            return ZIP_EXTRACTABLE_EXTS.has(ext);
+        });
+    }, [selectedItems, items]);
+    const extractZipInitialTarget = useMemo(() => {
+        if (selectedItemsForZipExtraction.length > 0) {
+            const [firstItem] = selectedItemsForZipExtraction;
+            const parentPath = getExtractZipParentPath(firstItem.path);
+            const folderId = firstItem.parent_id || 'root';
+            const hasDeterministicFolder = folderId === 'root' || Boolean(firstItem.parent_id);
+            const sameLocation = selectedItemsForZipExtraction.every((item) => (
+                item.account_id === firstItem.account_id
+                && (item.parent_id || 'root') === folderId
+                && getExtractZipParentPath(item.path) === parentPath
+            ));
+
+            if (sameLocation && hasDeterministicFolder) {
+                return {
+                    account_id: firstItem.account_id,
+                    folder_id: folderId,
+                    folder_path: parentPath === '/'
+                        ? t('folderPicker.root')
+                        : `${t('folderPicker.root')}${parentPath}`,
+                };
+            }
+        }
+
+        if (!contextualFolderTarget?.account_id || !contextualFolderTarget?.item_id) {
+            return null;
+        }
+        return {
+            account_id: contextualFolderTarget.account_id,
+            folder_id: contextualFolderTarget.item_id,
+            folder_path: contextualFolderTarget.path || t('folderPicker.root'),
+        };
+    }, [contextualFolderTarget, selectedItemsForZipExtraction, t]);
 
     const orderedColumns = useMemo(() => {
         const map = new Map(ALL_FILES_COLUMNS.map((col) => [col.id, col]));
@@ -552,7 +730,9 @@ export default function AllFiles() {
 
     const openFolderFromPath = (item, event) => {
         event.stopPropagation();
-        const targetPath = item.item_type === 'folder' ? (item.path || `/${item.name}`) : getParentPath(item.path || '');
+        const targetPath = normalizeFolderPath(
+            item.item_type === 'folder' ? (item.path || `/${item.name}`) : getParentPath(item.path || '')
+        );
         const targetFolder = {
             account_id: item.account_id,
             item_id: item.item_type === 'folder' ? item.item_id : (item.parent_id || null),
@@ -637,7 +817,7 @@ export default function AllFiles() {
     };
 
     const handleFolderClick = (item) => {
-        const folderPath = item.path || `/${item.name}`;
+        const folderPath = normalizeFolderPath(item.path || `/${item.name}`);
         const folderTarget = {
             account_id: item.account_id,
             item_id: item.item_id,
@@ -810,6 +990,52 @@ export default function AllFiles() {
         } finally {
             setUploading(false);
             setUploadProgress(0);
+        }
+    };
+
+    const queueExtractZipJobs = async ({ target, deleteSourceAfterExtract }) => {
+        if (!canExtractZips || selectedItemsForZipExtraction.length === 0) {
+            showToast(t('allFiles.extractZipAvailability'), 'error');
+            return;
+        }
+
+        setExtractZipSubmitting(true);
+        try {
+            const results = await Promise.allSettled(
+                selectedItemsForZipExtraction.map((item) =>
+                    jobsService.createExtractZipJob(
+                        item.account_id,
+                        item.item_id,
+                        target.account_id,
+                        target.folder_id,
+                        deleteSourceAfterExtract,
+                    )
+                )
+            );
+            const successCount = results.filter((result) => result.status === 'fulfilled').length;
+            if (successCount === selectedItemsForZipExtraction.length) {
+                showToast(t('allFiles.zipJobsQueued', { count: successCount }), 'success');
+                setExtractZipModalOpen(false);
+                setSelectedItems(new Set());
+                return;
+            }
+            if (successCount > 0) {
+                showToast(
+                    t('allFiles.zipJobsQueuedPartial', {
+                        success: successCount,
+                        total: selectedItemsForZipExtraction.length,
+                    }),
+                    'warning',
+                );
+                setExtractZipModalOpen(false);
+                setSelectedItems(new Set());
+                return;
+            }
+            showToast(t('allFiles.failedQueueZipJobs'), 'error');
+        } catch (error) {
+            showToast(`${t('allFiles.failedQueueZipJobs')}: ${error.message}`, 'error');
+        } finally {
+            setExtractZipSubmitting(false);
         }
     };
 
@@ -1001,6 +1227,54 @@ export default function AllFiles() {
         both: t('allFiles.searchByTitlePath'),
     };
 
+    const workspaceFilters = useMemo(() => {
+        const labels = [];
+        if (debouncedSearchTerm) {
+            labels.push(t('workspace.filterSearch', { value: debouncedSearchTerm, defaultValue: `Busca: ${debouncedSearchTerm}` }));
+        }
+        if (pathPrefix) {
+            labels.push(t('workspace.filterPath', { value: pathPrefix, defaultValue: `Caminho: ${pathPrefix}` }));
+        }
+        if (filters.account_id) {
+            const accountLabel = accounts.find((account) => account.id === filters.account_id)?.email || filters.account_id;
+            labels.push(t('workspace.filterAccount', { value: accountLabel, defaultValue: `Conta: ${accountLabel}` }));
+        }
+        if (filters.category_id) {
+            const categoryLabel = metaCategories.find((category) => category.id === filters.category_id)?.name || filters.category_id;
+            labels.push(t('workspace.filterCategory', { value: categoryLabel, defaultValue: `Categoria: ${categoryLabel}` }));
+        }
+        if (filters.has_metadata === 'true') labels.push(t('workspace.filterMetadataOnly', { defaultValue: 'Com metadata' }));
+        if (filters.has_metadata === 'false') labels.push(t('workspace.filterWithoutMetadata', { defaultValue: 'Sem metadata' }));
+        return labels;
+    }, [accounts, debouncedSearchTerm, filters.account_id, filters.category_id, filters.has_metadata, metaCategories, pathPrefix, t]);
+
+    useWorkspacePage(useMemo(() => ({
+        title: activeTab === 'similar' ? t('allFiles.similarFiles') : t('allFiles.fileLibrary'),
+        subtitle: activeTab === 'similar'
+            ? t('workspace.librarySimilarSubtitle', { defaultValue: 'Priorize duplicados, economia potencial e decisoes em lote.' })
+            : pathPrefix
+                ? t('workspace.libraryPathSubtitle', { value: pathPrefix, defaultValue: `Explorando o escopo ${pathPrefix} com contexto compartilhado.` })
+                : t('workspace.librarySubtitle', { defaultValue: 'Biblioteca central com filtros, selecao e automacoes cruzadas.' }),
+        entityType: 'library',
+        entityId: activeTab,
+        sourceRoute: location.pathname,
+        selectedIds: Array.from(selectedItems),
+        activeFilters: workspaceFilters,
+        metrics: [
+            t('allFiles.itemsCount', { count: total }),
+            t('workspace.pageMetric', { page, total: totalPages, defaultValue: `Pagina ${page} de ${totalPages}` }),
+        ],
+        suggestedPrompts: activeTab === 'similar'
+            ? [
+                t('workspace.aiPrompts.duplicates', { defaultValue: 'Quais grupos de duplicados devo priorizar primeiro?' }),
+                t('workspace.aiPrompts.recommend', { defaultValue: 'Sugira as proximas acoes com maior impacto.' }),
+            ]
+            : [
+                t('workspace.aiPrompts.metadataCoverage', { defaultValue: 'Onde a cobertura de metadata esta fraca?' }),
+                t('workspace.aiPrompts.summarize', { defaultValue: 'Resuma o contexto atual e destaque riscos.' }),
+            ],
+    }), [activeTab, location.pathname, page, pathPrefix, selectedItems, t, total, totalPages, workspaceFilters]));
+
     return (
         <div className="app-page density-compact">
             <div className="mb-4 inline-flex items-center gap-1 rounded-lg border border-border/70 bg-card p-1">
@@ -1044,8 +1318,9 @@ export default function AllFiles() {
                                         <button
                                             onClick={() => {
                                                 setSearchTerm('');
-                                                setCurrentFolderTarget(folderTargetsByPath[seg.path] || null);
-                                                setPathPrefix(seg.path);
+                                                const nextPath = normalizeFolderPath(seg.path);
+                                                setCurrentFolderTarget(folderTargetsByPath[nextPath] || null);
+                                                setPathPrefix(nextPath);
                                                 setPage(1);
                                             }}
                                             className={`page-title hover:text-primary transition-colors ${pathPrefix === seg.path ? 'text-foreground' : 'text-muted-foreground'}`}
@@ -1204,6 +1479,15 @@ export default function AllFiles() {
                                         event.target.value = '';
                                     }}
                                 />
+                                <button
+                                    onClick={() => setExtractZipModalOpen(true)}
+                                    disabled={!canExtractZips || extractZipSubmitting}
+                                    className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title={canExtractZips ? t('allFiles.extractZip') : t('allFiles.extractZipAvailability')}
+                                >
+                                    <Archive size={16} />
+                                    <span className="hidden sm:inline">{t('allFiles.extractZip')}</span>
+                                </button>
                                 <div
                                     className={`relative ${selectedItems.size === 0 ? 'pointer-events-none opacity-50' : ''}`}
                                     ref={metadataMenuRef}
@@ -1548,6 +1832,19 @@ export default function AllFiles() {
                                     setSelectedItems(new Set());
                                     void invalidateItems();
                                 }}
+                            />
+                        </Suspense>
+                    )}
+
+                    {extractZipModalOpen && (
+                        <Suspense fallback={null}>
+                            <ExtractZipModal
+                                isOpen={extractZipModalOpen}
+                                onClose={() => !extractZipSubmitting && setExtractZipModalOpen(false)}
+                                onConfirm={queueExtractZipJobs}
+                                selectedItems={selectedItemsForZipExtraction}
+                                initialTarget={extractZipInitialTarget}
+                                submitting={extractZipSubmitting}
                             />
                         </Suspense>
                     )}

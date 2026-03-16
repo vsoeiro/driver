@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -19,6 +19,17 @@ class _ScalarOneResult:
         return self._value
 
 
+class _SessionContext:
+    def __init__(self, session):
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
 def _account(**overrides):
     now = datetime.now(UTC)
     values = {
@@ -33,12 +44,12 @@ def _account(**overrides):
     return SimpleNamespace(**values)
 
 
-def _manager(*, db=None, microsoft=None, google=None, dropbox=None):
+def _manager(*, db=None, microsoft=None, google=None, dropbox=None, session_factory=None):
     db = db or AsyncMock()
     with patch("backend.security.token_manager.get_microsoft_auth_service", return_value=microsoft or AsyncMock()), \
         patch("backend.security.token_manager.get_google_auth_service", return_value=google or AsyncMock()), \
         patch("backend.security.token_manager.get_dropbox_auth_service", return_value=dropbox or AsyncMock()):
-        return TokenManager(db)
+        return TokenManager(db, session_factory=session_factory)
 
 
 @pytest.mark.asyncio
@@ -68,7 +79,11 @@ async def test_get_valid_access_token_forces_refresh_when_cached_microsoft_token
 @pytest.mark.asyncio
 async def test_refresh_token_returns_recently_refreshed_locked_token_and_updates_account():
     account = _account(access_token_encrypted="stale")
-    locked_account = _account(access_token_encrypted="fresh", refresh_token_encrypted="fresh-refresh")
+    locked_account = _account(
+        id=account.id,
+        access_token_encrypted="fresh",
+        refresh_token_encrypted="fresh-refresh",
+    )
     db = AsyncMock()
     db.execute.return_value = _ScalarOneResult(locked_account)
     manager = _manager(db=db)
@@ -83,6 +98,34 @@ async def test_refresh_token_returns_recently_refreshed_locked_token_and_updates
 
 
 @pytest.mark.asyncio
+async def test_refresh_token_releases_isolated_lock_when_row_was_refreshed_elsewhere():
+    account = _account(access_token_encrypted="stale")
+    locked_account = _account(
+        id=account.id,
+        access_token_encrypted="fresh",
+        refresh_token_encrypted="fresh-refresh",
+    )
+    caller_db = AsyncMock()
+    isolated_db = AsyncMock()
+    isolated_db.execute.return_value = _ScalarOneResult(locked_account)
+    isolated_db.in_transaction = MagicMock(return_value=True)
+    manager = _manager(
+        db=caller_db,
+        session_factory=lambda: _SessionContext(isolated_db),
+    )
+
+    with patch("backend.security.token_manager.decrypt_token", return_value="already-valid"):
+        token = await manager._refresh_token(account, force=False)
+
+    assert token == "already-valid"
+    assert account.access_token_encrypted == "fresh"
+    assert account.refresh_token_encrypted == "fresh-refresh"
+    isolated_db.rollback.assert_awaited_once()
+    caller_db.commit.assert_not_awaited()
+    caller_db.rollback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_refresh_token_marks_account_inactive_when_refresh_token_is_missing():
     locked_account = _account(refresh_token_encrypted=None)
     db = AsyncMock()
@@ -93,7 +136,10 @@ async def test_refresh_token_marks_account_inactive_when_refresh_token_is_missin
     with pytest.raises(TokenRefreshError, match="No refresh token available"):
         await manager._refresh_token(locked_account)
 
-    manager._mark_account_inactive.assert_awaited_once_with(locked_account)
+    manager._mark_account_inactive.assert_awaited_once()
+    assert manager._mark_account_inactive.await_args.args == (locked_account,)
+    assert manager._mark_account_inactive.await_args.kwargs["session"] is db
+    assert manager._mark_account_inactive.await_args.kwargs["persistent_account"] is locked_account
 
 
 @pytest.mark.asyncio
@@ -108,7 +154,10 @@ async def test_refresh_token_raises_when_refresh_token_cannot_be_decrypted():
         with pytest.raises(TokenRefreshError, match="Failed to decrypt refresh token"):
             await manager._refresh_token(locked_account)
 
-    manager._mark_account_inactive.assert_awaited_once_with(locked_account)
+    manager._mark_account_inactive.assert_awaited_once()
+    assert manager._mark_account_inactive.await_args.args == (locked_account,)
+    assert manager._mark_account_inactive.await_args.kwargs["session"] is db
+    assert manager._mark_account_inactive.await_args.kwargs["persistent_account"] is locked_account
 
 
 @pytest.mark.asyncio
@@ -156,7 +205,10 @@ async def test_refresh_token_marks_account_inactive_for_relink_required_failures
         with pytest.raises(TokenRefreshError, match="invalid_grant"):
             await manager._refresh_token(locked_account, force=True)
 
-    manager._mark_account_inactive.assert_awaited_once_with(locked_account)
+    manager._mark_account_inactive.assert_awaited_once()
+    assert manager._mark_account_inactive.await_args.args == (locked_account,)
+    assert manager._mark_account_inactive.await_args.kwargs["session"] is db
+    assert manager._mark_account_inactive.await_args.kwargs["persistent_account"] is locked_account
     db.rollback.assert_not_awaited()
 
 
