@@ -6,6 +6,7 @@ const useUploadMock = vi.fn();
 const useAccountsQueryMock = vi.fn();
 const useMetadataLibrariesQueryMock = vi.fn();
 const getDownloadUrlMock = vi.fn();
+const updateItemMock = vi.fn();
 const showToastMock = vi.fn();
 const batchDeleteMetadataMock = vi.fn();
 const batchUpdateMetadataMock = vi.fn();
@@ -42,6 +43,7 @@ vi.mock('../services/drive', () => ({
     driveService: {
         getDownloadUrl: (...args) => getDownloadUrlMock(...args),
         getDownloadContentUrl: vi.fn(() => 'https://example.test/cover.png'),
+        updateItem: (...args) => updateItemMock(...args),
     },
 }));
 
@@ -175,6 +177,7 @@ describe('FileBrowser page', () => {
         createMetadataUpdateJobMock.mockReset();
         applyMetadataRecursiveMock.mockReset();
         getDownloadUrlMock.mockReset();
+        updateItemMock.mockReset();
         useUploadMock.mockReturnValue({
             upload: vi.fn(),
             uploading: false,
@@ -193,6 +196,7 @@ describe('FileBrowser page', () => {
         createMetadataUpdateJobMock.mockResolvedValue({ id: 'job-metadata' });
         applyMetadataRecursiveMock.mockResolvedValue({ id: 'job-recursive' });
         getDownloadUrlMock.mockResolvedValue('https://example.test/download');
+        updateItemMock.mockResolvedValue({ id: 'file-1', name: 'issue-02.epub' });
         useMetadataLibrariesQueryMock.mockReturnValue({
             data: [],
         });
@@ -320,7 +324,7 @@ describe('FileBrowser page', () => {
         });
     }, 15000);
 
-    it('submits search, clears it, downloads, deletes and accepts dropped uploads', async () => {
+    it('submits search, renames, clears it, downloads, deletes and accepts dropped uploads', async () => {
         const user = userEvent.setup();
         const uploadMock = vi.fn();
         const setSearchQuery = vi.fn();
@@ -358,6 +362,18 @@ describe('FileBrowser page', () => {
 
         expect(resetPagination).toHaveBeenCalled();
         expect(setSearchQuery).toHaveBeenCalledWith('issue');
+
+        await user.click(screen.getByText('2 KB'));
+        await user.click(screen.getByRole('button', { name: /^rename$/i }));
+        const renameInput = screen.getByRole('textbox', { name: /new name/i });
+        await user.clear(renameInput);
+        await user.type(renameInput, 'issue-02.epub');
+        await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+        await waitFor(() => {
+            expect(updateItemMock).toHaveBeenCalledWith('acc-1', 'file-1', { name: 'issue-02.epub' });
+        });
+        expect(showToastMock).toHaveBeenCalledWith('Renamed successfully', 'success');
 
         const clearButton = searchInput.parentElement.querySelector('button');
         await user.click(clearButton);
@@ -484,12 +500,13 @@ describe('FileBrowser page', () => {
         expect(createExtractZipJobMock).not.toHaveBeenCalled();
     });
 
-    it('surfaces sync, folder, delete and metadata action failures', async () => {
+    it('surfaces sync, rename, folder, delete and metadata action failures', async () => {
         const user = userEvent.setup();
         const handleCreateFolder = vi.fn().mockRejectedValue(new Error('folder boom'));
         const handleBatchDelete = vi.fn().mockRejectedValue(new Error('delete boom'));
 
         createSyncJobMock.mockRejectedValue(new Error('sync boom'));
+        updateItemMock.mockRejectedValue(new Error('rename boom'));
         batchDeleteMetadataMock.mockRejectedValue(new Error('remove boom'));
         createExtractComicAssetsJobMock.mockRejectedValue(new Error('comics boom'));
         createAnalyzeImageAssetsJobMock.mockRejectedValue(new Error('images boom'));
@@ -523,12 +540,18 @@ describe('FileBrowser page', () => {
         await user.click(screen.getByRole('button', { name: /sync/i }));
         await waitFor(() => expect(showToastMock).toHaveBeenCalledWith(expect.stringContaining('sync boom'), 'error'));
 
+        await user.click(screen.getByText('0 B'));
+        await user.click(screen.getByRole('button', { name: /^rename$/i }));
+        const renameInput = screen.getByRole('textbox', { name: /new name/i });
+        await user.clear(renameInput);
+        await user.type(renameInput, 'Library Renamed');
+        await user.click(screen.getByRole('button', { name: /^save$/i }));
+        await waitFor(() => expect(showToastMock).toHaveBeenCalledWith(expect.stringContaining('rename boom'), 'error'));
+
         await user.click(screen.getByRole('button', { name: /new folder/i }));
         await user.type(screen.getAllByRole('textbox').at(-1), 'Broken');
         await user.click(screen.getByRole('button', { name: /^create$/i }));
         await waitFor(() => expect(showToastMock).toHaveBeenCalledWith('folder boom', 'error'));
-
-        await user.click(screen.getByText('0 B'));
         const metadataButton = screen.getByRole('button', { name: /^metadata$/i });
 
         await user.click(screen.getByRole('button', { name: /delete/i }));

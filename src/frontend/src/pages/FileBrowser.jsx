@@ -8,7 +8,7 @@ import { batchDeleteMetadata } from '../services/metadata';
 import { jobsService } from '../services/jobs';
 import {
     Folder, File, Download, Trash2,
-    UploadCloud, FolderPlus, Loader2, ArrowRightLeft, Database, XCircle, CheckSquare, Square, Search, X, ChevronDown, BookOpen, RefreshCw, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, GripVertical, Image as ImageIcon, Archive
+    UploadCloud, FolderPlus, Loader2, ArrowRightLeft, Database, XCircle, CheckSquare, Square, Search, X, ChevronDown, BookOpen, RefreshCw, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, GripVertical, Image as ImageIcon, Archive, Pencil
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import { useToast } from '../contexts/ToastContext';
@@ -124,10 +124,12 @@ export default function FileBrowser() {
     const [batchMetadataModalOpen, setBatchMetadataModalOpen] = useState(false);
     const [removeMetadataModal, setRemoveMetadataModal] = useState(false);
     const [createFolderModal, setCreateFolderModal] = useState(false);
+    const [renameModalOpen, setRenameModalOpen] = useState(false);
     const [metadataMenuOpen, setMetadataMenuOpen] = useState(false);
     const metadataMenuRef = useRef(null);
     const navDragCounterRef = useRef(0);
     const [newFolderName, setNewFolderName] = useState('');
+    const [renameValue, setRenameValue] = useState('');
     const [actionLoading, setActionLoading] = useState(false);
     const [extractZipSubmitting, setExtractZipSubmitting] = useState(false);
     const [syncing, setSyncing] = useState(false);
@@ -461,6 +463,43 @@ export default function FileBrowser() {
         }
     };
 
+    const openRenameModal = () => {
+        if (!canRenameSelected || !singleSelectedItem) return;
+        setRenameValue(singleSelectedItem.name || '');
+        setRenameModalOpen(true);
+    };
+
+    const closeRenameModal = () => {
+        if (actionLoading) return;
+        setRenameModalOpen(false);
+        setRenameValue('');
+    };
+
+    const executeRename = async (event) => {
+        event.preventDefault();
+        if (!accountId || !singleSelectedItem) return;
+
+        const trimmedName = renameValue.trim();
+        if (!trimmedName) {
+            showToast(t('fileBrowser.nameCannotBeEmpty'), 'error');
+            return;
+        }
+
+        setActionLoading(true);
+        try {
+            await driveService.updateItem(accountId, singleSelectedItem.id, { name: trimmedName });
+            showToast(t('fileBrowser.renamedSuccessfully'), 'success');
+            setRenameModalOpen(false);
+            setRenameValue('');
+            setSelectedItems(new Set());
+            await refresh();
+        } catch (e) {
+            showToast(`${t('fileBrowser.failedRename')}: ${e.message}`, 'error');
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
     const handleSearchSubmit = (e) => {
         if (e.key === 'Enter') {
             resetPagination();
@@ -522,6 +561,7 @@ export default function FileBrowser() {
         ? files.find(f => f.id === Array.from(selectedItems)[0])
         : null;
     const canMoveSelected = selectedItems.size === 1;
+    const canRenameSelected = selectedItems.size === 1;
 
     const currentFolderPath = breadcrumbs.length > 0
         ? `/${breadcrumbs.map((crumb) => crumb.name).join('/')}`
@@ -780,6 +820,15 @@ export default function FileBrowser() {
                         title={t('fileBrowser.download')}
                     >
                         <Download size={16} /> <span className="hidden sm:inline">{t('fileBrowser.download')}</span>
+                    </button>
+
+                    <button
+                        onClick={openRenameModal}
+                        disabled={!canRenameSelected}
+                        className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={t('fileBrowser.rename')}
+                    >
+                        <Pencil size={16} /> <span className="hidden sm:inline">{t('fileBrowser.rename')}</span>
                     </button>
 
                     <button
@@ -1046,6 +1095,36 @@ export default function FileBrowser() {
             </main>
 
             {/* Modals */}
+            <Modal
+                isOpen={renameModalOpen}
+                onClose={closeRenameModal}
+                title={t('fileBrowser.renameItem')}
+            >
+                <form onSubmit={executeRename} className="space-y-4">
+                    <div>
+                        <label htmlFor="rename-item-input" className="block text-sm font-medium mb-1">{t('fileBrowser.newName')}</label>
+                        <input
+                            id="rename-item-input"
+                            type="text"
+                            className="w-full border rounded-md p-2 bg-background"
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            placeholder={t('fileBrowser.newName')}
+                            autoFocus
+                        />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                        <button type="button" onClick={closeRenameModal} className="px-4 py-2 text-sm font-medium rounded-md hover:bg-accent">
+                            {t('common.cancel')}
+                        </button>
+                        <button type="submit" disabled={actionLoading || !renameValue.trim()} className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2">
+                            {actionLoading && <Loader2 className="animate-spin" size={14} />}
+                            {t('common.save')}
+                        </button>
+                    </div>
+                </form>
+            </Modal>
+
             <Modal
                 isOpen={deleteModal.isOpen}
                 onClose={() => setDeleteModal({ isOpen: false })}
