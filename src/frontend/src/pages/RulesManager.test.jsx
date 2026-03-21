@@ -31,10 +31,12 @@ vi.mock('../services/accounts', () => ({
 }));
 
 vi.mock('../services/drive', () => ({
-    getFiles: (...args) => getFilesMock(...args),
-    getFolderFiles: (...args) => getFolderFilesMock(...args),
-    createFolder: (...args) => createFolderMock(...args),
-    getPath: (...args) => getPathMock(...args),
+    driveService: {
+        getFiles: (...args) => getFilesMock(...args),
+        getFolderFiles: (...args) => getFolderFilesMock(...args),
+        createFolder: (...args) => createFolderMock(...args),
+        getPath: (...args) => getPathMock(...args),
+    },
 }));
 
 vi.mock('../services/jobs', () => ({

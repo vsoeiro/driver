@@ -442,7 +442,7 @@ describe('AllFiles page', () => {
         await user.click(screen.getByText('issue-01.cbz').closest('.group'));
 
         await user.click(screen.getByRole('button', { name: /download/i }));
-        await waitFor(() => expect(getDownloadUrlMock).toHaveBeenCalledWith('acc-1', 'file-book'));
+        await waitFor(() => expect(getDownloadUrlMock).toHaveBeenCalledWith('acc-1', 'file-book', expect.any(Object)));
         expect(window.open).toHaveBeenCalledWith('https://example.test/download.bin', '_blank');
 
         await user.click(screen.getByRole('button', { name: /map all as/i }));

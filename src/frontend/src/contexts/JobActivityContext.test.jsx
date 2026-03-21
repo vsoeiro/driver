@@ -14,7 +14,9 @@ vi.mock('@tanstack/react-query', async () => {
 });
 
 vi.mock('../services/jobs', () => ({
-    getJobs: (...args) => getJobsMock(...args),
+    jobsService: {
+        getJobs: (...args) => getJobsMock(...args),
+    },
 }));
 
 import { renderWithProviders } from '../test/render';

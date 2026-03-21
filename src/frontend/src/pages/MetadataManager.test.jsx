@@ -478,7 +478,7 @@ describe('MetadataManager page', () => {
                 has_metadata: true,
                 page: 1,
                 page_size: 50,
-            }));
+            }), expect.any(Object));
         });
 
         await user.click(screen.getByRole('button', { name: /gallery/i }));
@@ -726,12 +726,12 @@ describe('MetadataManager page', () => {
                 metadata: expect.objectContaining({
                     'attr-genre': expect.objectContaining({ value: 'Sci-Fi' }),
                 }),
-            }));
+            }), expect.any(Object));
         });
 
         fireEvent.click(screen.getByText('Comic One.cbz'));
         await user.click(screen.getByTitle(/download/i));
-        await waitFor(() => expect(getDownloadUrlMock).toHaveBeenCalledWith('acc-1', 'item-1'));
+        await waitFor(() => expect(getDownloadUrlMock).toHaveBeenCalledWith('acc-1', 'item-1', expect.any(Object)));
         expect(openSpy).toHaveBeenCalledWith('https://download.example/file.cbz', '_blank');
 
         const metadataMenuTrigger = screen.getByTitle(/metadata actions/i);

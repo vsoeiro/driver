@@ -36,7 +36,7 @@ describe('items service', () => {
         await itemsService.getSimilarReport({ scope: 'account', extensions: ['cbz'] });
         await expect(itemsService.batchUpdateMetadata('acc-1', ['item-1'], 'cat-1', { title: 'Dylan' })).resolves.toEqual({ updated: 2 });
 
-        expect(api.get).toHaveBeenCalledWith('/items/similar-report?scope=account&extensions=cbz');
+        expect(api.get).toHaveBeenCalledWith('/items/similar-report?scope=account&extensions=cbz', { signal: undefined });
         expect(api.post).toHaveBeenCalledWith('/items/metadata/batch', {
             account_id: 'acc-1',
             item_ids: ['item-1'],

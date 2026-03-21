@@ -67,10 +67,10 @@ describe('ExtractZipModal', () => {
 
         expect(await screen.findByText('Extract ZIP')).toBeInTheDocument();
         expect(screen.getByText('1 ZIP file(s) selected')).toBeInTheDocument();
-        await waitFor(() => expect(getFilesMock).toHaveBeenCalledWith('acc-1'));
+        await waitFor(() => expect(getFilesMock).toHaveBeenCalledWith('acc-1', expect.any(Object)));
 
         await user.click(screen.getByRole('button', { name: /covers/i }));
-        await waitFor(() => expect(getFolderFilesMock).toHaveBeenCalledWith('acc-1', 'folder-1'));
+        await waitFor(() => expect(getFolderFilesMock).toHaveBeenCalledWith('acc-1', 'folder-1', expect.any(Object)));
 
         await user.click(screen.getByRole('checkbox'));
         await user.click(screen.getByRole('button', { name: /queue extraction/i }));
@@ -100,11 +100,11 @@ describe('ExtractZipModal', () => {
             />,
         );
 
-        await waitFor(() => expect(getPathMock).toHaveBeenCalledWith('acc-2', 'folder-2'));
+        await waitFor(() => expect(getPathMock).toHaveBeenCalledWith('acc-2', 'folder-2', expect.any(Object)));
         expect(await screen.findByText('Root/Archive')).toBeInTheDocument();
 
         await user.selectOptions(screen.getByRole('combobox'), 'acc-1');
-        await waitFor(() => expect(getFilesMock).toHaveBeenCalledWith('acc-1'));
+        await waitFor(() => expect(getFilesMock).toHaveBeenCalledWith('acc-1', expect.any(Object)));
         expect(screen.getAllByText('Root').length).toBeGreaterThan(0);
     });
 });

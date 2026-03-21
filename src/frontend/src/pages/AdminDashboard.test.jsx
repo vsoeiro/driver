@@ -1,25 +1,19 @@
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-const useObservabilityQueryMock = vi.fn();
-const getObservabilitySnapshotMock = vi.fn();
+const useObservabilitySnapshotMock = vi.fn();
 const reprocessJobMock = vi.fn();
+const refreshSnapshotMock = vi.fn();
 const showToastMock = vi.fn();
 
-vi.mock('../hooks/useAppQueries', () => ({
-    useObservabilityQuery: (...args) => useObservabilityQueryMock(...args),
+vi.mock('../features/settings/hooks/useSettingsData', () => ({
+    useObservabilitySnapshot: (...args) => useObservabilitySnapshotMock(...args),
 }));
 
-vi.mock('../services/settings', () => ({
-    settingsService: {
-        getObservabilitySnapshot: (...args) => getObservabilitySnapshotMock(...args),
-    },
-}));
-
-vi.mock('../services/jobs', () => ({
-    jobsService: {
+vi.mock('../features/jobs/hooks/useJobsData', () => ({
+    useJobsActions: () => ({
         reprocessJob: (...args) => reprocessJobMock(...args),
-    },
+    }),
 }));
 
 vi.mock('../contexts/ToastContext', () => ({
@@ -91,17 +85,18 @@ function buildSnapshot(overrides = {}) {
 
 describe('AdminDashboard page', () => {
     beforeEach(() => {
-        useObservabilityQueryMock.mockReset();
-        getObservabilitySnapshotMock.mockReset();
+        useObservabilitySnapshotMock.mockReset();
         reprocessJobMock.mockReset();
+        refreshSnapshotMock.mockReset();
         showToastMock.mockReset();
     });
 
     it('renders the empty state when no snapshot data is available', async () => {
-        useObservabilityQueryMock.mockReturnValue({
+        useObservabilitySnapshotMock.mockReturnValue({
             data: null,
             isLoading: false,
             error: null,
+            refreshSnapshot: refreshSnapshotMock,
         });
 
         renderWithProviders(<AdminDashboard />);
@@ -112,15 +107,16 @@ describe('AdminDashboard page', () => {
 
     it('renders observability data, refreshes and reprocesses a dead-letter job', async () => {
         const user = userEvent.setup();
-        useObservabilityQueryMock.mockImplementation(({ period }) => ({
+        useObservabilitySnapshotMock.mockImplementation(({ period }) => ({
             data: buildSnapshot({
                 period_label: period === '7d' ? 'Last 7 days' : 'Last 24h',
                 throughput_window: period === '7d' ? 70 : 21,
             }),
             isLoading: false,
             error: null,
+            refreshSnapshot: refreshSnapshotMock,
         }));
-        getObservabilitySnapshotMock.mockResolvedValue(buildSnapshot({ queue_depth: 18 }));
+        refreshSnapshotMock.mockResolvedValue(buildSnapshot({ queue_depth: 18 }));
         reprocessJobMock.mockResolvedValue({ id: 'job-reprocess-9' });
 
         renderWithProviders(<AdminDashboard />);
@@ -132,7 +128,7 @@ describe('AdminDashboard page', () => {
 
         await user.selectOptions(screen.getByLabelText(/select period window/i), '7d');
         await waitFor(() => {
-            expect(useObservabilityQueryMock).toHaveBeenLastCalledWith(expect.objectContaining({
+            expect(useObservabilitySnapshotMock).toHaveBeenLastCalledWith(expect.objectContaining({
                 period: '7d',
             }));
         });
@@ -140,8 +136,7 @@ describe('AdminDashboard page', () => {
 
         await user.click(screen.getByRole('button', { name: /reload/i }));
         await waitFor(() => {
-            expect(getObservabilitySnapshotMock).toHaveBeenCalledWith({
-                period: '7d',
+            expect(refreshSnapshotMock).toHaveBeenCalledWith({
                 forceRefresh: true,
             });
         });
@@ -152,7 +147,7 @@ describe('AdminDashboard page', () => {
     });
 
     it('surfaces snapshot loading errors through toast messages', async () => {
-        useObservabilityQueryMock.mockReturnValue({
+        useObservabilitySnapshotMock.mockReturnValue({
             data: null,
             isLoading: false,
             error: {
@@ -162,6 +157,7 @@ describe('AdminDashboard page', () => {
                     },
                 },
             },
+            refreshSnapshot: refreshSnapshotMock,
         });
 
         renderWithProviders(<AdminDashboard />);

@@ -71,10 +71,10 @@ describe('FolderTargetPickerModal', () => {
         );
 
         expect(await screen.findByText(/select target folder/i)).toBeInTheDocument();
-        await waitFor(() => expect(getFilesMock).toHaveBeenCalledWith('acc-1'));
+        await waitFor(() => expect(getFilesMock).toHaveBeenCalledWith('acc-1', expect.any(Object)));
 
         await user.click(await screen.findByRole('button', { name: /covers/i }));
-        await waitFor(() => expect(getFolderFilesMock).toHaveBeenCalledWith('acc-1', 'folder-1'));
+        await waitFor(() => expect(getFolderFilesMock).toHaveBeenCalledWith('acc-1', 'folder-1', expect.any(Object)));
 
         await user.click(screen.getByRole('button', { name: /use this folder/i }));
 
@@ -98,11 +98,11 @@ describe('FolderTargetPickerModal', () => {
         );
 
         expect(await screen.findByText(/select target folder/i)).toBeInTheDocument();
-        await waitFor(() => expect(getFilesMock).toHaveBeenCalledWith('acc-2'));
+        await waitFor(() => expect(getFilesMock).toHaveBeenCalledWith('acc-2', expect.any(Object)));
         expect(await screen.findByText(/no folders found/i)).toBeInTheDocument();
 
         await user.selectOptions(screen.getByRole('combobox'), 'acc-1');
-        await waitFor(() => expect(getFilesMock).toHaveBeenCalledWith('acc-1'));
+        await waitFor(() => expect(getFilesMock).toHaveBeenCalledWith('acc-1', expect.any(Object)));
         expect(await screen.findByRole('button', { name: /covers/i })).toBeInTheDocument();
     });
 });

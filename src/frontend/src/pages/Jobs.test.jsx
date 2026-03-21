@@ -25,12 +25,14 @@ vi.mock('@tanstack/react-query', async () => {
 });
 
 vi.mock('../services/jobs', () => ({
-    cancelJob: (...args) => cancelJobMock(...args),
-    createMetadataUndoJob: (...args) => createMetadataUndoJobMock(...args),
-    deleteJob: (...args) => deleteJobMock(...args),
-    getJobAttempts: (...args) => getJobAttemptsMock(...args),
-    getJobs: (...args) => getJobsMock(...args),
-    reprocessJob: (...args) => reprocessJobMock(...args),
+    jobsService: {
+        cancelJob: (...args) => cancelJobMock(...args),
+        createMetadataUndoJob: (...args) => createMetadataUndoJobMock(...args),
+        deleteJob: (...args) => deleteJobMock(...args),
+        getJobAttempts: (...args) => getJobAttemptsMock(...args),
+        getJobs: (...args) => getJobsMock(...args),
+        reprocessJob: (...args) => reprocessJobMock(...args),
+    },
 }));
 
 vi.mock('../contexts/ToastContext', () => ({

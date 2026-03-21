@@ -48,8 +48,8 @@ vi.mock('../services/drive', () => ({
 }));
 
 vi.mock('../services/metadata', () => ({
-    batchDeleteMetadata: (...args) => batchDeleteMetadataMock(...args),
     metadataService: {
+        batchDeleteMetadata: (...args) => batchDeleteMetadataMock(...args),
         getCategories: vi.fn(() => Promise.resolve([])),
         getItemMetadata: vi.fn(() => Promise.resolve(null)),
         listFormLayouts: vi.fn(() => Promise.resolve([])),
@@ -384,7 +384,7 @@ describe('FileBrowser page', () => {
         await user.click(screen.getByRole('button', { name: /download/i }));
 
         await waitFor(() => {
-            expect(getDownloadUrlMock).toHaveBeenCalledWith('acc-1', 'file-1');
+            expect(getDownloadUrlMock).toHaveBeenCalledWith('acc-1', 'file-1', expect.any(Object));
         });
         expect(windowOpenMock).toHaveBeenCalledWith('https://example.test/download', '_blank');
 

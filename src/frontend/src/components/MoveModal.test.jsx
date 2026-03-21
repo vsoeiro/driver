@@ -8,16 +8,22 @@ const createMoveJobMock = vi.fn();
 const showToastMock = vi.fn();
 
 vi.mock('../services/accounts', () => ({
-    getAccounts: (...args) => getAccountsMock(...args),
+    accountsService: {
+        getAccounts: (...args) => getAccountsMock(...args),
+    },
 }));
 
 vi.mock('../services/drive', () => ({
-    getFiles: (...args) => getFilesMock(...args),
-    getFolderFiles: (...args) => getFolderFilesMock(...args),
+    driveService: {
+        getFiles: (...args) => getFilesMock(...args),
+        getFolderFiles: (...args) => getFolderFilesMock(...args),
+    },
 }));
 
 vi.mock('../services/jobs', () => ({
-    createMoveJob: (...args) => createMoveJobMock(...args),
+    jobsService: {
+        createMoveJob: (...args) => createMoveJobMock(...args),
+    },
 }));
 
 vi.mock('../contexts/ToastContext', () => ({
@@ -73,7 +79,7 @@ describe('MoveModal', () => {
 
         await user.click(screen.getByText('Books'));
         await waitFor(() => {
-            expect(getFolderFilesMock).toHaveBeenCalledWith('acc-1', 'folder-1');
+            expect(getFolderFilesMock).toHaveBeenCalledWith('acc-1', 'folder-1', expect.any(Object));
         });
         expect(await screen.findByText('Nested')).toBeInTheDocument();
 
@@ -90,7 +96,7 @@ describe('MoveModal', () => {
     it('resets the folder path when switching destination accounts and can go back to root', async () => {
         const user = userEvent.setup();
 
-        const firstView = renderWithProviders(
+        renderWithProviders(
             <MoveModal
                 isOpen
                 onClose={vi.fn()}
@@ -109,7 +115,7 @@ describe('MoveModal', () => {
 
         await user.selectOptions(screen.getByRole('combobox'), 'acc-2');
         await waitFor(() => {
-            expect(getFilesMock).toHaveBeenCalledWith('acc-2');
+            expect(getFilesMock).toHaveBeenCalledWith('acc-2', expect.any(Object));
         });
     });
 
@@ -146,7 +152,8 @@ describe('MoveModal', () => {
             />,
         );
 
-        await user.click(await screen.findByText('Broken folder'));
+        expect(await screen.findByText('Broken folder')).toBeInTheDocument();
+        await user.click(screen.getByText('Broken folder'));
         expect(showToastMock).toHaveBeenCalledWith('Missing destination folder id', 'error');
 
         createMoveJobMock.mockRejectedValueOnce(new Error('boom'));

@@ -209,7 +209,7 @@ describe('AdminSettings page', () => {
         expect(screen.getByText(/root\/covers/i)).toBeInTheDocument();
 
         await user.click(screen.getByRole('button', { name: /re-index covers/i }));
-        await waitFor(() => expect(createReindexComicCoversJobMock).toHaveBeenCalledWith('comics_core'));
+        await waitFor(() => expect(createReindexComicCoversJobMock).toHaveBeenCalledWith('comics_core', 250));
         expect(showToastMock).toHaveBeenCalledWith('Cover re-index started in 3 jobs for 640 items.', 'success');
 
         await user.click(screen.getByRole('button', { name: /^save$/i }));

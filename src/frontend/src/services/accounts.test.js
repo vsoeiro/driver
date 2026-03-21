@@ -16,13 +16,8 @@ describe('accounts service', () => {
         expect(api.get).toHaveBeenCalledWith('/accounts', { signal: 'abort-signal' });
     });
 
-    it('redirects browser for account linking', () => {
-        delete window.location;
-        window.location = { href: '' };
-
-        linkAccount('google');
-
-        expect(window.location.href).toBe('/api/v1/auth/google/login');
+    it('returns the login URL for account linking', () => {
+        expect(linkAccount('google')).toBe('/api/v1/auth/google/login');
     });
 
     it('deletes an account', async () => {

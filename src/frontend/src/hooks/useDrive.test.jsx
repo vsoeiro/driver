@@ -19,15 +19,14 @@ vi.mock('@tanstack/react-query', async () => {
     };
 });
 
-vi.mock('./useAppQueries', () => ({
+vi.mock('../features/drive/hooks/useDriveData', () => ({
     useDriveListingQuery: (...args) => useDriveListingQueryMock(...args),
     useDriveBreadcrumbQuery: (...args) => useDriveBreadcrumbQueryMock(...args),
-}));
-
-vi.mock('../services/drive', () => ({
-    deleteItem: (...args) => deleteItemMock(...args),
-    batchDeleteItems: (...args) => batchDeleteItemsMock(...args),
-    createFolder: (...args) => createFolderMock(...args),
+    useDriveActions: () => ({
+        deleteItem: (...args) => deleteItemMock(...args),
+        batchDeleteItems: (...args) => batchDeleteItemsMock(...args),
+        createFolder: (...args) => createFolderMock(...args),
+    }),
 }));
 
 import { useDrive } from './useDrive';

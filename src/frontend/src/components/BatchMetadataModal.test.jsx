@@ -179,6 +179,7 @@ describe('BatchMetadataModal', () => {
             '/Series',
             'cat-1',
             expect.objectContaining({ 'attr-title': 'Batch title' }),
+            false,
         );
         expect(applyMetadataRecursiveMock).toHaveBeenNthCalledWith(
             2,
@@ -186,6 +187,7 @@ describe('BatchMetadataModal', () => {
             '/Archive',
             'cat-1',
             expect.objectContaining({ 'attr-title': 'Batch title' }),
+            false,
         );
         expect(showToast).toHaveBeenCalledWith('Created 2 recursive metadata job(s)', 'success');
     });

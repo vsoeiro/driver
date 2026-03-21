@@ -98,16 +98,16 @@ describe('SimilarFilesReportTab', () => {
         renderWithProviders(<SimilarFilesReportTab accounts={ACCOUNTS} />);
 
         expect(await screen.findByText('Issue 001')).toBeInTheDocument();
-        expect(getSimilarReportMock).toHaveBeenCalledWith({
+        expect(getSimilarReportMock).toHaveBeenCalledWith(expect.objectContaining({
             page: 1,
             page_size: 20,
             scope: 'all',
-            account_id: undefined,
+            account_id: '',
             sort_by: 'size',
             sort_order: 'desc',
             extensions: [],
             hide_low_priority: true,
-        });
+        }), expect.any(Object));
 
         const table = screen.getByRole('table');
         const checkboxButtons = within(table).getAllByRole('button');
@@ -203,7 +203,7 @@ describe('SimilarFilesReportTab', () => {
         await user.click(screen.getByRole('checkbox', { name: /hide low priority/i }));
 
         await waitFor(() => {
-            expect(getSimilarReportMock).toHaveBeenLastCalledWith({
+            expect(getSimilarReportMock).toHaveBeenLastCalledWith(expect.objectContaining({
                 page: 1,
                 page_size: 20,
                 scope: 'same_account',
@@ -212,7 +212,7 @@ describe('SimilarFilesReportTab', () => {
                 sort_order: 'asc',
                 extensions: ['cbz', 'pdf'],
                 hide_low_priority: false,
-            });
+            }), expect.any(Object));
         });
 
         const callCountAfterFilters = getSimilarReportMock.mock.calls.length;
@@ -223,7 +223,7 @@ describe('SimilarFilesReportTab', () => {
         const [, nextPageButton] = paginationToolbar.querySelectorAll('button.p-1');
         await user.click(nextPageButton);
         await waitFor(() => {
-            expect(getSimilarReportMock).toHaveBeenLastCalledWith({
+            expect(getSimilarReportMock).toHaveBeenLastCalledWith(expect.objectContaining({
                 page: 2,
                 page_size: 20,
                 scope: 'same_account',
@@ -232,7 +232,7 @@ describe('SimilarFilesReportTab', () => {
                 sort_order: 'asc',
                 extensions: ['cbz', 'pdf'],
                 hide_low_priority: false,
-            });
+            }), expect.any(Object));
         });
 
         await user.click(screen.getByRole('button', { name: /create remove-duplicates job/i }));
