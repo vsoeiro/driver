@@ -1,11 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { getJobs } from '../services/jobs';
 import { useToast } from './ToastContext';
 import { formatJobType } from '../utils/jobLabels';
-import { queryKeys } from '../lib/queryKeys';
+import { useJobActivityQuery } from '../features/jobs/hooks/useJobsData';
 
 const FAST_POLL_INTERVAL_MS = 10000;
 const IDLE_POLL_INTERVAL_MS = 60000;
@@ -26,11 +24,8 @@ export function JobActivityProvider({ children }) {
     const previousActiveJobsRef = useRef(new Set());
     const jobsPageActive = location.pathname.startsWith('/jobs');
 
-    const jobsQuery = useQuery({
-        queryKey: queryKeys.jobs.activity(),
-        queryFn: ({ signal }) => getJobs(50, 0, [], {}, { includeEstimates: false, signal }),
+    const jobsQuery = useJobActivityQuery({
         enabled: !jobsPageActive,
-        staleTime: 5000,
         refetchInterval: (query) => {
             if (jobsPageActive) return false;
             const jobs = Array.isArray(query.state.data) ? query.state.data : [];

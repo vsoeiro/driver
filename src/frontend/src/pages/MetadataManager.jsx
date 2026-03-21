@@ -1,11 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router-dom';
-import { metadataService } from '../services/metadata';
-import { itemsService } from '../services/items';
-import { accountsService } from '../services/accounts';
-import { driveService } from '../services/drive';
 import { getCategoryLibraryView } from '../metadataLibraries/categoryViews';
 import { buildCoverCacheKey, getCachedCoverUrl, setCachedCoverUrl } from '../utils/coverCache';
 import {
@@ -34,6 +29,15 @@ import MetadataLayoutBuilderModal from '../components/MetadataLayoutBuilderModal
 import ConfirmDialog from '../components/ConfirmDialog';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { formatDateOnly, formatDateTime } from '../utils/dateTime';
+import { useAccountsQuery } from '../features/accounts/hooks/useAccountsData';
+import { useDriveActions } from '../features/drive/hooks/useDriveData';
+import { useItemsActions } from '../features/items/hooks/useItemsData';
+import {
+    useMetadataActions,
+    useMetadataCategoryDashboardQuery,
+    useMetadataCategoryStatsQuery,
+    useMetadataLibrariesQuery,
+} from '../features/metadata/hooks/useMetadataData';
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 const BASE_SORT_OPTIONS = [
@@ -102,11 +106,7 @@ const CategoryDashboardView = ({ category, onBack, onOpenItems }) => {
         ],
     }), [category.attributes?.length, category.id, category.item_count, category.name, t]));
 
-    const dashboardQuery = useQuery({
-        queryKey: ['metadata-category-dashboard', category.id],
-        queryFn: () => metadataService.getCategoryDashboard(category.id),
-        staleTime: 30000,
-    });
+    const dashboardQuery = useMetadataCategoryDashboardQuery(category.id);
     const metadataDashboard = dashboardQuery.data || {
         total_items: 0,
         average_coverage: 0,
@@ -163,6 +163,9 @@ const CategoryDashboardView = ({ category, onBack, onOpenItems }) => {
 const CategoryItemsTable = ({ category, onBack }) => {
     const { t, i18n } = useTranslation();
     const { showToast } = useToast();
+    const { getDownloadContentUrl, getDownloadUrl, batchDeleteItems, updateItem } = useDriveActions();
+    const { listItems } = useItemsActions();
+    const { getSeriesSummary, updateItemMetadataField } = useMetadataActions();
     const [items, setItems] = useState([]);
     const [seriesRows, setSeriesRows] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -262,9 +265,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
         return metadataSortOptions.find((option) => option.value === sort.by) || null;
     }, [sort.by, metadataSortOptions]);
 
-    const { data: accounts = [] } = useQuery({
-        queryKey: ['accounts'],
-        queryFn: accountsService.getAccounts,
+    const { data: accounts = [] } = useAccountsQuery({
         staleTime: 60000,
     });
 
@@ -571,7 +572,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
 
             if (isSeriesTrackerMode) {
                 const seriesSortBy = sort.by === 'size' ? 'total_items' : 'series';
-                const data = await metadataService.getSeriesSummary(category.id, {
+                const data = await getSeriesSummary(category.id, {
                     page: effectivePage,
                     page_size: pageSize,
                     sort_by: seriesSortBy,
@@ -587,7 +588,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
                 setTotal(data.total || 0);
                 setTotalPages(data.total_pages || 1);
             } else {
-                const data = await itemsService.listItems({
+                const data = await listItems({
                     ...baseParams,
                     page: effectivePage,
                     page_size: pageSize,
@@ -602,7 +603,23 @@ const CategoryItemsTable = ({ category, onBack }) => {
         } finally {
             setLoading(false);
         }
-    }, [page, pageSize, sort.by, sort.order, selectedMetadataSort, category.id, supportsSeriesTracker, viewMode, debouncedSearchTerm, searchScope, filters, baseListParams, metadataFilters]);
+    }, [
+        baseListParams,
+        category.id,
+        debouncedSearchTerm,
+        filters,
+        getSeriesSummary,
+        listItems,
+        metadataFilters,
+        page,
+        pageSize,
+        searchScope,
+        selectedMetadataSort,
+        sort.by,
+        sort.order,
+        supportsSeriesTracker,
+        viewMode,
+    ]);
 
     useEffect(() => {
         fetchItems();
@@ -672,7 +689,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
             await Promise.all(
                 misses.map(async ({ item, coverItemId, coverAccountId, cacheKey }) => {
                     try {
-                        const url = driveService.getDownloadContentUrl(
+                        const url = getDownloadContentUrl(
                             coverAccountId,
                             coverItemId,
                             { autoResolveAccount: true },
@@ -695,7 +712,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
         return () => {
             cancelled = true;
         };
-    }, [supportsGallery, viewMode, items, category.attributes, libraryView]);
+    }, [category.attributes, getDownloadContentUrl, items, libraryView, supportsGallery, viewMode]);
 
     const handleSort = (column) => {
         if (sort.by === column) {
@@ -808,7 +825,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
         const cellKey = `${item.id}:${attr.id}`;
         setSavingCellKey(cellKey);
         try {
-            const updatedMetadata = await metadataService.updateItemMetadataField(
+            const updatedMetadata = await updateItemMetadataField(
                 item.account_id,
                 item.item_id,
                 attr.id,
@@ -1277,7 +1294,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
         const selectedFiles = getSelectedObjects().filter((item) => item.item_type === 'file');
         for (const file of selectedFiles) {
             try {
-                const url = await driveService.getDownloadUrl(file.account_id, file.item_id);
+                const url = await getDownloadUrl(file.account_id, file.item_id);
                 window.open(url, '_blank');
             } catch (error) {
                 console.error(`Failed to download ${file.name}`, error);
@@ -1301,7 +1318,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
 
             await Promise.all(
                 Object.entries(byAccount).map(([accountId, itemIds]) =>
-                    driveService.batchDeleteItems(accountId, itemIds)
+                    batchDeleteItems(accountId, itemIds)
                 )
             );
 
@@ -1336,7 +1353,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
 
         setRenameSaving(true);
         try {
-            await driveService.updateItem(singleSelectedItem.account_id, singleSelectedItem.item_id, { name: nextName });
+            await updateItem(singleSelectedItem.account_id, singleSelectedItem.item_id, { name: nextName });
             showToast(t('allFiles.renamedSuccessfully'), 'success');
             setRenameModalOpen(false);
             await fetchItems();
@@ -2110,15 +2127,22 @@ export default function MetadataManager() {
     const [deleteCategoryTarget, setDeleteCategoryTarget] = useState(null);
     const [deletingCategory, setDeletingCategory] = useState(false);
     const [layoutBuilderOpen, setLayoutBuilderOpen] = useState(false);
+    const {
+        activateMetadataLibrary,
+        deactivateMetadataLibrary,
+        createCategory,
+        deleteCategory,
+        createAttribute,
+        deleteAttribute,
+        updateAttribute,
+    } = useMetadataActions();
 
     const {
         data: categories = [],
         isLoading: loading,
         error: categoriesError,
         refetch: refetchCategories,
-    } = useQuery({
-        queryKey: ['metadata-category-stats'],
-        queryFn: metadataService.getCategoryStats,
+    } = useMetadataCategoryStatsQuery({
         staleTime: 30000,
     });
     const {
@@ -2126,9 +2150,7 @@ export default function MetadataManager() {
         isLoading: librariesLoading,
         error: librariesError,
         refetch: refetchLibraries,
-    } = useQuery({
-        queryKey: ['metadata-libraries'],
-        queryFn: metadataService.listMetadataLibraries,
+    } = useMetadataLibrariesQuery({
         staleTime: 30000,
     });
 
@@ -2162,10 +2184,10 @@ export default function MetadataManager() {
             setTogglingLibraryKey(library.key);
             const libraryName = getLibraryDisplayName(library, t);
             if (library.is_active) {
-                await metadataService.deactivateMetadataLibrary(library.key);
+                await deactivateMetadataLibrary(library.key);
                 showToast(t('metadataManager.libraryDisabled', { name: libraryName }), 'success');
             } else {
-                await metadataService.activateMetadataLibrary(library.key);
+                await activateMetadataLibrary(library.key);
                 showToast(t('metadataManager.libraryEnabled', { name: libraryName }), 'success');
             }
             await Promise.all([refetchLibraries(), refetchCategories()]);
@@ -2180,7 +2202,7 @@ export default function MetadataManager() {
     const handleCreateCategory = async (e) => {
         e.preventDefault();
         try {
-            await metadataService.createCategory(newCategoryName, newCategoryDesc);
+            await createCategory(newCategoryName, newCategoryDesc);
             showToast(t('metadataManager.categoryCreated'), 'success');
             setCreateModalOpen(false);
             setNewCategoryName('');
@@ -2204,7 +2226,7 @@ export default function MetadataManager() {
         if (!deleteCategoryTarget) return;
         setDeletingCategory(true);
         try {
-            await metadataService.deleteCategory(deleteCategoryTarget.id);
+            await deleteCategory(deleteCategoryTarget.id);
             showToast(t('metadataManager.categoryDeleted'), 'success');
             setDeleteCategoryTarget(null);
             await refetchCategories();
@@ -2223,7 +2245,7 @@ export default function MetadataManager() {
                 options = { options: newAttrOptions.split(',').map(o => o.trim()) };
             }
 
-            await metadataService.createAttribute(addAttributeCategory.id, {
+            await createAttribute(addAttributeCategory.id, {
                 name: newAttrName,
                 data_type: newAttrType,
                 is_required: newAttrRequired,
@@ -2253,7 +2275,7 @@ export default function MetadataManager() {
     const confirmDeleteAttribute = async () => {
         if (!deleteAttributeTarget) return;
         try {
-            await metadataService.deleteAttribute(deleteAttributeTarget.id);
+            await deleteAttribute(deleteAttributeTarget.id);
             showToast(t('metadataManager.attributeDeleted'), 'success');
             refetchCategories();
         } catch (error) {
@@ -2290,7 +2312,7 @@ export default function MetadataManager() {
                 options = { options: parsedOptions };
             }
 
-            await metadataService.updateAttribute(editAttributeTarget.id, {
+            await updateAttribute(editAttributeTarget.id, {
                 name: editAttrName,
                 data_type: editAttrType,
                 is_required: editAttrRequired,

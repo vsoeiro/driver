@@ -1,16 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { Loader2, RefreshCw, RotateCcw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router-dom';
-import { settingsService } from '../services/settings';
-import { jobsService } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
 import { useWorkspacePage } from '../contexts/WorkspaceContext';
 import AdminTabs from '../components/AdminTabs';
-import { useObservabilityQuery } from '../hooks/useAppQueries';
-import { queryKeys } from '../lib/queryKeys';
 import { formatDateTime } from '../utils/dateTime';
+import { useJobsActions } from '../features/jobs/hooks/useJobsData';
+import { useObservabilitySnapshot } from '../features/settings/hooks/useSettingsData';
 
 function PercentRing({ value }) {
     const safe = Math.max(0, Math.min(100, Number(value) || 0));
@@ -51,10 +48,10 @@ export default function AdminDashboard() {
     const { t, i18n } = useTranslation();
     const location = useLocation();
     const { showToast } = useToast();
+    const { reprocessJob } = useJobsActions();
     const [refreshing, setRefreshing] = useState(false);
     const [period, setPeriod] = useState('24h');
     const [reprocessingJobId, setReprocessingJobId] = useState(null);
-    const queryClient = useQueryClient();
     const PERIOD_OPTIONS = useMemo(
         () => [
             { value: '24h', label: t('adminDashboard.last24h') },
@@ -71,7 +68,7 @@ export default function AdminDashboard() {
         [period, PERIOD_OPTIONS],
     );
 
-    const { data: snapshot, isLoading: loading, error } = useObservabilityQuery({
+    const { data: snapshot, isLoading: loading, error, refreshSnapshot: refreshSnapshotData } = useObservabilitySnapshot({
         period,
         refetchInterval: 60000,
         refetchIntervalInBackground: false,
@@ -87,18 +84,14 @@ export default function AdminDashboard() {
     const refreshSnapshot = useCallback(async ({ forceRefresh = false } = {}) => {
         setRefreshing(true);
         try {
-            const data = await settingsService.getObservabilitySnapshot({
-                period,
-                forceRefresh,
-            });
-            queryClient.setQueryData(queryKeys.observability.detail(period), data);
+            await refreshSnapshotData({ forceRefresh });
         } catch (error) {
             const message = error?.response?.data?.detail || t('adminDashboard.failedLoad');
             showToast(message, 'error');
         } finally {
             setRefreshing(false);
         }
-    }, [period, queryClient, showToast, t]);
+    }, [refreshSnapshotData, showToast, t]);
 
     const windowLabel = useMemo(
         () => snapshot?.period_label || selectedPeriodLabel,
@@ -177,7 +170,7 @@ export default function AdminDashboard() {
     const handleReprocess = useCallback(async (jobId) => {
         setReprocessingJobId(jobId);
         try {
-            const job = await jobsService.reprocessJob(jobId);
+            const job = await reprocessJob(jobId);
             showToast(t('adminDashboard.reprocessQueued', { id: job.id }), 'success');
             await refreshSnapshot({ forceRefresh: true });
         } catch (error) {
@@ -186,7 +179,7 @@ export default function AdminDashboard() {
         } finally {
             setReprocessingJobId(null);
         }
-    }, [refreshSnapshot, showToast, t]);
+    }, [refreshSnapshot, reprocessJob, showToast, t]);
 
     return (
         <div className="app-page">

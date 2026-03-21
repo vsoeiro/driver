@@ -14,7 +14,7 @@ export const getAccounts = async (options = {}) => {
  * Initiate OAuth flow for a provider
  */
 export const linkAccount = (provider = 'microsoft') => {
-    window.location.href = `/api/v1/auth/${provider}/login`;
+    return `/api/v1/auth/${provider}/login`;
 };
 
 /**

@@ -55,6 +55,15 @@ export function normalizeItemsListParams(params = {}) {
     };
 }
 
+export function normalizeSimilarReportParams(params = {}) {
+    const normalizedScope = normalizeString(params.scope, 'all');
+    return {
+        ...normalizeItemsListParams(params),
+        scope: ['all', 'same_account', 'cross_account'].includes(normalizedScope) ? normalizedScope : 'all',
+        hide_low_priority: params.hide_low_priority !== false,
+    };
+}
+
 export function normalizeJobsListParams(params = {}) {
     return {
         page: Math.max(1, Math.floor(normalizeNumber(params.page, 1))),
@@ -67,15 +76,27 @@ export function normalizeJobsListParams(params = {}) {
 }
 
 export const queryKeys = {
+    ai: {
+        sessionsRoot: () => ['ai', 'sessions'],
+        sessions: (limit = 50, offset = 0) => ['ai', 'sessions', { limit: normalizeNumber(limit, 50), offset: Math.max(0, Math.floor(normalizeNumber(offset, 0))) }],
+        messagesRoot: (sessionId) => ['ai', 'messages', normalizeString(sessionId)],
+        messages: (sessionId, limit = 300) => ['ai', 'messages', normalizeString(sessionId), { limit: normalizeNumber(limit, 300) }],
+    },
     accounts: {
         all: () => ['accounts'],
     },
     metadata: {
         categories: () => ['metadata-categories'],
         libraries: () => ['metadata-libraries'],
+        categoryStats: () => ['metadata-category-stats'],
+        categoryDashboard: (categoryId) => ['metadata-category-dashboard', normalizeString(categoryId)],
+        formLayouts: () => ['metadata-form-layouts'],
     },
     observability: {
         detail: (period = '24h') => ['observability', normalizeString(period, '24h')],
+    },
+    settings: {
+        runtime: () => ['settings', 'runtime'],
     },
     quota: {
         detail: (accountId) => ['quota', normalizeString(accountId)],
@@ -93,6 +114,7 @@ export const queryKeys = {
     items: {
         listRoot: () => ['items', 'list'],
         list: (params = {}) => ['items', 'list', normalizeItemsListParams(params)],
+        similarReport: (params = {}) => ['items', 'similar-report', normalizeSimilarReportParams(params)],
     },
 };
 

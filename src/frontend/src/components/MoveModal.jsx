@@ -1,14 +1,17 @@
 import { useState, useEffect, useCallback, Fragment } from 'react';
 import { FolderInput, Check, ChevronRight, Folder, File } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { getAccounts } from '../services/accounts';
-import { getFiles, getFolderFiles } from '../services/drive';
-import { createMoveJob } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
+import { useAccountsActions } from '../features/accounts/hooks/useAccountsData';
+import { useDriveActions } from '../features/drive/hooks/useDriveData';
+import { useJobsActions } from '../features/jobs/hooks/useJobsData';
 import Modal from './Modal';
 
 export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSuccess }) {
     const { t } = useTranslation();
+    const { getAccounts } = useAccountsActions();
+    const { listFolderEntries } = useDriveActions();
+    const { createMoveJob } = useJobsActions();
     const [accounts, setAccounts] = useState([]);
     const [selectedAccount, setSelectedAccount] = useState('');
     const [currentPath, setCurrentPath] = useState([]);
@@ -30,14 +33,12 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
             console.error('Failed to load accounts:', error);
             showToast(t('moveModal.failedLoadAccounts'), 'error');
         }
-    }, [sourceAccountId, showToast, t]);
+    }, [getAccounts, sourceAccountId, showToast, t]);
 
     const loadFolders = useCallback(async (accountId, folderId) => {
         setLoading(true);
         try {
-            const data = folderId === 'root'
-                ? await getFiles(accountId)
-                : await getFolderFiles(accountId, folderId);
+            const data = await listFolderEntries(accountId, folderId);
             setFolders(data.items || []);
         } catch (error) {
             console.error('Failed to load folders:', error);
@@ -46,7 +47,7 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
         } finally {
             setLoading(false);
         }
-    }, [showToast, t]);
+    }, [listFolderEntries, showToast, t]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -177,7 +178,7 @@ export default function MoveModal({ isOpen, onClose, item, sourceAccountId, onSu
                             ) : (
                                 folders.map((entry) => (
                                     <button
-                                        key={entry.id}
+                                        key={entry.id || `${entry.item_type || 'item'}:${entry.name || 'unknown'}`}
                                         onClick={() => entry.item_type === 'folder' && navigateToFolder(entry)}
                                         disabled={entry.item_type !== 'folder'}
                                         className={`w-full rounded-md p-2 text-left transition-colors ${

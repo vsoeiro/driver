@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Loader2, ZoomIn, ZoomOut } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import Modal from './Modal';
-import { driveService } from '../services/drive';
 import { isPdfFileName } from '../utils/imagePreview';
+import { useDriveActions } from '../features/drive/hooks/useDriveData';
 
 export default function ImagePreviewModal({
     isOpen,
@@ -13,6 +13,7 @@ export default function ImagePreviewModal({
     filename,
 }) {
     const { t } = useTranslation();
+    const { getDownloadContentUrl } = useDriveActions();
     const [zoomLevel, setZoomLevel] = useState(1);
     const [loading, setLoading] = useState(true);
     const [hasError, setHasError] = useState(false);
@@ -20,10 +21,10 @@ export default function ImagePreviewModal({
 
     const imageUrl = useMemo(() => {
         if (!accountId || !itemId) return '';
-        return driveService.getDownloadContentUrl(String(accountId), String(itemId), {
+        return getDownloadContentUrl(String(accountId), String(itemId), {
             autoResolveAccount: true,
         });
-    }, [accountId, itemId]);
+    }, [accountId, getDownloadContentUrl, itemId]);
     const pdfUrl = useMemo(() => {
         if (!imageUrl) return '';
         return `${imageUrl}#zoom=page-fit`;

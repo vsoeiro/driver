@@ -1,5 +1,5 @@
 import { ArrowRight, Bot, Database, FileText, HardDrive, Loader2, RefreshCw, Sparkles, Wand2 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import ProviderIcon from '../components/ProviderIcon';
@@ -8,7 +8,7 @@ import { useJobActivity } from '../contexts/JobActivityContext';
 import { useToast } from '../contexts/ToastContext';
 import { useAccountsQuery, useItemsListQuery, useQuotaQuery } from '../hooks/useAppQueries';
 import { createWorkspaceAction, WORKSPACE_ACTION_IDS } from '../lib/workspace';
-import { jobsService } from '../services/jobs';
+import { useJobsActions } from '../features/jobs/hooks/useJobsData';
 
 const LAST_ACCOUNT_STORAGE_KEY = 'driver-last-account-id';
 
@@ -127,8 +127,9 @@ function AccountCard({ account, isLastUsed, syncing, onSync, relatedJobs }) {
 export default function AccountsRedirect() {
     const navigate = useNavigate();
     const { t } = useTranslation();
-    const tx = (key, defaultValue, options = {}) => t(key, { defaultValue, ...options });
+    const tx = useCallback((key, defaultValue, options = {}) => t(key, { defaultValue, ...options }), [t]);
     const { showToast } = useToast();
+    const { createSyncJob } = useJobsActions();
     const { jobs = [], hasActiveJobs } = useJobActivity();
     const { data: accounts = [], isLoading } = useAccountsQuery();
     const [syncingAccountId, setSyncingAccountId] = useState('');
@@ -148,7 +149,7 @@ export default function AccountsRedirect() {
         createWorkspaceAction({ id: WORKSPACE_ACTION_IDS.RULES, label: tx('workspace.actions.rules', 'Regras'), to: '/rules' }),
         createWorkspaceAction({ id: WORKSPACE_ACTION_IDS.JOBS, label: tx('workspace.actions.jobs', 'Jobs'), to: '/jobs' }),
         createWorkspaceAction({ id: WORKSPACE_ACTION_IDS.AI, label: tx('workspace.actions.ai', 'IA'), to: '/ai' }),
-    ]), [t]);
+    ]), [tx]);
 
     useWorkspacePage(useMemo(() => ({
         title: tx('accountsHub.title', 'Contas e workspaces'),
@@ -167,7 +168,7 @@ export default function AccountsRedirect() {
             tx('workspace.aiPrompts.driveGaps', 'Quais lacunas de classificacao ou organizacao existem aqui?'),
             tx('workspace.aiPrompts.recommend', 'Sugira as proximas acoes com maior impacto.'),
         ],
-    }), [accounts.length, hasActiveJobs, providerCount, t, workspaceActions]));
+    }), [accounts.length, hasActiveJobs, providerCount, tx, workspaceActions]));
 
     const platformLinks = [
         {
@@ -207,17 +208,17 @@ export default function AccountsRedirect() {
         },
     ];
 
-    const handleSync = async (accountId) => {
+    const handleSync = useCallback(async (accountId) => {
         setSyncingAccountId(accountId);
         try {
-            await jobsService.createSyncJob(accountId);
+            await createSyncJob(accountId);
             showToast(t('accountsHub.syncQueued'), 'success');
         } catch (error) {
             showToast(error?.response?.data?.detail || t('accountsHub.syncFailed'), 'error');
         } finally {
             setSyncingAccountId('');
         }
-    };
+    }, [createSyncJob, showToast, t]);
 
     return (
         <div className="app-page">

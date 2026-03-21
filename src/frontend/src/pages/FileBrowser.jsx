@@ -3,9 +3,6 @@ import { useParams, Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useDrive } from '../hooks/useDrive';
 import { useUpload } from '../hooks/useUpload';
-import { driveService } from '../services/drive';
-import { batchDeleteMetadata } from '../services/metadata';
-import { jobsService } from '../services/jobs';
 import {
     Folder, File, Download, Trash2,
     UploadCloud, FolderPlus, Loader2, ArrowRightLeft, Database, XCircle, CheckSquare, Square, Search, X, ChevronDown, BookOpen, RefreshCw, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, GripVertical, Image as ImageIcon, Archive, Pencil
@@ -16,8 +13,10 @@ import { useWorkspacePage } from '../contexts/WorkspaceContext';
 import { useAccountsQuery, useMetadataLibrariesQuery } from '../hooks/useAppQueries';
 import { isPreviewableFileName } from '../utils/imagePreview';
 import { formatDateTime } from '../utils/dateTime';
+import { useDriveActions } from '../features/drive/hooks/useDriveData';
+import { useJobsActions } from '../features/jobs/hooks/useJobsData';
+import { useMetadataActions } from '../features/metadata/hooks/useMetadataData';
 
-const { getDownloadUrl } = driveService;
 const MetadataModal = lazy(() => import('../components/MetadataModal'));
 const BatchMetadataModal = lazy(() => import('../components/BatchMetadataModal'));
 const MoveModal = lazy(() => import('../components/MoveModal'));
@@ -69,6 +68,15 @@ function preloadImagePreviewModal() {
 export default function FileBrowser() {
     const { t, i18n } = useTranslation();
     const { showToast } = useToast();
+    const { getDownloadUrl, updateItem } = useDriveActions();
+    const {
+        createAnalyzeImageAssetsJob,
+        createExtractBookAssetsJob,
+        createExtractComicAssetsJob,
+        createExtractZipJob,
+        createSyncJob,
+    } = useJobsActions();
+    const { batchDeleteMetadata } = useMetadataActions();
     const { accountId, folderId } = useParams();
     const location = useLocation();
     const [pageSize, setPageSize] = useState(50);
@@ -342,7 +350,7 @@ export default function FileBrowser() {
         }
         setActionLoading(true);
         try {
-            await jobsService.createExtractComicAssetsJob(accountId, Array.from(selectedItems));
+            await createExtractComicAssetsJob(accountId, Array.from(selectedItems));
             showToast(t('fileBrowser.comicsJobCreated'), 'success');
             setMetadataMenuOpen(false);
         } catch (e) {
@@ -361,7 +369,7 @@ export default function FileBrowser() {
         }
         setActionLoading(true);
         try {
-            await jobsService.createAnalyzeImageAssetsJob(accountId, Array.from(selectedItems), false, false);
+            await createAnalyzeImageAssetsJob(accountId, Array.from(selectedItems), false, false);
             showToast(t('fileBrowser.imageAnalysisJobCreated'), 'success');
             setMetadataMenuOpen(false);
         } catch (e) {
@@ -380,7 +388,7 @@ export default function FileBrowser() {
         }
         setActionLoading(true);
         try {
-            await jobsService.createExtractBookAssetsJob(accountId, Array.from(selectedItems));
+            await createExtractBookAssetsJob(accountId, Array.from(selectedItems));
             showToast(t('fileBrowser.booksJobCreated'), 'success');
             setMetadataMenuOpen(false);
         } catch (e) {
@@ -399,7 +407,7 @@ export default function FileBrowser() {
         try {
             const results = await Promise.allSettled(
                 selectedItemsForZipExtraction.map((item) =>
-                    jobsService.createExtractZipJob(
+                    createExtractZipJob(
                         item.account_id,
                         item.item_id,
                         target.account_id,
@@ -454,7 +462,7 @@ export default function FileBrowser() {
         if (!accountId || syncing) return;
         setSyncing(true);
         try {
-            await jobsService.createSyncJob(accountId);
+            await createSyncJob(accountId);
             showToast(t('fileBrowser.syncCreated'), 'success');
         } catch (e) {
             showToast(`${t('fileBrowser.failedSync')}: ${e.message}`, 'error');
@@ -487,7 +495,7 @@ export default function FileBrowser() {
 
         setActionLoading(true);
         try {
-            await driveService.updateItem(accountId, singleSelectedItem.id, { name: trimmedName });
+            await updateItem(accountId, singleSelectedItem.id, { name: trimmedName });
             showToast(t('fileBrowser.renamedSuccessfully'), 'success');
             setRenameModalOpen(false);
             setRenameValue('');

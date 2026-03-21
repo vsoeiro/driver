@@ -36,7 +36,7 @@ export const itemsService = {
         return response.data;
     },
 
-    getSimilarReport: async (params = {}) => {
+    getSimilarReport: async (params = {}, options = {}) => {
         const queryParams = new URLSearchParams();
         Object.entries(params).forEach(([key, value]) => {
             if (value !== undefined && value !== null && value !== '') {
@@ -48,7 +48,9 @@ export const itemsService = {
             }
         });
         const suffix = queryParams.toString() ? `?${queryParams.toString()}` : '';
-        const response = await api.get(`/items/similar-report${suffix}`);
+        const response = await api.get(`/items/similar-report${suffix}`, {
+            signal: options.signal,
+        });
         return response.data;
     },
 

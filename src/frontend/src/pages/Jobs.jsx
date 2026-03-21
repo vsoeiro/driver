@@ -1,16 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw, CheckCircle, XCircle, Clock, PlayCircle, Eye, AlertTriangle, Undo2, Trash2, Square, RotateCcw, ChevronLeft, ChevronRight, GripVertical } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { cancelJob, createMetadataUndoJob, deleteJob, getJobAttempts, getJobs, reprocessJob } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
 import { useWorkspacePage } from '../contexts/WorkspaceContext';
 import Modal from '../components/Modal';
 import { getJobCrossLinkTarget } from '../lib/workspace';
 import { formatJobStatus, formatJobType } from '../utils/jobLabels';
-import { queryKeys } from '../lib/queryKeys';
 import { formatDateTime } from '../utils/dateTime';
+import { useJobsActions, useJobsListQuery } from '../features/jobs/hooks/useJobsData';
 
 const DATE_RANGE_MS = {
     '24h': 24 * 60 * 60 * 1000,
@@ -45,6 +43,13 @@ export default function Jobs() {
     const { t, i18n } = useTranslation();
     const navigate = useNavigate();
     const location = useLocation();
+    const {
+        cancelJob,
+        createMetadataUndoJob,
+        deleteJob,
+        getJobAttempts,
+        reprocessJob,
+    } = useJobsActions();
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(50);
     const [selectedJob, setSelectedJob] = useState(null);
@@ -80,7 +85,6 @@ export default function Jobs() {
         }
     });
     const { showToast } = useToast();
-    const queryClient = useQueryClient();
     const DATE_RANGE_OPTIONS = [
         { value: 'ALL', label: t('jobs.allTime') },
         { value: '24h', label: t('adminDashboard.last24h'), hours: 24 },
@@ -112,36 +116,25 @@ export default function Jobs() {
     ];
     const autoRefreshEnabled = page === 1 && (statusFilter === 'ALL' || LIVE_JOB_STATUSES.has(statusFilter));
 
-    const queryKey = useMemo(
-        () => queryKeys.jobs.list({
-            page,
-            pageSize,
-            statuses: statusFilter === 'ALL' ? [] : [statusFilter],
-            types: typeFilter === 'ALL' ? [] : [typeFilter],
-            createdAfter: (() => {
-                const deltaMs = DATE_RANGE_MS[dateRangeFilter] || 0;
-                return deltaMs > 0 ? new Date(Date.now() - deltaMs).toISOString() : null;
-            })(),
-            includeEstimates: true,
-        }),
-        [dateRangeFilter, page, pageSize, statusFilter, typeFilter],
-    );
     const {
         data: jobs = [],
         isLoading,
         isFetching,
         error,
         refetch,
-    } = useQuery({
-        queryKey,
-        queryFn: async ({ signal }) => {
-            const offset = (page - 1) * pageSize;
-            const statuses = statusFilter === 'ALL' ? [] : [statusFilter];
-            const types = typeFilter === 'ALL' ? [] : [typeFilter];
+        patchJobs,
+        removeJobs,
+    } = useJobsListQuery({
+        page,
+        pageSize,
+        statuses: statusFilter === 'ALL' ? [] : [statusFilter],
+        types: typeFilter === 'ALL' ? [] : [typeFilter],
+        createdAfter: (() => {
             const deltaMs = DATE_RANGE_MS[dateRangeFilter] || 0;
-            const createdAfter = deltaMs > 0 ? new Date(Date.now() - deltaMs).toISOString() : null;
-            return getJobs(pageSize, offset, statuses, { types, createdAfter }, { signal });
-        },
+            return deltaMs > 0 ? new Date(Date.now() - deltaMs).toISOString() : null;
+        })(),
+        includeEstimates: true,
+    }, {
         staleTime: 5000,
         refetchInterval: autoRefreshEnabled ? 10000 : false,
         refetchIntervalInBackground: false,
@@ -296,7 +289,7 @@ export default function Jobs() {
         setDeletingJobId(jobId);
         try {
             await deleteJob(jobId);
-            queryClient.setQueryData(queryKey, (prev = []) => prev.filter((job) => job.id !== jobId));
+            removeJobs(jobId);
             if (selectedJob?.id === jobId) setSelectedJob(null);
             showToast(t('jobs.jobRemoved'), 'success');
         } catch {
@@ -310,16 +303,7 @@ export default function Jobs() {
         setCancellingJobId(jobId);
         try {
             await cancelJob(jobId);
-            queryClient.setQueryData(queryKey, (prev = []) =>
-                prev.map((job) =>
-                    job.id === jobId
-                        ? {
-                            ...job,
-                            status: 'CANCELLED',
-                        }
-                        : job
-                )
-            );
+            patchJobs(jobId, { status: 'CANCELLED' });
             showToast(t('jobs.cancelRequested'), 'success');
             refetch();
         } catch (error) {
@@ -354,16 +338,7 @@ export default function Jobs() {
             const successSet = new Set(successIds);
 
             if (successSet.size > 0) {
-                queryClient.setQueryData(queryKey, (prev = []) =>
-                    prev.map((job) =>
-                        successSet.has(job.id)
-                            ? {
-                                ...job,
-                                status: 'CANCELLED',
-                            }
-                            : job
-                    )
-                );
+                patchJobs(successIds, { status: 'CANCELLED' });
                 setSelectedJobIds((prev) => {
                     const next = new Set(prev);
                     successIds.forEach((jobId) => next.delete(jobId));
@@ -399,9 +374,7 @@ export default function Jobs() {
             const successSet = new Set(successIds);
 
             if (successSet.size > 0) {
-                queryClient.setQueryData(queryKey, (prev = []) =>
-                    prev.filter((job) => !successSet.has(job.id))
-                );
+                removeJobs(successIds);
                 if (selectedJob?.id && successSet.has(selectedJob.id)) {
                     setSelectedJob(null);
                 }

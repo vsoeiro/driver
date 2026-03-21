@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GripVertical, Loader2, MoveHorizontal, Plus, RefreshCcw, Save, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import Modal from './Modal';
-import { metadataService } from '../services/metadata';
 import { formLayoutToPayload, normalizeFormLayoutForCategory } from '../utils/metadata';
 import { useToast } from '../contexts/ToastContext';
+import { useMetadataActions } from '../features/metadata/hooks/useMetadataData';
 
 const ROW_HEIGHT_PX = 56;
 const COLUMN_OPTIONS = [8, 10, 12, 16, 20, 24];
@@ -138,6 +138,7 @@ export default function MetadataLayoutBuilderModal({
 }) {
     const { t } = useTranslation();
     const { showToast } = useToast();
+    const { listFormLayouts, saveFormLayout } = useMetadataActions();
     const gridRef = useRef(null);
 
     const [loading, setLoading] = useState(false);
@@ -163,7 +164,7 @@ export default function MetadataLayoutBuilderModal({
     const loadLayouts = useCallback(async () => {
         try {
             setLoading(true);
-            const rows = await metadataService.listFormLayouts();
+            const rows = await listFormLayouts();
             const map = {};
             (rows || []).forEach((layout) => {
                 if (!layout?.category_id) return;
@@ -198,7 +199,7 @@ export default function MetadataLayoutBuilderModal({
         } finally {
             setLoading(false);
         }
-    }, [categories, showToast, t]);
+    }, [categories, listFormLayouts, showToast, t]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -346,12 +347,12 @@ export default function MetadataLayoutBuilderModal({
         });
     };
 
-    const handleSave = async () => {
+    const handleSave = useCallback(async () => {
         if (!selectedCategory || !layoutDraft) return;
         try {
             setSaving(true);
             const payload = formLayoutToPayload(layoutDraft);
-            const saved = await metadataService.saveFormLayout(selectedCategory.id, payload);
+            const saved = await saveFormLayout(selectedCategory.id, payload);
             setLayoutsByCategory((prev) => ({
                 ...prev,
                 [String(saved.category_id)]: {
@@ -380,7 +381,7 @@ export default function MetadataLayoutBuilderModal({
         } finally {
             setSaving(false);
         }
-    };
+    }, [layoutDraft, onSaved, saveFormLayout, selectedCategory, showToast, t]);
 
     const columns = Number(layoutDraft?.columns || 12);
     const visibleItems = useMemo(

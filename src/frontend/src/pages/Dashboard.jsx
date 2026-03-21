@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react';
-import { accountsService } from '../services/accounts';
-const { getAccounts, linkAccount } = accountsService;
 import { Link } from 'react-router-dom';
 import { Plus, HardDrive, Calendar, ArrowRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import ProviderIcon from '../components/ProviderIcon';
 import ProviderPickerModal from '../components/ProviderPickerModal';
 import { formatDateOnly } from '../utils/dateTime';
+import { useAccountsActions } from '../features/accounts/hooks/useAccountsData';
 
 export default function Dashboard() {
     const { t, i18n } = useTranslation();
+    const { getAccounts, linkAccount } = useAccountsActions();
     const [accounts, setAccounts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [pickerOpen, setPickerOpen] = useState(false);
@@ -22,7 +22,7 @@ export default function Dashboard() {
             console.error(err);
             setLoading(false);
         });
-    }, []);
+    }, [getAccounts]);
 
     return (
         <div className="app-page mx-auto w-full max-w-6xl">

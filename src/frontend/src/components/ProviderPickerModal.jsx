@@ -1,10 +1,11 @@
 import Modal from './Modal';
 import ProviderIcon from './ProviderIcon';
 import { useTranslation } from 'react-i18next';
-import { accountsService } from '../services/accounts';
+import { useAccountsActions } from '../features/accounts/hooks/useAccountsData';
 
 export default function ProviderPickerModal({ isOpen, onClose, onSelect }) {
     const { t } = useTranslation();
+    const { linkAccount } = useAccountsActions();
 
     const providers = [
         { id: 'microsoft', label: 'OneDrive' },
@@ -24,7 +25,7 @@ export default function ProviderPickerModal({ isOpen, onClose, onSelect }) {
                                 onSelect(provider.id);
                                 return;
                             }
-                            accountsService.linkAccount(provider.id);
+                            linkAccount(provider.id);
                         }}
                         className="w-full flex items-center gap-3 px-3 py-3 rounded-md border hover:bg-accent text-left"
                     >

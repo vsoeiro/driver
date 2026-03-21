@@ -1,10 +1,7 @@
 import { Fragment, useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router-dom';
-import { jobsService } from '../services/jobs';
-import { driveService } from '../services/drive';
 import { useToast } from '../contexts/ToastContext';
 import { useWorkspacePage } from '../contexts/WorkspaceContext';
 import {
@@ -14,11 +11,13 @@ import {
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import ProviderIcon from '../components/ProviderIcon';
-import { queryKeys } from '../lib/queryKeys';
 import { useAccountsQuery, useItemsListQuery, useMetadataCategoriesQuery, useMetadataLibrariesQuery } from '../hooks/useAppQueries';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { isPreviewableFileName } from '../utils/imagePreview';
 import { formatDateTime } from '../utils/dateTime';
+import { useDriveActions } from '../features/drive/hooks/useDriveData';
+import { useItemsCacheActions } from '../features/items/hooks/useItemsData';
+import { useJobsActions } from '../features/jobs/hooks/useJobsData';
 
 const MetadataModal = lazy(() => import('../components/MetadataModal'));
 const BatchMetadataModal = lazy(() => import('../components/BatchMetadataModal'));
@@ -371,7 +370,18 @@ export default function AllFiles() {
     const [columnWidths, setColumnWidths] = useState(() => initialColumnPreferences.widths);
 
     const { showToast } = useToast();
-    const queryClient = useQueryClient();
+    const { batchDeleteItems, getDownloadUrl, updateItem } = useDriveActions();
+    const { invalidateItemsList } = useItemsCacheActions();
+    const {
+        createAnalyzeImageAssetsJob,
+        createAnalyzeLibraryImageAssetsJob,
+        createExtractBookAssetsJob,
+        createExtractComicAssetsJob,
+        createExtractLibraryComicAssetsJob,
+        createExtractZipJob,
+        createMapLibraryBooksJob,
+        uploadFileBackground,
+    } = useJobsActions();
     const { data: accounts = [] } = useAccountsQuery();
     const { data: metaCategories = [] } = useMetadataCategoriesQuery();
     const { data: metadataLibraries = [] } = useMetadataLibrariesQuery();
@@ -439,8 +449,8 @@ export default function AllFiles() {
     const normalizedPathPrefix = useMemo(() => normalizeFolderPath(pathPrefix), [pathPrefix]);
 
     const invalidateItems = useCallback(async () => {
-        await queryClient.invalidateQueries({ queryKey: queryKeys.items.listRoot() });
-    }, [queryClient]);
+        await invalidateItemsList();
+    }, [invalidateItemsList]);
 
     // Selection Logic (copied from FileBrowser)
     const toggleSelection = (id, index, multiSelect, rangeSelect) => {
@@ -489,9 +499,10 @@ export default function AllFiles() {
         return formatDateTime(dateString, i18n.language);
     };
 
-    const getSelectedObjects = () => {
-        return items.filter(i => selectedItems.has(i.id));
-    };
+    const getSelectedObjects = useCallback(
+        () => items.filter((item) => selectedItems.has(item.id)),
+        [items, selectedItems],
+    );
 
     const singleSelectedItem = useMemo(() => {
         if (selectedItems.size !== 1) return null;
@@ -506,7 +517,7 @@ export default function AllFiles() {
             const ext = item.name.slice(dotIndex + 1).toLowerCase();
             return ZIP_EXTRACTABLE_EXTS.has(ext);
         }),
-        [items, selectedItems],
+        [getSelectedObjects],
     );
     const moveTargetItem = singleSelectedItem
         ? { ...singleSelectedItem, id: singleSelectedItem.item_id }
@@ -856,7 +867,7 @@ export default function AllFiles() {
             const entries = Object.entries(byAccount);
             await Promise.all(
                 entries.map(([accountId, itemIds]) =>
-                    jobsService.createExtractComicAssetsJob(accountId, itemIds)
+                    createExtractComicAssetsJob(accountId, itemIds)
                 )
             );
 
@@ -888,7 +899,7 @@ export default function AllFiles() {
             const entries = Object.entries(byAccount);
             await Promise.all(
                 entries.map(([accountId, itemIds]) =>
-                    jobsService.createAnalyzeImageAssetsJob(accountId, itemIds, false, false)
+                    createAnalyzeImageAssetsJob(accountId, itemIds, false, false)
                 )
             );
 
@@ -920,7 +931,7 @@ export default function AllFiles() {
             const entries = Object.entries(byAccount);
             await Promise.all(
                 entries.map(([accountId, itemIds]) =>
-                    jobsService.createExtractBookAssetsJob(accountId, itemIds)
+                    createExtractBookAssetsJob(accountId, itemIds)
                 )
             );
 
@@ -937,7 +948,7 @@ export default function AllFiles() {
         const selectedFiles = getSelectedObjects().filter((item) => item.item_type === 'file');
         for (const file of selectedFiles) {
             try {
-                const url = await driveService.getDownloadUrl(file.account_id, file.item_id);
+                const url = await getDownloadUrl(file.account_id, file.item_id);
                 window.open(url, '_blank');
             } catch (error) {
                 showToast(`${t('allFiles.failedDownload')} ${file.name}`, 'error');
@@ -964,7 +975,7 @@ export default function AllFiles() {
             for (let index = 0; index < files.length; index += 1) {
                 const file = files[index];
                 try {
-                    await jobsService.uploadFileBackground(
+                    await uploadFileBackground(
                         uploadTargetFolder.account_id,
                         uploadTargetFolder.item_id,
                         file,
@@ -1003,7 +1014,7 @@ export default function AllFiles() {
         try {
             const results = await Promise.allSettled(
                 selectedItemsForZipExtraction.map((item) =>
-                    jobsService.createExtractZipJob(
+                    createExtractZipJob(
                         item.account_id,
                         item.item_id,
                         target.account_id,
@@ -1054,7 +1065,7 @@ export default function AllFiles() {
 
             await Promise.all(
                 Object.entries(byAccount).map(([accountId, itemIds]) =>
-                    driveService.batchDeleteItems(accountId, itemIds)
+                    batchDeleteItems(accountId, itemIds)
                 )
             );
 
@@ -1089,7 +1100,7 @@ export default function AllFiles() {
 
         setRenameSaving(true);
         try {
-            await driveService.updateItem(singleSelectedItem.account_id, singleSelectedItem.item_id, { name: nextName });
+            await updateItem(singleSelectedItem.account_id, singleSelectedItem.item_id, { name: nextName });
             showToast(t('allFiles.renamedSuccessfully'), 'success');
             setRenameModalOpen(false);
             setMetadataMenuOpen(false);
@@ -1118,7 +1129,7 @@ export default function AllFiles() {
 
         setMapLibraryLoading(true);
         try {
-            const summary = await jobsService.createExtractLibraryComicAssetsJob(accountScope, safeChunkSize);
+            const summary = await createExtractLibraryComicAssetsJob(accountScope, safeChunkSize);
             if (!summary?.total_jobs) {
                 showToast(t('allFiles.noUnmappedComics'), 'success');
                 return;
@@ -1161,7 +1172,7 @@ export default function AllFiles() {
 
         setMapLibraryLoading(true);
         try {
-            const summary = await jobsService.createAnalyzeLibraryImageAssetsJob(accountScope, safeChunkSize, false);
+            const summary = await createAnalyzeLibraryImageAssetsJob(accountScope, safeChunkSize, false);
             if (!summary?.total_jobs) {
                 showToast(t('allFiles.noUnmappedImages'), 'success');
                 return;
@@ -1190,7 +1201,7 @@ export default function AllFiles() {
 
         setMapLibraryLoading(true);
         try {
-            const summary = await jobsService.createMapLibraryBooksJob(accountScope, safeChunkSize);
+            const summary = await createMapLibraryBooksJob(accountScope, safeChunkSize);
             if (!summary?.total_jobs) {
                 showToast(t('allFiles.noUnmappedBooks'), 'success');
                 return;

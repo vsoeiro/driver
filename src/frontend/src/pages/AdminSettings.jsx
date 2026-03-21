@@ -2,14 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { Loader2, RefreshCw, Save, Search } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router-dom';
-import { settingsService } from '../services/settings';
 import { useToast } from '../contexts/ToastContext';
 import { useWorkspacePage } from '../contexts/WorkspaceContext';
 import FolderTargetPickerModal from '../components/FolderTargetPickerModal';
-import { accountsService } from '../services/accounts';
-import { jobsService } from '../services/jobs';
 import AdminTabs from '../components/AdminTabs';
 import { SUPPORTED_LANGUAGES } from '../i18n';
+import { useAccountsActions } from '../features/accounts/hooks/useAccountsData';
+import { useJobsActions } from '../features/jobs/hooks/useJobsData';
+import { useSettingsActions } from '../features/settings/hooks/useSettingsData';
 
 function PluginField({ field, onChange, onOpenFolderPicker, accountLabelById, t }) {
     const inputClass = 'input-shell w-full p-2 text-sm';
@@ -79,6 +79,9 @@ export default function AdminSettings() {
     const { t, i18n } = useTranslation();
     const location = useLocation();
     const { showToast } = useToast();
+    const { getAccounts } = useAccountsActions();
+    const { createReindexComicCoversJob } = useJobsActions();
+    const { getRuntimeSettings, updateRuntimeSettings } = useSettingsActions();
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [pluginActionLoading, setPluginActionLoading] = useState({});
@@ -107,8 +110,8 @@ export default function AdminSettings() {
             setLoading(true);
             try {
                 const [data, accountRows] = await Promise.all([
-                    settingsService.getRuntimeSettings(),
-                    accountsService.getAccounts(),
+                    getRuntimeSettings(),
+                    getAccounts(),
                 ]);
                 setAccounts(accountRows);
                 setForm({
@@ -129,7 +132,7 @@ export default function AdminSettings() {
             }
         };
         load();
-    }, [showToast, t]);
+    }, [getAccounts, getRuntimeSettings, showToast, t]);
 
     const accountLabelById = useMemo(
         () => Object.fromEntries(accounts.map((acc) => [acc.id, `${acc.display_name} (${acc.email})`])),
@@ -303,7 +306,7 @@ export default function AdminSettings() {
                     pluginPayload[group.plugin_key][field.key] = field.value;
                 }
             }
-            const data = await settingsService.updateRuntimeSettings({
+            const data = await updateRuntimeSettings({
                 enable_daily_sync_scheduler: form.enable_daily_sync_scheduler,
                 daily_sync_cron: form.daily_sync_cron,
                 worker_job_timeout_seconds: form.worker_job_timeout_seconds,
@@ -336,7 +339,7 @@ export default function AdminSettings() {
         if (action !== 'reindex_covers') return;
         setPluginActionLoading((prev) => ({ ...prev, [`${group.plugin_key}:${action}`]: true }));
         try {
-            const summary = await jobsService.createReindexComicCoversJob(group.plugin_key);
+            const summary = await createReindexComicCoversJob(group.plugin_key);
             showToast(
                 t('adminSettings.reindexStarted', {
                     count: summary.total_jobs,

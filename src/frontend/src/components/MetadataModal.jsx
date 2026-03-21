@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import Modal from './Modal';
-import { metadataService } from '../services/metadata';
-import { jobsService } from '../services/jobs';
-import { driveService } from '../services/drive';
 import { useToast } from '../contexts/ToastContext';
 import { Loader2, AlertTriangle, ZoomIn, ZoomOut, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { getCategoryLibraryView } from '../metadataLibraries/categoryViews';
@@ -18,6 +15,9 @@ import {
     tagsToInputValue,
 } from '../utils/metadata';
 import { formatDateTime } from '../utils/dateTime';
+import { useDriveActions } from '../features/drive/hooks/useDriveData';
+import { useJobsActions } from '../features/jobs/hooks/useJobsData';
+import { useMetadataActions } from '../features/metadata/hooks/useMetadataData';
 const DEFAULT_COMIC_FORM_FIELD_GROUPS = [
     ['series', 'title'],
     ['volume', 'issue_number', 'year', 'month'],
@@ -102,6 +102,15 @@ export default function MetadataModal({
 }) {
     const { t, i18n } = useTranslation();
     const { showToast } = useToast();
+    const { getDownloadContentUrl } = useDriveActions();
+    const { createMetadataUpdateJob } = useJobsActions();
+    const {
+        getCategories,
+        getItemMetadata,
+        listFormLayouts,
+        getItemMetadataHistory,
+        saveItemMetadata,
+    } = useMetadataActions();
     const [categories, setCategories] = useState([]);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -127,9 +136,9 @@ export default function MetadataModal({
         try {
             setLoading(true);
             const [cats, meta, layouts] = await Promise.all([
-                metadataService.getCategories(),
-                metadataService.getItemMetadata(accountId, providerItemId),
-                metadataService.listFormLayouts(),
+                getCategories(),
+                getItemMetadata(accountId, providerItemId),
+                listFormLayouts(),
             ]);
             setCategories(cats);
             const map = {};
@@ -164,7 +173,7 @@ export default function MetadataModal({
                 setFormValues({});
                 setInitialMetadataSignature(buildMetadataSignature('', {}));
             }
-            const historyData = await metadataService.getItemMetadataHistory(accountId, providerItemId);
+            const historyData = await getItemMetadataHistory(accountId, providerItemId);
             setHistory(historyData || []);
             setTagInputDrafts({});
         } catch (error) {
@@ -173,7 +182,7 @@ export default function MetadataModal({
         } finally {
             setLoading(false);
         }
-    }, [accountId, providerItemId, showToast, t]);
+    }, [accountId, getCategories, getItemMetadata, getItemMetadataHistory, listFormLayouts, providerItemId, showToast, t]);
 
     useEffect(() => {
         if (isOpen && item) {
@@ -263,7 +272,7 @@ export default function MetadataModal({
                     }
                 });
 
-                await jobsService.createMetadataUpdateJob(
+                await createMetadataUpdateJob(
                     accountId,
                     providerItemId,
                     metadata,
@@ -273,7 +282,7 @@ export default function MetadataModal({
                     showToast(t('metadataModal.bulkStarted'), 'success');
                 }
             } else {
-                await metadataService.saveItemMetadata({
+                await saveItemMetadata({
                     account_id: accountId,
                     item_id: providerItemId,
                     category_id: selectedCategoryId,
@@ -297,12 +306,14 @@ export default function MetadataModal({
     }, [
         accountId,
         categories,
+        createMetadataUpdateJob,
         currentMetadataSignature,
         formValues,
         hasUnsavedChanges,
         item,
         onSuccess,
         providerItemId,
+        saveItemMetadata,
         selectedCategoryId,
         showToast,
         t,
@@ -411,7 +422,7 @@ export default function MetadataModal({
         const loadCover = async () => {
             try {
                 setCoverLoading(true);
-                const url = driveService.getDownloadContentUrl(
+                const url = getDownloadContentUrl(
                     String(coverAccountId),
                     String(coverItemId),
                     { autoResolveAccount: true },
@@ -430,7 +441,7 @@ export default function MetadataModal({
         return () => {
             cancelled = true;
         };
-    }, [isOpen, showCoverPanel, coverItemId, coverAccountId]);
+    }, [coverAccountId, coverItemId, getDownloadContentUrl, isOpen, showCoverPanel]);
 
     useEffect(() => {
         if (!isOpen || !showImagePanel || !accountId || !providerItemId) {
@@ -450,7 +461,7 @@ export default function MetadataModal({
         const loadImagePreview = async () => {
             try {
                 setImagePreviewLoading(true);
-                const url = driveService.getDownloadContentUrl(
+                const url = getDownloadContentUrl(
                     String(accountId),
                     String(providerItemId),
                     { autoResolveAccount: true },
@@ -469,7 +480,7 @@ export default function MetadataModal({
         return () => {
             cancelled = true;
         };
-    }, [isOpen, showImagePanel, accountId, providerItemId]);
+    }, [accountId, getDownloadContentUrl, isOpen, providerItemId, showImagePanel]);
 
     const renderAttributeField = (attr, className = '', style = null) => {
         const isReadOnlyComputed = ['comics_core', 'books_core'].includes(selectedCategory?.plugin_key)

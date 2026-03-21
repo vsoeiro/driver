@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useState } from 'react';
 import { Check, ChevronRight, Folder, FolderInput, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { accountsService } from '../services/accounts';
-import { driveService } from '../services/drive';
+import { useAccountsActions } from '../features/accounts/hooks/useAccountsData';
+import { useDriveActions } from '../features/drive/hooks/useDriveData';
 
 export default function FolderTargetPickerModal({
     isOpen,
@@ -11,6 +11,8 @@ export default function FolderTargetPickerModal({
     onConfirm,
 }) {
     const { t } = useTranslation();
+    const { getAccounts } = useAccountsActions();
+    const { listFolderEntries } = useDriveActions();
     const [accounts, setAccounts] = useState([]);
     const [selectedAccount, setSelectedAccount] = useState('');
     const [currentFolderId, setCurrentFolderId] = useState('root');
@@ -24,7 +26,7 @@ export default function FolderTargetPickerModal({
         const load = async () => {
             setLoadingAccounts(true);
             try {
-                const data = await accountsService.getAccounts();
+                const data = await getAccounts();
                 setAccounts(data);
                 const initialAccount = initialValue?.account_id || data[0]?.id || '';
                 setSelectedAccount(initialAccount);
@@ -35,23 +37,21 @@ export default function FolderTargetPickerModal({
             }
         };
         load();
-    }, [isOpen, initialValue]);
+    }, [getAccounts, initialValue, isOpen]);
 
     useEffect(() => {
         if (!isOpen || !selectedAccount) return;
         const loadFolders = async () => {
             setLoadingFolders(true);
             try {
-                const data = currentFolderId === 'root'
-                    ? await driveService.getFiles(selectedAccount)
-                    : await driveService.getFolderFiles(selectedAccount, currentFolderId);
+                const data = await listFolderEntries(selectedAccount, currentFolderId);
                 setFolders((data.items || []).filter((item) => item.item_type === 'folder'));
             } finally {
                 setLoadingFolders(false);
             }
         };
         loadFolders();
-    }, [isOpen, selectedAccount, currentFolderId]);
+    }, [currentFolderId, isOpen, listFolderEntries, selectedAccount]);
 
     if (!isOpen) return null;
 

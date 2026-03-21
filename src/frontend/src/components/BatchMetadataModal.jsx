@@ -1,9 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { metadataService } from '../services/metadata';
-import { itemsService } from '../services/items';
-import { jobsService } from '../services/jobs';
-import { driveService } from '../services/drive';
 import { getCategoryLibraryView } from '../metadataLibraries/categoryViews';
 import { buildCoverCacheKey, getCachedCoverUrl, setCachedCoverUrl } from '../utils/coverCache';
 import {
@@ -17,9 +13,17 @@ import {
 } from '../utils/metadata';
 import { Loader2 } from 'lucide-react';
 import Modal from './Modal';
+import { useDriveActions } from '../features/drive/hooks/useDriveData';
+import { useItemsActions } from '../features/items/hooks/useItemsData';
+import { useJobsActions } from '../features/jobs/hooks/useJobsData';
+import { useMetadataActions } from '../features/metadata/hooks/useMetadataData';
 
 const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToast }) => {
     const { t } = useTranslation();
+    const { getDownloadContentUrl } = useDriveActions();
+    const { batchUpdateMetadata } = useItemsActions();
+    const { applyMetadataRecursive } = useJobsActions();
+    const { listCategories, listFormLayouts } = useMetadataActions();
     const [categories, setCategories] = useState([]);
     const [selectedCategory, setSelectedCategory] = useState('');
     const [attributeValues, setAttributeValues] = useState({});
@@ -86,8 +90,8 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
         setLoading(true);
         try {
             const [data, layouts] = await Promise.all([
-                metadataService.listCategories(),
-                metadataService.listFormLayouts(),
+                listCategories(),
+                listFormLayouts(),
             ]);
             setCategories(data);
             const map = {};
@@ -117,7 +121,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [listCategories, listFormLayouts]);
 
     useEffect(() => {
         if (isOpen) {
@@ -148,7 +152,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
 
                 if (files.length > 0) {
                     promises.push(
-                        itemsService.batchUpdateMetadata(
+                        batchUpdateMetadata(
                             accountId,
                             files.map(i => i.item_id),
                             selectedCategory,
@@ -161,7 +165,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
                     recursiveJobs += folders.length;
                     for (const folder of folders) {
                         promises.push(
-                            jobsService.applyMetadataRecursive(
+                            applyMetadataRecursive(
                                 accountId,
                                 folder.path,
                                 selectedCategory,
@@ -257,7 +261,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
         const loadCover = async () => {
             try {
                 setCoverLoading(true);
-                const url = driveService.getDownloadContentUrl(
+                const url = getDownloadContentUrl(
                     String(coverAccountId),
                     String(coverItemId),
                     { autoResolveAccount: true },
@@ -276,7 +280,7 @@ const BatchMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToa
         return () => {
             cancelled = true;
         };
-    }, [isOpen, showCoverPanel, coverAccountId, coverItemId]);
+    }, [coverAccountId, coverItemId, getDownloadContentUrl, isOpen, showCoverPanel]);
 
     const renderAttributeInput = (attr, className = '', style = null) => {
         const isReadOnlyComputed = ['comics_core', 'books_core'].includes(currentCategory?.plugin_key)

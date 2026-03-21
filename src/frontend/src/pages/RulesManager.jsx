@@ -3,13 +3,13 @@ import { Fragment, useEffect, useMemo, useRef, useState, useCallback } from 'rea
 import { PlayCircle, Trash2, Plus, Eye, Loader2, Folder, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { metadataService } from '../services/metadata';
-import { accountsService } from '../services/accounts';
-import { getFiles, getFolderFiles, createFolder, getPath } from '../services/drive';
-import { jobsService } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
 import { useWorkspacePage } from '../contexts/WorkspaceContext';
 import { getSelectOptions, parseTagsInput, tagsToInputValue } from '../utils/metadata';
+import { useAccountsActions } from '../features/accounts/hooks/useAccountsData';
+import { useDriveActions } from '../features/drive/hooks/useDriveData';
+import { useJobsActions } from '../features/jobs/hooks/useJobsData';
+import { useMetadataActions } from '../features/metadata/hooks/useMetadataData';
 
 const DEFAULT_FORM = {
     name: '',
@@ -105,6 +105,16 @@ export default function RulesManager() {
     const navigate = useNavigate();
     const location = useLocation();
     const { showToast } = useToast();
+    const { getAccounts } = useAccountsActions();
+    const { createFolder, getFiles, getFolderFiles, getPath } = useDriveActions();
+    const { createApplyRuleJob } = useJobsActions();
+    const {
+        listRules,
+        listCategories,
+        createRule,
+        previewRule,
+        deleteRule,
+    } = useMetadataActions();
     const [rules, setRules] = useState([]);
     const [categories, setCategories] = useState([]);
     const [accounts, setAccounts] = useState([]);
@@ -200,9 +210,9 @@ export default function RulesManager() {
         setLoading(true);
         try {
             const [rulesData, categoriesData, accountsData] = await Promise.all([
-                metadataService.listRules(),
-                metadataService.listCategories(),
-                accountsService.getAccounts(),
+                listRules(),
+                listCategories(),
+                getAccounts(),
             ]);
             setRules(rulesData);
             setCategories(categoriesData);
@@ -212,7 +222,7 @@ export default function RulesManager() {
         } finally {
             setLoading(false);
         }
-    }, [showToast, t]);
+    }, [getAccounts, listCategories, listRules, showToast, t]);
 
     const loadDestinationFolders = useCallback(async (accountId, folderId) => {
         if (!accountId) {
@@ -229,7 +239,7 @@ export default function RulesManager() {
         } finally {
             setDestinationFolderLoading(false);
         }
-    }, [showToast, t]);
+    }, [getFiles, getFolderFiles, showToast, t]);
 
     useEffect(() => {
         loadData();
@@ -294,7 +304,7 @@ export default function RulesManager() {
         return () => {
             cancelled = true;
         };
-    }, [form.apply_move, form.destination_account_id, form.destination_folder_id, folderLabels, t]);
+    }, [form.apply_move, form.destination_account_id, form.destination_folder_id, folderLabels, getPath, t]);
 
     useEffect(() => {
         const moveRules = rules.filter((rule) => rule.apply_move && rule.destination_account_id && rule.destination_folder_id);
@@ -340,7 +350,7 @@ export default function RulesManager() {
         return () => {
             cancelled = true;
         };
-    }, [rules, folderLabels, t]);
+    }, [folderLabels, getPath, rules, t]);
 
     useEffect(() => {
         if (form.apply_move) return;
@@ -362,7 +372,7 @@ export default function RulesManager() {
 
         setSaving(true);
         try {
-            await metadataService.createRule({
+            await createRule({
                 name: form.name,
                 description: form.description || null,
                 account_id: form.account_id || null,
@@ -402,7 +412,7 @@ export default function RulesManager() {
         setPreviewing(true);
         setPreviewLabel(form.name || t('rules.preview'));
         try {
-            const data = await metadataService.previewRule({
+            const data = await previewRule({
                 account_id: form.account_id || null,
                 path_prefix: null,
                 path_contains: null,
@@ -441,7 +451,7 @@ export default function RulesManager() {
         setPreviewing(true);
         setPreviewLabel(rule.name || t('rules.preview'));
         try {
-            const data = await metadataService.previewRule({
+            const data = await previewRule({
                 account_id: rule.account_id || null,
                 path_prefix: rule.path_prefix || null,
                 path_contains: rule.path_contains || null,
@@ -478,7 +488,7 @@ export default function RulesManager() {
 
     const handleApplyRule = async (ruleId) => {
         try {
-            await jobsService.createApplyRuleJob(ruleId);
+            await createApplyRuleJob(ruleId);
             showToast(t('rules.applyJobCreated'), 'success');
         } catch {
             showToast(t('rules.failedApplyJob'), 'error');
@@ -487,7 +497,7 @@ export default function RulesManager() {
 
     const handleDeleteRule = async (ruleId) => {
         try {
-            await metadataService.deleteRule(ruleId);
+            await deleteRule(ruleId);
             showToast(t('rules.deleted'), 'success');
             loadData();
         } catch {

@@ -1,8 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { Archive, Check, ChevronRight, Folder, FolderInput } from 'lucide-react';
+import { Archive, Check, ChevronRight, Folder } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { accountsService } from '../services/accounts';
-import { driveService } from '../services/drive';
+import { useAccountsActions } from '../features/accounts/hooks/useAccountsData';
+import { useDriveActions } from '../features/drive/hooks/useDriveData';
 import Modal from './Modal';
 
 export default function ExtractZipModal({
@@ -14,6 +14,8 @@ export default function ExtractZipModal({
     submitting = false,
 }) {
     const { t } = useTranslation();
+    const { getAccounts } = useAccountsActions();
+    const { getPath, listFolderEntries } = useDriveActions();
     const [accounts, setAccounts] = useState([]);
     const [selectedAccount, setSelectedAccount] = useState('');
     const [currentFolderId, setCurrentFolderId] = useState('root');
@@ -47,7 +49,7 @@ export default function ExtractZipModal({
         }
 
         try {
-            const pathData = await driveService.getPath(accountId, safeFolderId);
+            const pathData = await getPath(accountId, safeFolderId);
             const breadcrumb = Array.isArray(pathData?.breadcrumb) ? pathData.breadcrumb : [];
             const parts = breadcrumb
                 .filter((part) => String(part?.name || '').toLowerCase() !== 'root')
@@ -62,7 +64,7 @@ export default function ExtractZipModal({
             const fallbackName = fallbackSegments.at(-1);
             setCurrentPath(fallbackName ? [{ id: safeFolderId, name: fallbackName }] : []);
         }
-    }, [t]);
+    }, [getPath, t]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -72,7 +74,7 @@ export default function ExtractZipModal({
             setDeleteSourceAfterExtract(false);
             setLoadingAccounts(true);
             try {
-                const data = await accountsService.getAccounts();
+                const data = await getAccounts();
                 if (!active) return;
                 setAccounts(data);
                 const initialAccount = data.some((account) => account.id === initialTarget?.account_id)
@@ -96,7 +98,7 @@ export default function ExtractZipModal({
         return () => {
             active = false;
         };
-    }, [initialTarget, isOpen, restoreFolderState]);
+    }, [getAccounts, initialTarget, isOpen, restoreFolderState]);
 
     useEffect(() => {
         if (!isOpen || !selectedAccount) return;
@@ -105,9 +107,7 @@ export default function ExtractZipModal({
         const loadFolders = async () => {
             setLoadingFolders(true);
             try {
-                const data = currentFolderId === 'root'
-                    ? await driveService.getFiles(selectedAccount)
-                    : await driveService.getFolderFiles(selectedAccount, currentFolderId);
+                const data = await listFolderEntries(selectedAccount, currentFolderId);
                 if (!active) return;
                 setFolders((data.items || []).filter((item) => item.item_type === 'folder'));
             } finally {
@@ -122,7 +122,7 @@ export default function ExtractZipModal({
         return () => {
             active = false;
         };
-    }, [currentFolderId, isOpen, selectedAccount]);
+    }, [currentFolderId, isOpen, listFolderEntries, selectedAccount]);
 
     const canConfirm = Boolean(selectedAccount && currentFolderId && selectedCount > 0 && !submitting);
 

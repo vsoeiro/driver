@@ -1,13 +1,12 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { AlertCircle, ArrowDown, ArrowUp, CheckSquare, ChevronLeft, ChevronRight, Copy, Loader2, RefreshCcw, Square, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { itemsService } from '../services/items';
-import { driveService } from '../services/drive';
-import { jobsService } from '../services/jobs';
 import { useToast } from '../contexts/ToastContext';
 import Modal from './Modal';
 import ConfirmDialog from './ConfirmDialog';
+import { useDriveActions } from '../features/drive/hooks/useDriveData';
+import { useJobsActions } from '../features/jobs/hooks/useJobsData';
+import { useSimilarFilesReportQuery } from '../features/items/hooks/useItemsData';
 
 function formatSize(bytes) {
     const value = Number(bytes) || 0;
@@ -21,6 +20,8 @@ function formatSize(bytes) {
 export default function SimilarFilesReportTab({ accounts = [] }) {
     const { t } = useTranslation();
     const { showToast } = useToast();
+    const { batchDeleteItems } = useDriveActions();
+    const { createRemoveDuplicatesJob } = useJobsActions();
     const [page, setPage] = useState(1);
     const [scope, setScope] = useState('all');
     const [accountId, setAccountId] = useState('');
@@ -44,9 +45,7 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
         isFetching,
         isError,
         refetch,
-    } = useQuery({
-        queryKey: ['items-similar-report', page, scope, accountId, sortBy, sortOrder, extensions.join('|'), hideLowPriority],
-        queryFn: () => itemsService.getSimilarReport({
+    } = useSimilarFilesReportQuery({
             page,
             page_size: 20,
             scope,
@@ -55,7 +54,7 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
             sort_order: sortOrder,
             extensions,
             hide_low_priority: hideLowPriority,
-        }),
+        }, {
         staleTime: 15000,
     });
 
@@ -159,7 +158,7 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
         try {
             await Promise.all(
                 Array.from(byAccount.entries()).map(([accId, itemIds]) =>
-                    driveService.batchDeleteItems(accId, itemIds)
+                    batchDeleteItems(accId, itemIds)
                 )
             );
             showToast(t('similarFiles.deleted', { count: selectedItems.length }), 'success');
@@ -190,7 +189,7 @@ export default function SimilarFilesReportTab({ accounts = [] }) {
 
         try {
             setCreatingRemoveDuplicatesJob(true);
-            const job = await jobsService.createRemoveDuplicatesJob({
+            const job = await createRemoveDuplicatesJob({
                 preferred_account_id: preferredKeepAccountId,
                 account_id: accountId || null,
                 scope,

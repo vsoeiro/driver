@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { metadataService } from '../services/metadata';
-import { jobsService } from '../services/jobs';
 import { File, Loader2 } from 'lucide-react';
+import { useMetadataActions } from '../features/metadata/hooks/useMetadataData';
+import { useJobsActions } from '../features/jobs/hooks/useJobsData';
 import Modal from './Modal';
 
 const RemoveMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showToast }) => {
     const { t } = useTranslation();
+    const { batchDeleteMetadata } = useMetadataActions();
+    const { removeMetadataRecursive } = useJobsActions();
     const [removing, setRemoving] = useState(false);
 
     const folders = selectedItems.filter(i => i.item_type === 'folder');
@@ -27,13 +29,13 @@ const RemoveMetadataModal = ({ isOpen, onClose, selectedItems, onSuccess, showTo
                     byAccount[item.account_id].push(item.item_id);
                 }
                 for (const [accountId, itemIds] of Object.entries(byAccount)) {
-                    promises.push(metadataService.batchDeleteMetadata(accountId, itemIds));
+                    promises.push(batchDeleteMetadata(accountId, itemIds));
                 }
             }
 
             for (const folder of folders) {
                 promises.push(
-                    jobsService.removeMetadataRecursive(folder.account_id, folder.path)
+                    removeMetadataRecursive(folder.account_id, folder.path)
                 );
             }
 

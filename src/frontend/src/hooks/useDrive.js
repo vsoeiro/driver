@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { batchDeleteItems, createFolder, deleteItem } from '../services/drive';
 import { queryKeys } from '../lib/queryKeys';
-import { useDriveBreadcrumbQuery, useDriveListingQuery } from './useAppQueries';
+import { useDriveActions, useDriveBreadcrumbQuery, useDriveListingQuery } from '../features/drive/hooks/useDriveData';
 
 export function useDrive(accountId, folderId, options = {}) {
     const queryClient = useQueryClient();
+    const { batchDeleteItems, createFolder, deleteItem } = useDriveActions();
     const [searchQuery, setSearchQuery] = useState('');
     const [currentCursor, setCurrentCursor] = useState(null);
     const [cursorHistory, setCursorHistory] = useState([]);

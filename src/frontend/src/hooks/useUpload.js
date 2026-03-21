@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { jobsService } from '../services/jobs';
+import { useJobsActions } from '../features/jobs/hooks/useJobsData';
 
 export function useUpload(accountId, folderId, onSuccess, onError) {
+    const { uploadFileBackground } = useJobsActions();
     const [uploading, setUploading] = useState(false);
     const [progress, setProgress] = useState(0);
 
@@ -21,7 +22,7 @@ export function useUpload(accountId, folderId, onSuccess, onError) {
             for (let index = 0; index < files.length; index += 1) {
                 const file = files[index];
                 try {
-                    await jobsService.uploadFileBackground(
+                    await uploadFileBackground(
                         accountId,
                         folderId || 'root',
                         file,

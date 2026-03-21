@@ -1,10 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bot, ChevronRight, Loader2, Plus, Send, ShieldAlert, Square, Trash2, Wrench, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { aiService } from '../services/ai';
 import { useToast } from '../contexts/ToastContext';
 import { formatDateTime } from '../utils/dateTime';
+import {
+    useAiActions,
+    useAiMessagesQuery,
+    useAiSessionsQuery,
+    useCreateChatSessionMutation,
+    useDeleteChatSessionMutation,
+    useGenerateSessionTitleMutation,
+    usePostChatMessageMutation,
+    useResolveAiConfirmationMutation,
+} from '../features/ai/hooks/useAiData';
 
 const DRAFT_SESSION_ID = '__draft__';
 
@@ -67,8 +75,13 @@ export default function AIAssistantWorkspace({
     onCompactClose = null,
 }) {
     const { t } = useTranslation();
-    const queryClient = useQueryClient();
     const { showToast } = useToast();
+    const {
+        deleteChatSession,
+        invalidateMessages,
+        invalidateSessions,
+        setMessagesData,
+    } = useAiActions();
     const [selectedSessionId, setSelectedSessionId] = useState('');
     const [hasDraftSession, setHasDraftSession] = useState(false);
     const [inputMessage, setInputMessage] = useState('');
@@ -82,21 +95,15 @@ export default function AIAssistantWorkspace({
     const messagesContainerRef = useRef(null);
     const messageEndRef = useRef(null);
 
-    const sessionsQuery = useQuery({
-        queryKey: ['ai-sessions'],
-        queryFn: () => aiService.listChatSessions(50, 0),
+    const sessionsQuery = useAiSessionsQuery({
         refetchInterval: (query) => {
             const data = query.state.data || [];
             return data.some((session) => session.title_pending) ? 3000 : false;
         },
-        retry: false,
     });
 
-    const messagesQuery = useQuery({
-        queryKey: ['ai-messages', selectedSessionId],
-        queryFn: () => aiService.listSessionMessages(selectedSessionId, 300),
+    const messagesQuery = useAiMessagesQuery(selectedSessionId, {
         enabled: !!selectedSessionId && selectedSessionId !== DRAFT_SESSION_ID,
-        retry: false,
     });
 
     useEffect(() => {
@@ -135,18 +142,13 @@ export default function AIAssistantWorkspace({
         ];
     }, [sessionsQuery.data, hasDraftSession, t]);
 
-    const createSessionMutation = useMutation({
-        mutationFn: () => aiService.createChatSession(null),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['ai-sessions'] });
-        },
+    const createSessionMutation = useCreateChatSessionMutation({
         onError: (error) => {
             showToast(error?.response?.data?.detail || t('aiAssistant.failedCreateSession'), 'error');
         },
     });
 
-    const generateTitleMutation = useMutation({
-        mutationFn: (sessionId) => aiService.generateSessionTitle(sessionId),
+    const generateTitleMutation = useGenerateSessionTitleMutation({
         onMutate: (sessionId) => {
             setGeneratingTitleSessionIds((prev) => {
                 const next = new Set(prev);
@@ -160,12 +162,10 @@ export default function AIAssistantWorkspace({
                 next.delete(sessionId);
                 return next;
             });
-            queryClient.invalidateQueries({ queryKey: ['ai-sessions'] });
         },
     });
 
-    const postMessageMutation = useMutation({
-        mutationFn: (payload) => aiService.postChatMessage(payload.sessionId, payload.message, { signal: payload.signal }),
+    const postMessageMutation = usePostChatMessageMutation({
         onMutate: (variables) => {
             const nowIso = new Date().toISOString();
             const baseId = Date.now();
@@ -199,7 +199,7 @@ export default function AIAssistantWorkspace({
                 prev.filter((msg) => msg.id !== context?.tempUserId && msg.id !== context?.tempAssistantId)
             );
             if (response.assistant_message) {
-                queryClient.setQueryData(['ai-messages', variables.sessionId], (prev) => {
+                setMessagesData(variables.sessionId, (prev) => {
                     const current = Array.isArray(prev) ? [...prev] : [];
                     if (!current.some((item) => item.id === response.assistant_message.id)) {
                         current.push(response.assistant_message);
@@ -207,8 +207,8 @@ export default function AIAssistantWorkspace({
                     return current;
                 });
             }
-            queryClient.invalidateQueries({ queryKey: ['ai-messages', variables.sessionId] });
-            queryClient.invalidateQueries({ queryKey: ['ai-sessions'] });
+            void invalidateMessages(variables.sessionId);
+            void invalidateSessions();
             if (!generatingTitleSessionIds.has(variables.sessionId)) {
                 generateTitleMutation.mutate(variables.sessionId);
             }
@@ -228,23 +228,17 @@ export default function AIAssistantWorkspace({
         },
     });
 
-    const confirmationMutation = useMutation({
-        mutationFn: ({ approve }) => aiService.resolveConfirmation(selectedSessionId, pendingConfirmation.id, approve),
+    const confirmationMutation = useResolveAiConfirmationMutation({
         onSuccess: (response) => {
             setPendingConfirmation(response.pending_confirmation?.status === 'pending' ? response.pending_confirmation : null);
-            queryClient.invalidateQueries({ queryKey: ['ai-messages', selectedSessionId] });
-            queryClient.invalidateQueries({ queryKey: ['ai-sessions'] });
         },
         onError: (error) => {
             showToast(error?.response?.data?.detail || t('aiAssistant.failedConfirm'), 'error');
         },
     });
 
-    const deleteSessionMutation = useMutation({
-        mutationFn: (sessionId) => aiService.deleteChatSession(sessionId),
+    const deleteSessionMutation = useDeleteChatSessionMutation({
         onSuccess: (_, sessionId) => {
-            queryClient.invalidateQueries({ queryKey: ['ai-sessions'] });
-            queryClient.invalidateQueries({ queryKey: ['ai-messages', sessionId] });
             if (selectedSessionId === sessionId) {
                 setSelectedSessionId('');
                 setPendingConfirmation(null);
@@ -334,8 +328,8 @@ export default function AIAssistantWorkspace({
             } catch {
                 if (!createdSessionId) return;
                 try {
-                    await aiService.deleteChatSession(createdSessionId);
-                    queryClient.invalidateQueries({ queryKey: ['ai-sessions'] });
+                    await deleteChatSession(createdSessionId);
+                    await invalidateSessions();
                     setSelectedSessionId(DRAFT_SESSION_ID);
                     setHasDraftSession(true);
                 } catch {
@@ -556,7 +550,11 @@ export default function AIAssistantWorkspace({
                                     <button
                                         type="button"
                                         className="btn-minimal-primary text-xs"
-                                        onClick={() => confirmationMutation.mutate({ approve: true })}
+                                        onClick={() => confirmationMutation.mutate({
+                                            sessionId: selectedSessionId,
+                                            confirmationId: pendingConfirmation.id,
+                                            approve: true,
+                                        })}
                                         disabled={confirmationMutation.isPending}
                                     >
                                         {t('aiAssistant.approve')}
@@ -564,7 +562,11 @@ export default function AIAssistantWorkspace({
                                     <button
                                         type="button"
                                         className="btn-minimal text-xs"
-                                        onClick={() => confirmationMutation.mutate({ approve: false })}
+                                        onClick={() => confirmationMutation.mutate({
+                                            sessionId: selectedSessionId,
+                                            confirmationId: pendingConfirmation.id,
+                                            approve: false,
+                                        })}
                                         disabled={confirmationMutation.isPending}
                                     >
                                         {t('aiAssistant.reject')}
