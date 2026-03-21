@@ -1,4 +1,5 @@
 import json
+from uuid import uuid4
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -86,8 +87,37 @@ async def test_list_active_metadata_library_configs_builds_public_payload():
 
 
 @pytest.mark.asyncio
+async def test_list_active_metadata_library_configs_exposes_reindex_for_books():
+    service = library_settings.MetadataLibrarySettingsService(SimpleNamespace())
+    spec = library_settings.METADATA_LIBRARY_SETTINGS_REGISTRY[BOOKS_LIBRARY_KEY]
+    rows = {
+        library_settings.setting_db_key(BOOKS_LIBRARY_KEY, field.key): _setting(
+            library_settings.setting_db_key(BOOKS_LIBRARY_KEY, field.key),
+            library_settings.MetadataLibrarySettingsService._serialize_value(field, field.default),
+        )
+        for field in spec.fields
+    }
+    service._active_metadata_libraries = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                key=BOOKS_LIBRARY_KEY,
+                name="",
+                description=None,
+            )
+        ]
+    )
+    service._ensure_library_defaults = AsyncMock(return_value=rows)
+
+    configs = await service.list_active_metadata_library_configs()
+
+    assert configs[0]["plugin_key"] == BOOKS_LIBRARY_KEY
+    assert configs[0]["capabilities"]["actions"] == ["reindex_covers"]
+
+
+@pytest.mark.asyncio
 async def test_update_metadata_library_configs_validates_payload_and_persists_changes():
-    session = SimpleNamespace(commit=AsyncMock())
+    account_id = uuid4()
+    session = SimpleNamespace(commit=AsyncMock(), get=AsyncMock(return_value=SimpleNamespace(id=account_id, provider="microsoft")))
     service = library_settings.MetadataLibrarySettingsService(session)
     spec = library_settings.METADATA_LIBRARY_SETTINGS_REGISTRY[COMICS_LIBRARY_KEY]
     rows = {
@@ -99,6 +129,17 @@ async def test_update_metadata_library_configs_validates_payload_and_persists_ch
     }
     service._active_metadata_libraries = AsyncMock(return_value=[SimpleNamespace(key=COMICS_LIBRARY_KEY)])
     service._ensure_library_defaults = AsyncMock(return_value=rows)
+    client = SimpleNamespace(
+        list_root_items=AsyncMock(
+            return_value=SimpleNamespace(items=[], next_link=None)
+        ),
+        list_folder_items=AsyncMock(
+            return_value=SimpleNamespace(items=[], next_link=None)
+        ),
+        create_folder=AsyncMock(return_value=SimpleNamespace(id="covers-123")),
+    )
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(library_settings, "build_drive_client", lambda account, token_manager: client)
 
     with pytest.raises(ValueError, match="Unknown metadata library settings key"):
         await service.update_metadata_library_configs({"unknown": {}})
@@ -116,10 +157,11 @@ async def test_update_metadata_library_configs_validates_payload_and_persists_ch
             COMICS_LIBRARY_KEY: {
                 "cover_max_width": 1024,
                 "cover_storage_target": {
-                    "account_id": " acc-1 ",
+                    "account_id": f" {account_id} ",
                     "folder_id": "",
                     "folder_path": "",
                 },
+                "cover_storage_folder_name": "My Covers",
                 "cover_jpeg_quality_steps": "80,70",
             }
         }
@@ -127,12 +169,15 @@ async def test_update_metadata_library_configs_validates_payload_and_persists_ch
 
     assert rows[library_settings.setting_db_key(COMICS_LIBRARY_KEY, "cover_max_width")].value == "1024"
     assert json.loads(rows[library_settings.setting_db_key(COMICS_LIBRARY_KEY, "cover_storage_target")].value) == {
-        "account_id": "acc-1",
+        "account_id": str(account_id),
         "folder_id": "root",
         "folder_path": "Root",
+        "cover_folder_id": "covers-123",
     }
+    assert rows[library_settings.setting_db_key(COMICS_LIBRARY_KEY, "cover_storage_folder_name")].value == "My Covers"
     assert rows[library_settings.setting_db_key(COMICS_LIBRARY_KEY, "cover_jpeg_quality_steps")].value == "80,70"
     session.commit.assert_awaited_once()
+    monkeypatch.undo()
 
 
 @pytest.mark.asyncio
@@ -162,6 +207,7 @@ async def test_get_cover_runtime_settings_parses_values_and_applies_guards():
     assert runtime.storage_account_id == "acc-1"
     assert runtime.storage_parent_folder_id == "root"
     assert runtime.storage_folder_name == "__driver_comic_covers__"
+    assert runtime.storage_folder_id is None
     assert runtime.max_width == 64
     assert runtime.max_height == 64
     assert runtime.target_bytes == 10_000
@@ -198,6 +244,7 @@ def test_metadata_library_settings_helpers_validate_and_parse_values():
         "account_id": "acc",
         "folder_id": "root",
         "folder_path": "Root",
+        "cover_folder_id": "",
     }
     assert library_settings.MetadataLibrarySettingsService._parse_value(number_field, "bad") == 800
     assert library_settings.MetadataLibrarySettingsService._parse_value(folder_field, "{bad") == folder_field.default

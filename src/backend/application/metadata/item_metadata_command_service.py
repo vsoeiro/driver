@@ -37,12 +37,25 @@ class ItemMetadataCommandService:
 
         await self._sync_item_record(account=account, item_id=metadata.item_id)
 
+        existing_stmt = select(ItemMetadata).where(
+            ItemMetadata.account_id == metadata.account_id,
+            ItemMetadata.item_id == metadata.item_id,
+        )
+        existing = (await self._session.execute(existing_stmt)).scalar_one_or_none()
+
+        normalized_values = normalize_metadata_values(metadata.values)
+        if existing and existing.category_id == metadata.category_id:
+            merged_values = normalize_metadata_values(existing.values)
+            merged_values.update(normalized_values)
+        else:
+            merged_values = normalized_values
+
         await apply_metadata_change(
             self._session,
             account_id=metadata.account_id,
             item_id=metadata.item_id,
             category_id=metadata.category_id,
-            values=normalize_metadata_values(metadata.values),
+            values=merged_values,
         )
         await self._session.commit()
 

@@ -179,8 +179,7 @@ async def _reconcile_active_comic_schema(session: AsyncSession) -> None:
         library.key == COMICS_LIBRARY_KEY and library.is_active for library in libraries
     ):
         try:
-            await service.ensure_active_comics_category()
-            await session.commit()
+            await service.require_active_comics_category()
         except ValueError:
             # Library flagged active but category is missing/inactive; keep request resilient.
             return

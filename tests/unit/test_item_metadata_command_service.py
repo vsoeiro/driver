@@ -95,7 +95,7 @@ async def test_upsert_item_metadata_syncs_missing_item_and_returns_saved_row(mon
 
     session = SimpleNamespace(
         get=AsyncMock(side_effect=[_account(account_id), _category(category_id)]),
-        execute=AsyncMock(side_effect=[_Result(scalar=None), _Result(scalar=current_metadata)]),
+        execute=AsyncMock(side_effect=[_Result(scalar=None), _Result(scalar=None), _Result(scalar=current_metadata)]),
         commit=AsyncMock(),
         add=Mock(),
     )
@@ -143,6 +143,50 @@ async def test_upsert_item_metadata_syncs_missing_item_and_returns_saved_row(mon
     assert added_item.path == "/Series/Issue 001.CBZ"
     assert added_item.extension == "cbz"
     assert added_item.mime_type == "application/x-cbz"
+
+
+@pytest.mark.asyncio
+async def test_upsert_item_metadata_merges_existing_values_for_same_category(monkeypatch):
+    account_id = uuid4()
+    category_id = uuid4()
+    payload = _metadata_payload(account_id, category_id)
+    existing_metadata = SimpleNamespace(
+        category_id=category_id,
+        values={"publisher": "Dupuis", "series": "Old"},
+    )
+    current_metadata = SimpleNamespace(id=uuid4(), item_id="item-1")
+
+    session = SimpleNamespace(
+        get=AsyncMock(side_effect=[_account(account_id), _category(category_id)]),
+        execute=AsyncMock(
+            side_effect=[
+                _Result(scalar=existing_metadata),
+                _Result(scalar=current_metadata),
+            ]
+        ),
+        commit=AsyncMock(),
+        add=Mock(),
+    )
+
+    monkeypatch.setattr(
+        item_commands.ItemMetadataCommandService,
+        "_sync_item_record",
+        AsyncMock(return_value=None),
+    )
+    apply_change_mock = AsyncMock()
+    normalize_mock = Mock(side_effect=lambda values: dict(values or {}))
+    monkeypatch.setattr(item_commands, "apply_metadata_change", apply_change_mock)
+    monkeypatch.setattr(item_commands, "normalize_metadata_values", normalize_mock)
+
+    service = item_commands.ItemMetadataCommandService(session)
+    result = await service.upsert_item_metadata(payload)
+
+    assert result is current_metadata
+    apply_change_mock.assert_awaited_once()
+    assert apply_change_mock.await_args.kwargs["values"] == {
+        "publisher": "Dupuis",
+        "series": "Saga",
+    }
 
 
 @pytest.mark.asyncio
@@ -203,7 +247,7 @@ async def test_upsert_item_metadata_raises_when_saved_row_cannot_be_loaded(monke
 
     session = SimpleNamespace(
         get=AsyncMock(side_effect=[_account(account_id), _category(category_id)]),
-        execute=AsyncMock(return_value=_Result(scalar=None)),
+        execute=AsyncMock(side_effect=[_Result(scalar=None), _Result(scalar=None)]),
         commit=AsyncMock(),
         add=Mock(),
     )

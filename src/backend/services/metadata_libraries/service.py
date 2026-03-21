@@ -62,6 +62,11 @@ class MetadataLibraryService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    @staticmethod
+    def _set_if_changed(instance, field_name: str, value) -> None:
+        if getattr(instance, field_name) != value:
+            setattr(instance, field_name, value)
+
     async def list_libraries(self) -> list[MetadataPlugin]:
         try:
             stmt = select(MetadataPlugin).order_by(MetadataPlugin.key.asc())
@@ -186,6 +191,15 @@ class MetadataLibraryService:
             )
         return await self._ensure_comics_category()
 
+    async def require_active_comics_category(self) -> MetadataCategory:
+        """Return the active comics category without mutating schema/state."""
+        category = await self.get_active_comics_category()
+        if category is None:
+            raise ValueError(
+                "Comics metadata library is not active. Activate comics_core first."
+            )
+        return category
+
     async def get_active_images_category(self) -> MetadataCategory | None:
         stmt = (
             select(MetadataCategory)
@@ -224,8 +238,25 @@ class MetadataLibraryService:
             await self.activate_books_library()
         return await self._ensure_books_category()
 
-    async def comics_attribute_id_map(self) -> dict[str, str]:
-        category = await self.ensure_active_comics_category()
+    async def require_active_books_category(self) -> MetadataCategory:
+        """Return the active books category without mutating schema/state."""
+        category = await self.get_active_books_category()
+        if category is None:
+            raise ValueError(
+                "Books metadata library is not active. Activate books_core first."
+            )
+        return category
+
+    async def comics_attribute_id_map(
+        self,
+        *,
+        ensure_schema: bool = True,
+    ) -> dict[str, str]:
+        category = (
+            await self.ensure_active_comics_category()
+            if ensure_schema
+            else await self.require_active_comics_category()
+        )
         return {
             attr.plugin_field_key: str(attr.id)
             for attr in category.attributes
@@ -240,8 +271,16 @@ class MetadataLibraryService:
             if attr.plugin_field_key
         }
 
-    async def books_attribute_id_map(self) -> dict[str, str]:
-        category = await self.ensure_active_books_category()
+    async def books_attribute_id_map(
+        self,
+        *,
+        ensure_schema: bool = True,
+    ) -> dict[str, str]:
+        category = (
+            await self.ensure_active_books_category()
+            if ensure_schema
+            else await self.require_active_books_category()
+        )
         return {
             attr.plugin_field_key: str(attr.id)
             for attr in category.attributes
@@ -308,11 +347,11 @@ class MetadataLibraryService:
             self.session.add(category)
             await self.session.flush()
 
-        category.is_active = True
-        category.managed_by_plugin = True
-        category.plugin_key = COMICS_LIBRARY_KEY
-        category.is_locked = True
-        category.description = "Comics by Metadata Library."
+        self._set_if_changed(category, "is_active", True)
+        self._set_if_changed(category, "managed_by_plugin", True)
+        self._set_if_changed(category, "plugin_key", COMICS_LIBRARY_KEY)
+        self._set_if_changed(category, "is_locked", True)
+        self._set_if_changed(category, "description", "Comics by Metadata Library.")
 
         attrs_stmt = select(MetadataAttribute).where(
             MetadataAttribute.category_id == category.id
@@ -342,14 +381,14 @@ class MetadataLibraryService:
                 )
                 self.session.add(db_attr)
             else:
-                db_attr.name = spec.name
-                db_attr.data_type = spec.data_type
-                db_attr.options = spec.options
-                db_attr.is_required = spec.is_required
-                db_attr.managed_by_plugin = True
-                db_attr.plugin_key = COMICS_LIBRARY_KEY
-                db_attr.plugin_field_key = field_key
-                db_attr.is_locked = True
+                self._set_if_changed(db_attr, "name", spec.name)
+                self._set_if_changed(db_attr, "data_type", spec.data_type)
+                self._set_if_changed(db_attr, "options", spec.options)
+                self._set_if_changed(db_attr, "is_required", spec.is_required)
+                self._set_if_changed(db_attr, "managed_by_plugin", True)
+                self._set_if_changed(db_attr, "plugin_key", COMICS_LIBRARY_KEY)
+                self._set_if_changed(db_attr, "plugin_field_key", field_key)
+                self._set_if_changed(db_attr, "is_locked", True)
             if field_key in _COMICS_MULTI_VALUE_FIELD_KEYS:
                 tag_attrs.append(db_attr)
 
@@ -544,11 +583,11 @@ class MetadataLibraryService:
             self.session.add(category)
             await self.session.flush()
 
-        category.is_active = True
-        category.managed_by_plugin = True
-        category.plugin_key = BOOKS_LIBRARY_KEY
-        category.is_locked = True
-        category.description = "Books by Metadata Library."
+        self._set_if_changed(category, "is_active", True)
+        self._set_if_changed(category, "managed_by_plugin", True)
+        self._set_if_changed(category, "plugin_key", BOOKS_LIBRARY_KEY)
+        self._set_if_changed(category, "is_locked", True)
+        self._set_if_changed(category, "description", "Books by Metadata Library.")
 
         attrs_stmt = select(MetadataAttribute).where(
             MetadataAttribute.category_id == category.id
@@ -577,14 +616,14 @@ class MetadataLibraryService:
                 )
                 self.session.add(db_attr)
             else:
-                db_attr.name = spec.name
-                db_attr.data_type = spec.data_type
-                db_attr.options = None
-                db_attr.is_required = spec.is_required
-                db_attr.managed_by_plugin = True
-                db_attr.plugin_key = BOOKS_LIBRARY_KEY
-                db_attr.plugin_field_key = field_key
-                db_attr.is_locked = True
+                self._set_if_changed(db_attr, "name", spec.name)
+                self._set_if_changed(db_attr, "data_type", spec.data_type)
+                self._set_if_changed(db_attr, "options", None)
+                self._set_if_changed(db_attr, "is_required", spec.is_required)
+                self._set_if_changed(db_attr, "managed_by_plugin", True)
+                self._set_if_changed(db_attr, "plugin_key", BOOKS_LIBRARY_KEY)
+                self._set_if_changed(db_attr, "plugin_field_key", field_key)
+                self._set_if_changed(db_attr, "is_locked", True)
 
         valid_keys = set(specs.keys())
         for db_attr in category_attrs:

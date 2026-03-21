@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.api.dependencies import DBSession
+from backend.core.exceptions import DriveOrganizerError
 from backend.schemas.admin import (
     ObservabilitySnapshot,
     PluginSettingFieldResponse,
@@ -95,6 +96,8 @@ async def update_runtime_settings(
         await library_service.update_metadata_library_configs(payload.plugin_settings)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except DriveOrganizerError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     await clear_observability_cache()
     plugin_groups = await library_service.list_active_metadata_library_configs()
     return _build_runtime_settings_response(settings, plugin_groups)

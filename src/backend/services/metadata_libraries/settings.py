@@ -5,19 +5,23 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.core.exceptions import DriveOrganizerError
 from backend.core.config import get_settings
 from backend.services.metadata_libraries.implementations.books.schema import (
     BOOKS_LIBRARY_KEY,
 )
-from backend.db.models import AppSetting, MetadataPlugin
+from backend.db.models import AppSetting, LinkedAccount, MetadataPlugin
 from backend.services.metadata_libraries.implementations.comics.schema import (
     COMICS_LIBRARY_KEY,
 )
+from backend.security.token_manager import TokenManager
+from backend.services.providers.factory import build_drive_client
 
 # Keep persisted setting keys stable for backward compatibility.
 METADATA_LIBRARY_PREFIX = "plugin:"
@@ -51,6 +55,7 @@ class CoverRuntimeSettings:
     storage_account_id: str | None
     storage_parent_folder_id: str
     storage_folder_name: str
+    storage_folder_id: str | None
     max_width: int
     max_height: int
     target_bytes: int
@@ -78,6 +83,7 @@ def _comics_library_setting_spec() -> MetadataLibrarySettingSpec:
                     "account_id": cfg.comic_cover_storage_account_id or "",
                     "folder_id": cfg.comic_cover_storage_parent_folder_id,
                     "folder_path": "Root",
+                    "cover_folder_id": "",
                 },
             ),
             MetadataLibrarySettingFieldSpec(
@@ -144,6 +150,7 @@ def _books_library_setting_spec() -> MetadataLibrarySettingSpec:
                     "account_id": cfg.comic_cover_storage_account_id or "",
                     "folder_id": cfg.comic_cover_storage_parent_folder_id,
                     "folder_path": "Root",
+                    "cover_folder_id": "",
                 },
             ),
             MetadataLibrarySettingFieldSpec(
@@ -197,6 +204,7 @@ METADATA_LIBRARY_SETTINGS_REGISTRY: dict[str, MetadataLibrarySettingSpec] = {
     COMICS_LIBRARY_KEY: _comics_library_setting_spec(),
     BOOKS_LIBRARY_KEY: _books_library_setting_spec(),
 }
+_COVER_LIBRARY_KEYS = {COMICS_LIBRARY_KEY, BOOKS_LIBRARY_KEY}
 
 
 def setting_db_key(library_key: str, field_key: str) -> str:
@@ -246,7 +254,7 @@ class MetadataLibrarySettingsService:
                             {field.input_type for field in spec.fields}
                         ),
                         "actions": ["reindex_covers"]
-                        if spec.library_key == COMICS_LIBRARY_KEY
+                        if spec.library_key in {COMICS_LIBRARY_KEY, BOOKS_LIBRARY_KEY}
                         else [],
                     },
                     "fields": fields,
@@ -275,6 +283,8 @@ class MetadataLibrarySettingsService:
                 )
 
             rows = await self._ensure_library_defaults(spec)
+            current_values = self._read_setting_values(spec, rows)
+            updated_values = dict(current_values)
             for field_key, raw_value in values.items():
                 field_spec = next(
                     (field for field in spec.fields if field.key == field_key), None
@@ -284,8 +294,19 @@ class MetadataLibrarySettingsService:
                         f"Unknown setting '{field_key}' for metadata library '{library_key}'."
                     )
                 validated = self._validate_value(field_spec, raw_value)
+                updated_values[field_key] = validated
+            if library_key in _COVER_LIBRARY_KEYS:
+                updated_values = await self._materialize_cover_storage_target(
+                    library_key,
+                    current_values=current_values,
+                    updated_values=updated_values,
+                )
+            for field_spec in spec.fields:
+                field_key = field_spec.key
+                if updated_values.get(field_key) == current_values.get(field_key):
+                    continue
                 row = rows[setting_db_key(library_key, field_key)]
-                row.value = self._serialize_value(field_spec, validated)
+                row.value = self._serialize_value(field_spec, updated_values[field_key])
                 changed = True
         if changed:
             await self.session.commit()
@@ -309,6 +330,7 @@ class MetadataLibrarySettingsService:
         target = values["cover_storage_target"] or {}
         account_id = (target.get("account_id") or "").strip() or None
         folder_id = (target.get("folder_id") or "root").strip() or "root"
+        cover_folder_id = (target.get("cover_folder_id") or "").strip() or None
         folder_name = (
             str(values["cover_storage_folder_name"]).strip()
             or "__driver_comic_covers__"
@@ -320,11 +342,39 @@ class MetadataLibrarySettingsService:
             storage_account_id=account_id,
             storage_parent_folder_id=folder_id,
             storage_folder_name=folder_name,
+            storage_folder_id=cover_folder_id,
             max_width=max(64, int(values["cover_max_width"])),
             max_height=max(64, int(values["cover_max_height"])),
             target_bytes=max(10_000, int(values["cover_target_bytes"])),
             quality_steps=quality_steps,
         )
+
+    async def persist_cover_storage_folder_id(
+        self,
+        library_key: str,
+        *,
+        folder_id: str,
+    ) -> None:
+        if library_key not in _COVER_LIBRARY_KEYS:
+            return
+        spec = METADATA_LIBRARY_SETTINGS_REGISTRY[library_key]
+        rows = await self._ensure_library_defaults(spec)
+        values = self._read_setting_values(spec, rows)
+        target = dict(values.get("cover_storage_target") or {})
+        account_id = str(target.get("account_id") or "").strip()
+        normalized_folder_id = str(folder_id or "").strip()
+        if not account_id or not normalized_folder_id:
+            return
+        if str(target.get("cover_folder_id") or "").strip() == normalized_folder_id:
+            return
+        target["cover_folder_id"] = normalized_folder_id
+        field_spec = next(
+            field for field in spec.fields if field.key == "cover_storage_target"
+        )
+        rows[setting_db_key(library_key, "cover_storage_target")].value = (
+            self._serialize_value(field_spec, target)
+        )
+        await self.session.commit()
 
     async def _active_metadata_libraries(self) -> list[MetadataPlugin]:
         try:
@@ -361,6 +411,123 @@ class MetadataLibrarySettingsService:
             await self.session.commit()
         return rows
 
+    @staticmethod
+    def _read_setting_values(
+        spec: MetadataLibrarySettingSpec,
+        rows: dict[str, AppSetting],
+    ) -> dict[str, Any]:
+        values: dict[str, Any] = {}
+        for field in spec.fields:
+            row = rows[setting_db_key(spec.library_key, field.key)]
+            values[field.key] = MetadataLibrarySettingsService._parse_value(
+                field, row.value
+            )
+        return values
+
+    async def _materialize_cover_storage_target(
+        self,
+        library_key: str,
+        *,
+        current_values: dict[str, Any],
+        updated_values: dict[str, Any],
+    ) -> dict[str, Any]:
+        target = dict(updated_values.get("cover_storage_target") or {})
+        account_id = str(target.get("account_id") or "").strip()
+        parent_folder_id = str(target.get("folder_id") or "root").strip() or "root"
+        folder_path = str(target.get("folder_path") or "Root").strip() or "Root"
+        folder_name = (
+            str(updated_values.get("cover_storage_folder_name") or "").strip()
+            or "__driver_comic_covers__"
+        )
+        current_target = dict(current_values.get("cover_storage_target") or {})
+        current_account_id = str(current_target.get("account_id") or "").strip()
+        current_parent_folder_id = (
+            str(current_target.get("folder_id") or "root").strip() or "root"
+        )
+        current_folder_name = (
+            str(current_values.get("cover_storage_folder_name") or "").strip()
+            or "__driver_comic_covers__"
+        )
+        stored_cover_folder_id = str(target.get("cover_folder_id") or "").strip()
+        should_reuse_stored_id = (
+            stored_cover_folder_id
+            and current_account_id == account_id
+            and current_parent_folder_id == parent_folder_id
+            and current_folder_name == folder_name
+        )
+
+        if not account_id:
+            target["account_id"] = ""
+            target["folder_id"] = parent_folder_id
+            target["folder_path"] = folder_path
+            target["cover_folder_id"] = ""
+            updated_values["cover_storage_target"] = target
+            return updated_values
+
+        try:
+            account_uuid = UUID(account_id)
+        except ValueError as exc:
+            raise ValueError(f"Invalid linked account id for {library_key}: {account_id}") from exc
+
+        account = await self.session.get(LinkedAccount, account_uuid)
+        if account is None:
+            raise ValueError(f"Linked account {account_id} not found")
+
+        client = build_drive_client(account, TokenManager(self.session))
+        cover_folder_id = await self._resolve_cover_folder_id(
+            client,
+            account,
+            parent_folder_id=parent_folder_id,
+            cover_folder_name=folder_name,
+            existing_folder_id=stored_cover_folder_id if should_reuse_stored_id else None,
+        )
+        target["account_id"] = account_id
+        target["folder_id"] = parent_folder_id
+        target["folder_path"] = folder_path
+        target["cover_folder_id"] = cover_folder_id
+        updated_values["cover_storage_target"] = target
+        return updated_values
+
+    async def _resolve_cover_folder_id(
+        self,
+        client,
+        account: LinkedAccount,
+        *,
+        parent_folder_id: str,
+        cover_folder_name: str,
+        existing_folder_id: str | None = None,
+    ) -> str:
+        normalized_existing_folder_id = str(existing_folder_id or "").strip()
+        if normalized_existing_folder_id:
+            try:
+                item = await client.get_item_metadata(account, normalized_existing_folder_id)
+            except DriveOrganizerError as exc:
+                if exc.status_code != 404:
+                    raise
+            else:
+                if item.item_type == "folder" and item.name == cover_folder_name:
+                    return item.id
+
+        if parent_folder_id == "root":
+            listing = await client.list_root_items(account)
+        else:
+            listing = await client.list_folder_items(account, parent_folder_id)
+        while True:
+            for item in listing.items:
+                if item.item_type == "folder" and item.name == cover_folder_name:
+                    return item.id
+            if not listing.next_link:
+                break
+            listing = await client.list_items_by_next_link(account, listing.next_link)
+
+        folder = await client.create_folder(
+            account,
+            cover_folder_name,
+            parent_id=parent_folder_id,
+            conflict_behavior="rename",
+        )
+        return folder.id
+
     def _validate_value(
         self, field: MetadataLibrarySettingFieldSpec, value: Any
     ) -> Any:
@@ -377,10 +544,12 @@ class MetadataLibrarySettingsService:
             folder_id = str(value.get("folder_id") or "root").strip() or "root"
             account_id = str(value.get("account_id") or "").strip()
             folder_path = str(value.get("folder_path") or "Root").strip() or "Root"
+            cover_folder_id = str(value.get("cover_folder_id") or "").strip()
             return {
                 "account_id": account_id,
                 "folder_id": folder_id,
                 "folder_path": folder_path,
+                "cover_folder_id": cover_folder_id,
             }
         if field.input_type == "text":
             text = str(value if value is not None else "").strip()
