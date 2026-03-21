@@ -46,6 +46,7 @@ from backend.schemas.jobs import (
     JobMetadataUpdateRequest,
     JobMoveRequest,
     JobReindexComicCoversRequest,
+    JobReindexComicCoversResponse,
     JobRemoveMetadataRecursiveRequest,
     JobRemoveDuplicateFilesRequest,
     JobSyncRequest,
@@ -146,6 +147,44 @@ def _chunk_indexed_items_globally(
     return payloads
 
 
+async def _fetch_mapped_comic_item_groups(
+    db: DBSession,
+) -> dict[UUID, list[str]]:
+    library_service = MetadataLibraryService(db)
+    category = await library_service.require_active_comics_category()
+    stmt = select(ItemMetadata.account_id, ItemMetadata.item_id).where(
+        ItemMetadata.category_id == category.id
+    )
+    rows = await _fetch_rows_with_limit(
+        db,
+        stmt,
+        operation_name="Comic cover reindex",
+    )
+    by_account: dict[UUID, list[str]] = {}
+    for account_id, item_id in rows:
+        by_account.setdefault(account_id, []).append(str(item_id))
+    return by_account
+
+
+async def _fetch_mapped_book_item_groups(
+    db: DBSession,
+) -> dict[UUID, list[str]]:
+    library_service = MetadataLibraryService(db)
+    category = await library_service.require_active_books_category()
+    stmt = select(ItemMetadata.account_id, ItemMetadata.item_id).where(
+        ItemMetadata.category_id == category.id
+    )
+    rows = await _fetch_rows_with_limit(
+        db,
+        stmt,
+        operation_name="Book cover reindex",
+    )
+    by_account: dict[UUID, list[str]] = {}
+    for account_id, item_id in rows:
+        by_account.setdefault(account_id, []).append(str(item_id))
+    return by_account
+
+
 async def _fetch_rows_with_limit(
     db: DBSession,
     stmt,
@@ -173,7 +212,7 @@ async def _filter_unmapped_comic_items(
 
     library_service = MetadataLibraryService(db)
     try:
-        category = await library_service.ensure_active_comics_category()
+        category = await library_service.require_active_comics_category()
     except Exception:
         # If metadata library schema is unavailable, keep current behavior (no pre-filter).
         return by_account
@@ -785,21 +824,60 @@ async def create_analyze_library_image_assets_job(
 
 
 @router.post(
-    "/comics/reindex-covers", response_model=Job, status_code=status.HTTP_201_CREATED
+    "/comics/reindex-covers",
+    response_model=JobReindexComicCoversResponse,
+    status_code=status.HTTP_201_CREATED,
 )
 async def create_reindex_comic_covers_job(
     request: JobReindexComicCoversRequest,
-    job_service: JobServiceDep,
-) -> Job:
-    """Create a background job that re-indexes mapped comic covers using current library settings."""
+    db: DBSession,
+) -> JobReindexComicCoversResponse:
+    """Create chunked background jobs that re-index mapped comic covers."""
     if request.library_key != COMICS_LIBRARY_KEY:
-        raise HTTPException(
-            status_code=404, detail="Unknown metadata library key for cover re-index"
+        if request.library_key != BOOKS_LIBRARY_KEY:
+            raise HTTPException(
+                status_code=404, detail="Unknown metadata library key for cover re-index"
+            )
+    chunk_size = max(1, min(5000, int(request.chunk_size or 250)))
+    if request.library_key == COMICS_LIBRARY_KEY:
+        by_account = await _fetch_mapped_comic_item_groups(db)
+        job_type = "reindex_comic_covers"
+        dedupe_prefix = "comics-reindex"
+    else:
+        by_account = await _fetch_mapped_book_item_groups(db)
+        job_type = "reindex_book_covers"
+        dedupe_prefix = "books-reindex"
+    total_items = sum(len(item_ids) for item_ids in by_account.values())
+    if total_items == 0:
+        return JobReindexComicCoversResponse(
+            total_items=0,
+            total_jobs=0,
+            chunk_size=chunk_size,
+            job_ids=[],
         )
-    return await enqueue_job_command(
-        job_service.session,
-        job_type="reindex_comic_covers",
-        payload=request.model_dump(mode="json"),
+
+    created_job_ids: list[UUID] = []
+    for item_groups in _chunk_indexed_items_globally(by_account, chunk_size=chunk_size):
+        job = await enqueue_job_command(
+            db,
+            job_type=job_type,
+            payload={
+                "library_key": request.library_key,
+                "indexed_item_groups": item_groups,
+                "use_indexed_items": True,
+            },
+            dedupe_key=_build_grouped_chunk_dedupe_key(
+                prefix=dedupe_prefix,
+                item_groups=item_groups,
+            ),
+        )
+        created_job_ids.append(job.id)
+
+    return JobReindexComicCoversResponse(
+        total_items=total_items,
+        total_jobs=len(created_job_ids),
+        chunk_size=chunk_size,
+        job_ids=created_job_ids,
     )
 
 

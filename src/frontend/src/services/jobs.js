@@ -194,9 +194,10 @@ export const createAnalyzeLibraryImageAssetsJob = async (accountIds = null, chun
     return response.data;
 };
 
-export const createReindexComicCoversJob = async (libraryKey = 'comics_core') => {
+export const createReindexComicCoversJob = async (libraryKey = 'comics_core', chunkSize = 250) => {
     const response = await api.post('/jobs/comics/reindex-covers', {
         library_key: libraryKey,
+        chunk_size: chunkSize,
     });
     return response.data;
 };

@@ -19,6 +19,7 @@ class JobType(StrEnum):
     EXTRACT_BOOK_ASSETS = "extract_book_assets"
     EXTRACT_LIBRARY_COMIC_ASSETS = "extract_library_comic_assets"
     REINDEX_COMIC_COVERS = "reindex_comic_covers"
+    REINDEX_BOOK_COVERS = "reindex_book_covers"
     ANALYZE_IMAGE_ASSETS = "analyze_image_assets"
     ANALYZE_LIBRARY_IMAGE_ASSETS = "analyze_library_image_assets"
     REMOVE_DUPLICATE_FILES = "remove_duplicate_files"

@@ -70,6 +70,7 @@ async def _process_indexed_item_groups(
     session: AsyncSession,
     service: ComicMetadataService,
     progress: JobProgressReporter,
+    force_remap: bool = False,
 ) -> dict:
     item_groups = _normalize_indexed_item_groups(payload)
     if not item_groups:
@@ -101,6 +102,7 @@ async def _process_indexed_item_groups(
             job_id=progress.job_id,
             progress_reporter=progress,
             initialize_progress_total=False,
+            force_remap=force_remap,
         )
         stats["total"] += account_stats.get("total", 0)
         stats["mapped"] += account_stats.get("mapped", 0)
@@ -174,10 +176,19 @@ async def reindex_comic_covers_handler(payload: dict, session: AsyncSession) -> 
         raise ValueError("Unsupported metadata library key for cover reindex")
 
     progress = JobProgressReporter.from_payload(session, payload)
-    await progress.set_total(1)
-
     service = ComicMetadataService(session)
-    stats = await service.reindex_mapped_comics(job_id=progress.job_id)
+    indexed_groups = _normalize_indexed_item_groups(payload)
+    if indexed_groups:
+        stats = await _process_indexed_item_groups(
+            payload,
+            session=session,
+            service=service,
+            progress=progress,
+            force_remap=True,
+        )
+    else:
+        await progress.set_total(1)
+        stats = await service.reindex_mapped_comics(job_id=progress.job_id)
     await session.commit()
 
     await progress.update_metrics(

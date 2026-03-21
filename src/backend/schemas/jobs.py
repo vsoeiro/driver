@@ -173,11 +173,21 @@ class JobExtractBookAssetsRequest(BaseModel):
 
 
 class JobReindexComicCoversRequest(BaseModel):
-    """Schema for metadata-library-driven comic cover reindex request."""
+    """Schema for metadata-library-driven cover reindex request."""
 
     library_key: str = Field(default="comics_core", alias="plugin_key")
+    chunk_size: int = 250
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+class JobReindexComicCoversResponse(BaseModel):
+    """Summary of chunked cover reindex jobs created from mapped items."""
+
+    total_items: int
+    total_jobs: int
+    chunk_size: int
+    job_ids: list[UUID]
 
 
 class JobExtractLibraryComicAssetsRequest(BaseModel):

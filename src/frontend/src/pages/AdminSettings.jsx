@@ -336,8 +336,14 @@ export default function AdminSettings() {
         if (action !== 'reindex_covers') return;
         setPluginActionLoading((prev) => ({ ...prev, [`${group.plugin_key}:${action}`]: true }));
         try {
-            const job = await jobsService.createReindexComicCoversJob(group.plugin_key);
-            showToast(t('adminSettings.reindexStarted', { id: job.id }), 'success');
+            const summary = await jobsService.createReindexComicCoversJob(group.plugin_key);
+            showToast(
+                t('adminSettings.reindexStarted', {
+                    count: summary.total_jobs,
+                    items: summary.total_items,
+                }),
+                'success',
+            );
         } catch (error) {
             const message = error?.response?.data?.detail || t('adminSettings.failedReindex');
             showToast(message, 'error');

@@ -87,6 +87,7 @@ describe('jobs service', () => {
         await createAnalyzeImageAssetsJob('acc-1', ['i1'], false, true);
         await createAnalyzeLibraryImageAssetsJob(['acc-1'], 100, true);
         await createReindexComicCoversJob();
+        await createReindexComicCoversJob('books_core', 100);
         await createExtractLibraryComicAssetsJob(['acc-1'], 10);
         await createMapLibraryBooksJob(['acc-1'], 11);
         await createExtractLibraryBookAssetsJob(null, 12);
@@ -100,7 +101,8 @@ describe('jobs service', () => {
             reprocess: true,
         });
         expect(api.post).toHaveBeenCalledWith('/jobs/books/extract-library', { chunk_size: 12 });
-        expect(api.post).toHaveBeenCalledWith('/jobs/comics/reindex-covers', { library_key: 'comics_core' });
+        expect(api.post).toHaveBeenCalledWith('/jobs/comics/reindex-covers', { library_key: 'comics_core', chunk_size: 250 });
+        expect(api.post).toHaveBeenCalledWith('/jobs/comics/reindex-covers', { library_key: 'books_core', chunk_size: 100 });
         expect(api.post).toHaveBeenCalledWith('/jobs/remove-duplicates', { account_id: 'acc-1' });
     });
 });

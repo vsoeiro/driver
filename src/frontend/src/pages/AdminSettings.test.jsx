@@ -142,7 +142,7 @@ describe('AdminSettings page', () => {
             runtimeSettingsState = applyPayloadToRuntimeSettings(payload);
             return clone(runtimeSettingsState);
         });
-        createReindexComicCoversJobMock.mockResolvedValue({ id: 'job-cover-7' });
+        createReindexComicCoversJobMock.mockResolvedValue({ total_jobs: 3, total_items: 640, chunk_size: 250, job_ids: ['job-cover-7'] });
     });
 
     it('loads settings and saves scheduler, worker and AI changes', async () => {
@@ -210,7 +210,7 @@ describe('AdminSettings page', () => {
 
         await user.click(screen.getByRole('button', { name: /re-index covers/i }));
         await waitFor(() => expect(createReindexComicCoversJobMock).toHaveBeenCalledWith('comics_core'));
-        expect(showToastMock).toHaveBeenCalledWith('Cover re-index job started (job-cover-7).', 'success');
+        expect(showToastMock).toHaveBeenCalledWith('Cover re-index started in 3 jobs for 640 items.', 'success');
 
         await user.click(screen.getByRole('button', { name: /^save$/i }));
         await waitFor(() => {

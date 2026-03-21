@@ -403,7 +403,9 @@ async def test_create_analyze_library_image_assets_job_chunks_items(monkeypatch)
 @pytest.mark.asyncio
 async def test_create_reindex_and_library_chunk_routes(monkeypatch):
     account_id = uuid4()
+    book_account_id = uuid4()
     enqueue_mock = AsyncMock(side_effect=[
+        SimpleNamespace(id=uuid4()),
         SimpleNamespace(id=uuid4()),
         SimpleNamespace(id=uuid4()),
         SimpleNamespace(id=uuid4()),
@@ -428,23 +430,42 @@ async def test_create_reindex_and_library_chunk_routes(monkeypatch):
     with pytest.raises(HTTPException) as exc_info:
         await jobs_routes.create_reindex_comic_covers_job(
             JobReindexComicCoversRequest(plugin_key="wrong"),
-            job_service=SimpleNamespace(session=object()),
+            db=object(),
         )
 
     assert exc_info.value.status_code == 404
 
-    reindex_job = await jobs_routes.create_reindex_comic_covers_job(
-        JobReindexComicCoversRequest(plugin_key=jobs_routes.COMICS_LIBRARY_KEY),
-        job_service=SimpleNamespace(session=object()),
+    monkeypatch.setattr(
+        jobs_routes,
+        "_fetch_mapped_comic_item_groups",
+        AsyncMock(return_value={account_id: ["item-1", "item-2", "item-3"]}),
+    )
+    monkeypatch.setattr(
+        jobs_routes,
+        "_fetch_mapped_book_item_groups",
+        AsyncMock(return_value={book_account_id: ["book-1", "book-2"]}),
+    )
+
+    reindex_response = await jobs_routes.create_reindex_comic_covers_job(
+        JobReindexComicCoversRequest(plugin_key=jobs_routes.COMICS_LIBRARY_KEY, chunk_size=2),
+        db=object(),
+    )
+    books_reindex_response = await jobs_routes.create_reindex_comic_covers_job(
+        JobReindexComicCoversRequest(plugin_key=jobs_routes.BOOKS_LIBRARY_KEY, chunk_size=2),
+        db=object(),
     )
     extract_response = await jobs_routes.create_extract_library_comic_assets_job(
         JobExtractLibraryComicAssetsRequest(chunk_size=2),
         db=object(),
     )
 
-    assert reindex_job.id
+    assert reindex_response.total_items == 3
+    assert reindex_response.total_jobs == 2
+    assert books_reindex_response.total_items == 2
+    assert books_reindex_response.total_jobs == 1
     assert extract_response.total_items == 3
     assert extract_response.total_jobs == 2
+    assert enqueue_mock.await_args_list[2].kwargs["job_type"] == "reindex_book_covers"
 
 
 @pytest.mark.asyncio
