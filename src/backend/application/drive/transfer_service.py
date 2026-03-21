@@ -158,6 +158,7 @@ class DriveTransferService:
         uploaded_item_id: str | None = None
         offset = 0
         while offset < file_size:
+            handle.seek(offset)
             chunk = handle.read(DEFAULT_CHUNK_SIZE)
             if not chunk:
                 break
@@ -173,5 +174,40 @@ class DriveTransferService:
             )
             if isinstance(upload_result, dict) and upload_result.get("id"):
                 uploaded_item_id = str(upload_result["id"])
-            offset += len(chunk)
+            next_offset = self._resolve_next_upload_offset(
+                upload_result=upload_result,
+                fallback_offset=end + 1,
+            )
+            if next_offset <= offset and offset < file_size:
+                raise RuntimeError(
+                    f"Upload session did not advance (offset={offset}, next_offset={next_offset})"
+                )
+            offset = min(next_offset, file_size)
         return uploaded_item_id
+
+    @staticmethod
+    def _resolve_next_upload_offset(
+        *,
+        upload_result: object,
+        fallback_offset: int,
+    ) -> int:
+        if not isinstance(upload_result, dict):
+            return fallback_offset
+
+        ranges = upload_result.get("next_expected_ranges")
+        if not isinstance(ranges, list):
+            return fallback_offset
+
+        for raw_range in ranges:
+            candidate = str(raw_range or "").strip()
+            if not candidate:
+                continue
+            start_text = candidate.split("-", 1)[0].strip()
+            try:
+                parsed = int(start_text)
+            except ValueError:
+                continue
+            if parsed >= 0:
+                return parsed
+
+        return fallback_offset

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 MAX_SIMPLE_UPLOAD_SIZE = 4 * 1024 * 1024  # 4MB
-DEFAULT_CHUNK_SIZE = 327680 * 10  # ~3.2MB
+# Keep resumable chunks aligned to 256 KiB blocks so Google Drive can fully accept them.
+DEFAULT_CHUNK_SIZE = 256 * 1024 * 12  # 3 MiB
 MAX_RESUMABLE_UPLOAD_CHUNK_SIZE = 16 * 1024 * 1024  # 16MB guard rail for /upload/chunk
 
 

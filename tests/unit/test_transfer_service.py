@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from backend.application.drive.transfer_service import DriveTransferService
-from backend.common.upload_policy import MAX_SIMPLE_UPLOAD_SIZE
+from backend.common.upload_policy import DEFAULT_CHUNK_SIZE, MAX_SIMPLE_UPLOAD_SIZE
 
 
 @pytest.mark.asyncio
@@ -63,6 +63,43 @@ async def test_upload_local_file_uses_chunked_upload_for_large_files():
         client.upload_small_file.assert_not_awaited()
         client.create_upload_session.assert_awaited_once()
         assert client.upload_chunk.await_count >= 2
+
+
+@pytest.mark.asyncio
+async def test_upload_local_file_respects_provider_next_expected_ranges():
+    with TemporaryDirectory() as tmp:
+        path = Path(tmp) / "large.bin"
+        path.write_bytes(b"x" * (MAX_SIMPLE_UPLOAD_SIZE + 100))
+
+        client = MagicMock()
+        client.upload_small_file = AsyncMock()
+        client.create_upload_session = AsyncMock(return_value={"upload_url": "https://upload.example"})
+        client.upload_chunk = AsyncMock(
+            side_effect=[
+                {"next_expected_ranges": ["1048576-"]},
+                {},
+                {"id": "large-1"},
+            ]
+        )
+        account = SimpleNamespace(id="acc-1")
+
+        service = DriveTransferService()
+        uploaded_id = await service.upload_local_file(
+            client=client,
+            account=account,
+            local_path=str(path),
+            filename="large.bin",
+            folder_id="root",
+        )
+
+        assert uploaded_id == "large-1"
+        first_call = client.upload_chunk.await_args_list[0]
+        second_call = client.upload_chunk.await_args_list[1]
+        third_call = client.upload_chunk.await_args_list[2]
+        assert first_call.args[2] == 0
+        assert first_call.args[3] == DEFAULT_CHUNK_SIZE - 1
+        assert second_call.args[2] == 1048576
+        assert third_call.args[2] == 1048576 + DEFAULT_CHUNK_SIZE
 
 
 @pytest.mark.asyncio
