@@ -71,6 +71,9 @@ async def process_job(ctx, job_id: str) -> None:
         if job is None:
             logger.info("Worker received unknown job id=%s", job_id)
             return
+        if not bool(getattr(job, "_claimed_by_worker", False)):
+            logger.info("Worker skipped already-claimed job id=%s status=%s", job_id, getattr(job, "status", None))
+            return
         job_id_value = getattr(job, "id", job_uuid)
         job_type = getattr(job, "type", "unknown")
         if job.status in {"COMPLETED", "FAILED", "DEAD_LETTER", "CANCELLED"}:

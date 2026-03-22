@@ -283,6 +283,12 @@ class Job(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")
     queue_name: Mapped[str] = mapped_column(String(120), nullable=False, default="driver:jobs")
     dedupe_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    queue_enqueued_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    queue_dispatch_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    queue_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload: Mapped[dict] = mapped_column(JSON, nullable=True)  # Stored as JSON string
     result: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # Stored as JSON string
     retry_count: Mapped[int] = mapped_column(default=0)

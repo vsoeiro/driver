@@ -39,6 +39,10 @@ ACTIVE_DEDUPE_STATUSES = {
     JobStatus.RUNNING.value,
     JobStatus.RETRY_SCHEDULED.value,
 }
+QUEUE_DISPATCHABLE_STATUSES = {
+    JobStatus.PENDING.value,
+    JobStatus.RETRY_SCHEDULED.value,
+}
 
 
 class JobCancelledError(Exception):
@@ -218,6 +222,63 @@ class JobService:
         job.metrics = self._coerce_json_dict(job.metrics, default_empty=False)
         return job
 
+    async def _persist_job_dispatch_state(self, job: Job) -> None:
+        self.session.add(job)
+        await self.session.commit()
+        await self.session.refresh(job)
+
+    async def dispatch_job(self, job: Job, *, defer_seconds: int = 0) -> Job:
+        """Enqueue a persisted job and track dispatch outcome in the database."""
+        if job.status not in QUEUE_DISPATCHABLE_STATUSES:
+            return self._normalize_job_json_fields(job)
+
+        queue_name = self._resolve_job_queue_name(str(job.type), getattr(job, "queue_name", None))
+        queue = self.queue or get_job_queue()
+        job.queue_name = queue_name
+        job.queue_dispatch_attempts = int(getattr(job, "queue_dispatch_attempts", 0) or 0) + 1
+
+        try:
+            await queue.enqueue_job(
+                str(job.id),
+                queue_name=queue_name,
+                defer_seconds=max(0, int(defer_seconds)),
+            )
+        except Exception as exc:
+            logger.error("Failed to enqueue job %s: %s", job.id, exc, exc_info=True)
+            job.queue_enqueued_at = None
+            job.queue_last_error = str(exc)
+            await self._persist_job_dispatch_state(job)
+            return self._normalize_job_json_fields(job)
+
+        job.queue_enqueued_at = datetime.now(UTC)
+        job.queue_last_error = None
+        await self._persist_job_dispatch_state(job)
+        return self._normalize_job_json_fields(job)
+
+    async def reconcile_pending_dispatches(self, *, limit: int = 100) -> int:
+        """Best-effort re-enqueue for persisted jobs still awaiting Redis dispatch."""
+        now = datetime.now(UTC)
+        stmt = (
+            select(Job)
+            .where(
+                Job.status.in_(tuple(QUEUE_DISPATCHABLE_STATUSES)),
+                Job.queue_enqueued_at.is_(None),
+            )
+            .order_by(Job.created_at.asc())
+            .limit(max(1, limit))
+        )
+        result = await self.session.execute(stmt)
+        jobs = result.scalars().all()
+        reconciled = 0
+        for job in jobs:
+            delay_seconds = 0
+            if job.status == JobStatus.RETRY_SCHEDULED.value and job.next_retry_at is not None:
+                delay_seconds = max(0, int((job.next_retry_at - now).total_seconds()))
+            dispatched = await self.dispatch_job(job, defer_seconds=delay_seconds)
+            if dispatched.queue_enqueued_at is not None:
+                reconciled += 1
+        return reconciled
+
     async def _build_avg_duration_by_type(self) -> tuple[dict[str, float], float]:
         stmt = (
             select(Job.type, Job.started_at, Job.completed_at)
@@ -364,6 +425,9 @@ class JobService:
             status=JobStatus.PENDING.value,
             queue_name=queue_name,
             dedupe_key=dedupe_key,
+            queue_enqueued_at=None,
+            queue_dispatch_attempts=0,
+            queue_last_error=None,
             max_retries=max_retries,
             reprocessed_from_job_id=reprocessed_from_job_id,
             progress_current=0,
@@ -393,13 +457,7 @@ class JobService:
             raise
 
         await self.session.refresh(job)
-        queue = self.queue or get_job_queue()
-        try:
-            await queue.enqueue_job(str(job.id), queue_name=job.queue_name)
-        except Exception as exc:
-            logger.error("Failed to enqueue job %s: %s", job.id, exc, exc_info=True)
-            await self.fail_job(job.id, f"Failed to enqueue job: {exc}")
-            raise
+        job = await self.dispatch_job(job)
         log_event(
             logger,
             "job_created",
@@ -408,6 +466,7 @@ class JobService:
             queue_name=job.queue_name,
             max_retries=max_retries,
             dedupe_key=dedupe_key,
+            queue_enqueued=bool(job.queue_enqueued_at),
         )
         return job
 
@@ -418,8 +477,10 @@ class JobService:
         if not job:
             return None
         if job.status in FINALIZED_STATUSES:
+            setattr(job, "_claimed_by_worker", False)
             return self._normalize_job_json_fields(job)
         if job.status == JobStatus.RUNNING.value:
+            setattr(job, "_claimed_by_worker", False)
             return self._normalize_job_json_fields(job)
         if not getattr(job, "queue_name", None):
             job.queue_name = self._resolve_job_queue_name(str(job.type), None)
@@ -428,10 +489,12 @@ class JobService:
         job.started_at = datetime.now(UTC)
         job.last_error = None
         job.next_retry_at = None
+        job.queue_last_error = None
         self.session.add(job)
         await self._create_attempt(job.id, triggered_by="worker")
         await self.session.commit()
         await self.session.refresh(job)
+        setattr(job, "_claimed_by_worker", True)
         log_event(logger, "job_started", job_id=str(job.id), job_type=job.type, retry_count=job.retry_count)
         return self._normalize_job_json_fields(job)
 
@@ -607,18 +670,9 @@ class JobService:
         self.session.add(job)
         await self.session.commit()
         if job.status == JobStatus.RETRY_SCHEDULED.value:
-            queue = self.queue or get_job_queue()
             delay = max(0, int((job.next_retry_at - now).total_seconds())) if job.next_retry_at else 0
-            queue_name = self._resolve_job_queue_name(str(job.type), getattr(job, "queue_name", None))
-            try:
-                await queue.enqueue_job(str(job.id), queue_name=queue_name, defer_seconds=delay)
-            except Exception as exc:
-                logger.error(
-                    "Failed to enqueue retry for job %s: %s",
-                    job.id,
-                    exc,
-                    exc_info=True,
-                )
+            job.queue_enqueued_at = None
+            job = await self.dispatch_job(job, defer_seconds=delay)
         return job
 
     async def update_job_progress(

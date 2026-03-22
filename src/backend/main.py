@@ -19,6 +19,7 @@ from backend.core.exceptions import DriveOrganizerError
 from backend.db.session import async_session_maker
 from backend.services.dropbox.drive.client import close_dropbox_drive_http_client
 from backend.services.google.drive.client import close_google_drive_http_client
+from backend.services.job_dispatch_reconciler import JobDispatchReconciler
 from backend.services.microsoft.onedrive.client import close_graph_http_client
 from backend.services.job_queue import close_job_queue
 from backend.services.sync_scheduler import DailySyncScheduler
@@ -51,6 +52,8 @@ async def lifespan(app: FastAPI):
     
     scheduler: DailySyncScheduler | None = None
     scheduler_task: asyncio.Task | None = None
+    dispatch_reconciler: JobDispatchReconciler | None = None
+    dispatch_reconciler_task: asyncio.Task | None = None
     if settings.enable_daily_sync_scheduler and settings.run_scheduler_in_api:
         scheduler = DailySyncScheduler(async_session_maker)
         scheduler_task = asyncio.create_task(scheduler.start())
@@ -61,6 +64,19 @@ async def lifespan(app: FastAPI):
             settings.enable_daily_sync_scheduler,
             settings.run_scheduler_in_api,
         )
+
+    if settings.run_job_dispatch_reconciler_in_api:
+        dispatch_reconciler = JobDispatchReconciler(
+            async_session_maker,
+            interval_seconds=settings.job_dispatch_reconcile_interval_seconds,
+        )
+        dispatch_reconciler_task = asyncio.create_task(dispatch_reconciler.start())
+        logger.info(
+            "Job dispatch reconciler started in API process interval=%ss.",
+            settings.job_dispatch_reconcile_interval_seconds,
+        )
+    else:
+        logger.info("Job dispatch reconciler not started in API process.")
     
     logger.info("Starting Drive Organizer API on %s:%s", settings.host, settings.port)
     yield
@@ -70,6 +86,13 @@ async def lifespan(app: FastAPI):
         scheduler.stop()
         try:
             await scheduler_task
+        except asyncio.CancelledError:
+            pass
+    if dispatch_reconciler is not None and dispatch_reconciler_task is not None:
+        logger.info("Stopping job dispatch reconciler...")
+        dispatch_reconciler.stop()
+        try:
+            await dispatch_reconciler_task
         except asyncio.CancelledError:
             pass
 

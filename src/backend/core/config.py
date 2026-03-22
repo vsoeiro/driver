@@ -125,6 +125,14 @@ class Settings(BaseSettings):
     job_queue_names: dict[str, str] = Field(default_factory=dict, alias="JOB_QUEUE_NAMES")
     worker_concurrency: int = Field(default=8, alias="WORKER_CONCURRENCY")
     worker_job_timeout_seconds: int = Field(default=1800, alias="WORKER_JOB_TIMEOUT_SECONDS")
+    run_job_dispatch_reconciler_in_api: bool = Field(
+        default=True,
+        alias="RUN_JOB_DISPATCH_RECONCILER_IN_API",
+    )
+    job_dispatch_reconcile_interval_seconds: int = Field(
+        default=15,
+        alias="JOB_DISPATCH_RECONCILE_INTERVAL_SECONDS",
+    )
     sync_snapshot_worker_count: int = Field(default=4, alias="SYNC_SNAPSHOT_WORKER_COUNT")
     sync_snapshot_worker_count_microsoft: int = Field(
         default=2,
@@ -228,6 +236,8 @@ class Settings(BaseSettings):
             raise ValueError("WORKER_CONCURRENCY must be greater than 0")
         if self.worker_job_timeout_seconds <= 0:
             raise ValueError("WORKER_JOB_TIMEOUT_SECONDS must be greater than 0")
+        if self.job_dispatch_reconcile_interval_seconds <= 0:
+            raise ValueError("JOB_DISPATCH_RECONCILE_INTERVAL_SECONDS must be greater than 0")
         if self.sync_snapshot_worker_count <= 0:
             raise ValueError("SYNC_SNAPSHOT_WORKER_COUNT must be greater than 0")
         if self.sync_snapshot_worker_count_microsoft <= 0:

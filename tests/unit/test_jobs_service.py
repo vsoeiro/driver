@@ -333,6 +333,8 @@ async def test_create_job_and_start_job_enqueue_and_claim_pending_work():
 
     assert created.id == new_job_id
     assert created.type == "sync_items"
+    assert created.queue_dispatch_attempts == 1
+    assert created.queue_enqueued_at is not None
     queue.enqueue_job.assert_awaited_once()
 
     pending_job = Job(id=new_job_id, type="sync_items", status="PENDING")
@@ -340,8 +342,77 @@ async def test_create_job_and_start_job_enqueue_and_claim_pending_work():
     started = await service.start_job(new_job_id)
 
     assert started.status == "RUNNING"
+    assert getattr(started, "_claimed_by_worker") is True
     assert pending_job.started_at is not None
     assert session.commit.await_count >= 2
+
+
+@pytest.mark.asyncio
+async def test_create_job_records_dispatch_error_without_failing_job_creation():
+    session = AsyncMock()
+    session.add = MagicMock()
+    no_duplicate = MagicMock()
+    no_duplicate.scalar_one_or_none.return_value = None
+    session.execute.return_value = no_duplicate
+    queue = AsyncMock()
+    queue.enqueue_job.side_effect = RuntimeError("redis down")
+    new_job_id = uuid4()
+
+    async def _refresh(job):
+        if getattr(job, "id", None) is None:
+            job.id = new_job_id
+
+    session.refresh.side_effect = _refresh
+
+    service = JobService(session, queue=queue)
+    created = await service.create_job(JobCreate(type="sync_items", payload={"account_id": "acc-1"}))
+
+    assert created.id == new_job_id
+    assert created.status == "PENDING"
+    assert created.queue_enqueued_at is None
+    assert created.queue_dispatch_attempts == 1
+    assert created.queue_last_error == "redis down"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_pending_dispatches_retries_undispatched_jobs():
+    session = AsyncMock()
+    session.add = MagicMock()
+    queue = AsyncMock()
+    job = Job(
+        id=uuid4(),
+        type="sync_items",
+        status="PENDING",
+        queue_name="driver:jobs:light",
+        queue_dispatch_attempts=1,
+        queue_enqueued_at=None,
+    )
+    rows = MagicMock()
+    rows.scalars.return_value.all.return_value = [job]
+    session.execute.return_value = rows
+
+    service = JobService(session, queue=queue)
+    reconciled = await service.reconcile_pending_dispatches(limit=10)
+
+    assert reconciled == 1
+    assert job.queue_dispatch_attempts == 2
+    assert job.queue_enqueued_at is not None
+    assert job.queue_last_error is None
+    queue.enqueue_job.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_start_job_marks_existing_running_job_as_not_claimed():
+    session = AsyncMock()
+    running_job = Job(id=uuid4(), type="sync_items", status="RUNNING")
+    session.get.return_value = running_job
+
+    service = JobService(session)
+    service.recover_stale_running_jobs = AsyncMock(return_value=0)
+    started = await service.start_job(running_job.id)
+
+    assert started.status == "RUNNING"
+    assert getattr(started, "_claimed_by_worker") is False
 
 
 @pytest.mark.asyncio
