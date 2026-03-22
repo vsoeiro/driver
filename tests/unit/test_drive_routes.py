@@ -5,9 +5,6 @@ from uuid import uuid4
 import pytest
 
 from backend.api.routes import drive as drive_routes
-from backend.core.exceptions import DriveOrganizerError
-
-
 class _RowsResult:
     def __init__(self, rows):
         self._rows = rows
@@ -93,52 +90,30 @@ async def test_list_routes_delegate_to_drive_client():
 
 @pytest.mark.asyncio
 async def test_get_download_url_auto_resolves_other_accounts(monkeypatch):
-    account = SimpleNamespace(id=uuid4())
-    candidate_a = SimpleNamespace(id=uuid4())
-    candidate_b = SimpleNamespace(id=uuid4())
-    db = SimpleNamespace(
-        get=AsyncMock(return_value=account),
-        execute=AsyncMock(return_value=_RowsResult([candidate_a, candidate_b])),
-    )
-    client_a = SimpleNamespace(get_download_url=AsyncMock(side_effect=DriveOrganizerError("missing", status_code=404)))
-    client_b = SimpleNamespace(get_download_url=AsyncMock(return_value="https://resolved.example/file"))
-    monkeypatch.setattr(drive_routes, "TokenManager", lambda db_session: object())
-    monkeypatch.setattr(
-        drive_routes,
-        "build_drive_client",
-        lambda candidate, token_manager: (
-            SimpleNamespace(get_download_url=AsyncMock(side_effect=DriveOrganizerError("missing", status_code=404)))
-            if candidate.id == account.id
-            else client_a
-            if candidate.id == candidate_a.id
-            else client_b
-        ),
-    )
+    db = object()
+    service = SimpleNamespace(get_download_url=AsyncMock(return_value="https://resolved.example/file"))
+    monkeypatch.setattr(drive_routes, "DriveDownloadService", lambda session: service)
 
     result = await drive_routes.get_download_url(
-        str(account.id),
+        str(uuid4()),
         db,
         "file-1",
         auto_resolve_account=True,
     )
 
     assert result == {"download_url": "https://resolved.example/file"}
+    service.get_download_url.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_download_content_returns_provider_bytes():
-    account = SimpleNamespace(id=uuid4())
-    db = SimpleNamespace(
-        get=AsyncMock(return_value=account),
-        execute=AsyncMock(return_value=_RowsResult([])),
-    )
+    db = object()
     client = SimpleNamespace(download_file_bytes=AsyncMock(return_value=("cover.png", b"image-bytes")))
     monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(drive_routes, "TokenManager", lambda db_session: object())
-    monkeypatch.setattr(drive_routes, "build_drive_client", lambda linked_account, token_manager: client)
+    monkeypatch.setattr(drive_routes, "DriveDownloadService", lambda session: client)
 
     response = await drive_routes.download_content(
-        str(account.id),
+        str(uuid4()),
         db=db,
         item_id="file-1",
     )
@@ -150,28 +125,12 @@ async def test_download_content_returns_provider_bytes():
 
 @pytest.mark.asyncio
 async def test_download_content_auto_resolves_other_accounts(monkeypatch):
-    account = SimpleNamespace(id=uuid4())
-    candidate = SimpleNamespace(id=uuid4())
-    db = SimpleNamespace(
-        get=AsyncMock(return_value=account),
-        execute=AsyncMock(return_value=_RowsResult([candidate])),
-    )
-    candidate_client = SimpleNamespace(
-        download_file_bytes=AsyncMock(return_value=("cover.png", b"image-bytes")),
-    )
-    monkeypatch.setattr(drive_routes, "TokenManager", lambda db_session: object())
-    monkeypatch.setattr(
-        drive_routes,
-        "build_drive_client",
-        lambda linked_account, token_manager: (
-            SimpleNamespace(download_file_bytes=AsyncMock(side_effect=DriveOrganizerError("missing", status_code=404)))
-            if linked_account.id == account.id
-            else candidate_client
-        ),
-    )
+    db = object()
+    candidate_client = SimpleNamespace(download_file_bytes=AsyncMock(return_value=("cover.png", b"image-bytes")))
+    monkeypatch.setattr(drive_routes, "DriveDownloadService", lambda session: candidate_client)
 
     response = await drive_routes.download_content(
-        str(account.id),
+        str(uuid4()),
         db=db,
         item_id="file-1",
         auto_resolve_account=True,
@@ -183,16 +142,9 @@ async def test_download_content_auto_resolves_other_accounts(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_download_content_auto_resolves_when_requested_account_was_deleted(monkeypatch):
-    candidate = SimpleNamespace(id=uuid4())
-    db = SimpleNamespace(
-        get=AsyncMock(return_value=None),
-        execute=AsyncMock(return_value=_RowsResult([candidate])),
-    )
-    candidate_client = SimpleNamespace(
-        download_file_bytes=AsyncMock(return_value=("cover.png", b"image-bytes")),
-    )
-    monkeypatch.setattr(drive_routes, "TokenManager", lambda db_session: object())
-    monkeypatch.setattr(drive_routes, "build_drive_client", lambda linked_account, token_manager: candidate_client)
+    db = object()
+    candidate_client = SimpleNamespace(download_file_bytes=AsyncMock(return_value=("cover.png", b"image-bytes")))
+    monkeypatch.setattr(drive_routes, "DriveDownloadService", lambda session: candidate_client)
 
     response = await drive_routes.download_content(
         str(uuid4()),

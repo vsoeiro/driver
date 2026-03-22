@@ -22,9 +22,9 @@ from backend.api.dependencies import (
     DriveClientDep,
     LinkedAccountDep,
 )
+from backend.application.drive.download_service import DriveDownloadService
 from backend.application.drive.transfer_service import DriveTransferService
 from backend.common.upload_policy import MAX_RESUMABLE_UPLOAD_CHUNK_SIZE, MAX_SIMPLE_UPLOAD_SIZE
-from backend.core.exceptions import DriveOrganizerError
 from backend.db.models import Item, ItemMetadata, LinkedAccount
 from backend.schemas.drive import (
     BatchDeleteRequest,
@@ -40,7 +40,6 @@ from backend.schemas.drive import (
     UploadSession,
     UploadSessionRequest,
 )
-from backend.security.token_manager import TokenManager
 from backend.services.item_index import (
     delete_item_and_descendants,
     get_item_path as get_indexed_item_path,
@@ -49,7 +48,6 @@ from backend.services.item_index import (
     update_descendant_paths,
     upsert_item_record,
 )
-from backend.services.providers.factory import build_drive_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/drive")
@@ -177,38 +175,12 @@ async def get_download_url(
     ),
 ) -> dict:
     """Get a temporary download URL for a file."""
-    token_manager = TokenManager(db)
-    requested_account = await _resolve_download_account(
-        db,
+    download_url = await DriveDownloadService(db).get_download_url(
         account_id=account_id,
+        item_id=item_id,
         auto_resolve_account=auto_resolve_account,
     )
-    candidate_accounts = await _build_download_candidates(
-        db,
-        requested_account=requested_account,
-    )
-    last_error: Exception | None = None
-
-    for index, candidate in enumerate(candidate_accounts):
-        try:
-            candidate_client = build_drive_client(candidate, token_manager)
-            download_url = await candidate_client.get_download_url(candidate, item_id)
-            return {"download_url": download_url}
-        except DriveOrganizerError as exc:
-            last_error = exc
-            should_try_next = (
-                auto_resolve_account
-                and exc.status_code in {400, 404}
-                and index < len(candidate_accounts) - 1
-            )
-            if should_try_next:
-                continue
-            raise
-
-    if last_error is not None:
-        raise last_error
-
-    raise HTTPException(status_code=404, detail="Account not found")
+    return {"download_url": download_url}
 
 
 @router.get("/{account_id}/download/{item_id}/content", tags=["Downloads"])
@@ -222,39 +194,11 @@ async def download_content(
     ),
 ) -> Response:
     """Proxy file bytes through backend so browser <img> can load provider-protected files."""
-    token_manager = TokenManager(db)
-    requested_account = await _resolve_download_account(
-        db,
+    filename, content = await DriveDownloadService(db).download_file_bytes(
         account_id=account_id,
+        item_id=item_id,
         auto_resolve_account=auto_resolve_account,
     )
-    candidate_accounts = await _build_download_candidates(
-        db,
-        requested_account=requested_account,
-    )
-    last_error: Exception | None = None
-
-    for index, candidate in enumerate(candidate_accounts):
-        try:
-            candidate_client = build_drive_client(candidate, token_manager)
-            filename, content = await candidate_client.download_file_bytes(
-                candidate, item_id
-            )
-            break
-        except DriveOrganizerError as exc:
-            last_error = exc
-            should_try_next = (
-                auto_resolve_account
-                and exc.status_code in {400, 404}
-                and index < len(candidate_accounts) - 1
-            )
-            if should_try_next:
-                continue
-            raise
-    else:
-        if last_error is not None:
-            raise last_error
-        raise HTTPException(status_code=404, detail="Account not found")
 
     media_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
     return Response(
@@ -262,42 +206,6 @@ async def download_content(
         media_type=media_type,
         headers={"Cache-Control": "public, max-age=3600"},
     )
-
-
-async def _resolve_download_account(
-    db: DBSession,
-    *,
-    account_id: str,
-    auto_resolve_account: bool,
-) -> LinkedAccount | None:
-    try:
-        account_uuid = uuid.UUID(str(account_id))
-    except (TypeError, ValueError):
-        account_uuid = None
-
-    if account_uuid is not None:
-        account = await db.get(LinkedAccount, account_uuid)
-        if account is not None:
-            return account
-
-    if auto_resolve_account:
-        return None
-
-    raise HTTPException(status_code=404, detail="Account not found")
-
-
-async def _build_download_candidates(
-    db: DBSession,
-    *,
-    requested_account: LinkedAccount | None,
-) -> list[LinkedAccount]:
-    stmt = select(LinkedAccount).where(LinkedAccount.is_active.is_(True))
-    if requested_account is not None:
-        stmt = stmt.where(LinkedAccount.id != requested_account.id)
-    other_accounts = (await db.execute(stmt)).scalars().all()
-    if requested_account is None:
-        return list(other_accounts)
-    return [requested_account, *other_accounts]
 
 
 @router.get("/{account_id}/download/{item_id}/redirect", tags=["Downloads"])
