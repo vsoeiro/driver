@@ -1,0 +1,1019 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Driver Frontend Inventory</title>
+    <script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async></script>
+    <style>
+        :root {
+            --bg: #f4efe6;
+            --paper: rgba(255, 252, 247, 0.82);
+            --paper-strong: #fffdf9;
+            --ink: #11233b;
+            --muted: #5a6b7e;
+            --line: rgba(17, 35, 59, 0.14);
+            --line-strong: rgba(17, 35, 59, 0.24);
+            --accent: #1f9ad8;
+            --accent-soft: rgba(31, 154, 216, 0.12);
+            --accent-deep: #0f6da4;
+            --lime: #4fa36d;
+            --amber: #c98a24;
+            --shadow: 0 30px 80px rgba(17, 35, 59, 0.12);
+            --radius-xl: 28px;
+            --radius-lg: 22px;
+            --radius-md: 16px;
+            --radius-sm: 999px;
+        }
+
+        * { box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+        body {
+            margin: 0;
+            color: var(--ink);
+            font-family: "Aptos", "Segoe UI Variable", "Trebuchet MS", sans-serif;
+            background:
+                radial-gradient(circle at top left, rgba(31, 154, 216, 0.18), transparent 30%),
+                radial-gradient(circle at 85% 15%, rgba(201, 138, 36, 0.18), transparent 24%),
+                linear-gradient(180deg, #f7f1e8 0%, #f1ebdf 48%, #ece6dc 100%);
+        }
+        h1, h2, h3, h4 {
+            margin: 0;
+            font-family: "Bahnschrift", "Arial Narrow", "Aptos", sans-serif;
+            letter-spacing: -0.03em;
+        }
+        p { margin: 0; line-height: 1.55; }
+        code { font-family: "Cascadia Code", "Consolas", monospace; }
+        .page { width: min(1560px, calc(100vw - 48px)); margin: 24px auto 56px; }
+        .hero,
+        .section {
+            position: relative;
+            overflow: hidden;
+            border: 1px solid var(--line);
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow);
+        }
+        .hero {
+            padding: 38px 40px 34px;
+            background:
+                linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.9)),
+                linear-gradient(120deg, rgba(31, 154, 216, 0.1), rgba(79, 163, 109, 0.08));
+        }
+        .hero::before,
+        .hero::after {
+            content: "";
+            position: absolute;
+            border-radius: 999px;
+            pointer-events: none;
+        }
+        .hero::before {
+            width: 300px;
+            height: 300px;
+            top: -120px;
+            right: -80px;
+            background: radial-gradient(circle, rgba(31, 154, 216, 0.22), transparent 70%);
+        }
+        .hero::after {
+            width: 260px;
+            height: 260px;
+            bottom: -130px;
+            left: -90px;
+            background: radial-gradient(circle, rgba(201, 138, 36, 0.2), transparent 72%);
+        }
+        .eyebrow,
+        .pill,
+        .route-card .route,
+        .badge,
+        .overlay-kind,
+        .overlay-meta span,
+        .mini-tag {
+            border-radius: var(--radius-sm);
+        }
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 18px;
+            padding: 10px 16px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.78);
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.18em;
+        }
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            background: linear-gradient(135deg, var(--accent), var(--lime));
+            box-shadow: 0 0 0 6px rgba(31, 154, 216, 0.08);
+        }
+        .hero-grid {
+            position: relative;
+            display: grid;
+            grid-template-columns: minmax(0, 2.1fr) minmax(320px, 1fr);
+            gap: 24px;
+            z-index: 1;
+        }
+        .hero-copy h1 {
+            font-size: clamp(36px, 4.4vw, 68px);
+            line-height: 0.95;
+        }
+        .hero-copy p {
+            max-width: 880px;
+            margin-top: 18px;
+            font-size: 18px;
+            color: var(--muted);
+        }
+        .hero-metrics {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+            align-content: start;
+        }
+        .metric {
+            padding: 18px 18px 20px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius-lg);
+            background: rgba(255, 255, 255, 0.78);
+            backdrop-filter: blur(14px);
+        }
+        .metric .label {
+            font-size: 12px;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+        .metric .value {
+            margin-top: 8px;
+            font-size: 34px;
+            font-weight: 700;
+            line-height: 1;
+        }
+        .metric .note {
+            margin-top: 8px;
+            font-size: 13px;
+            color: var(--muted);
+        }
+        .section {
+            margin-top: 28px;
+            padding: 30px;
+            background: var(--paper);
+            backdrop-filter: blur(14px);
+        }
+        .section-head {
+            display: flex;
+            align-items: end;
+            justify-content: space-between;
+            gap: 20px;
+            margin-bottom: 22px;
+        }
+        .section-head h2 { font-size: 34px; }
+        .section-head p {
+            max-width: 720px;
+            color: var(--muted);
+            font-size: 15px;
+        }
+        .pill-row,
+        .meta,
+        .badge-row,
+        .overlay-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.86);
+            font-size: 13px;
+            color: var(--muted);
+        }
+        .pill strong,
+        .screen-foot strong,
+        .note-box strong {
+            color: var(--ink);
+        }
+        .route-grid,
+        .overlay-grid,
+        .mobile-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 16px;
+        }
+        .route-card,
+        .screen-card,
+        .mobile-card {
+            border: 1px solid var(--line);
+            border-radius: var(--radius-lg);
+            background: var(--paper-strong);
+            overflow: hidden;
+        }
+        .route-card {
+            padding: 18px;
+            min-height: 220px;
+        }
+        .route-card .route {
+            display: inline-flex;
+            padding: 8px 12px;
+            background: var(--accent-soft);
+            color: var(--accent-deep);
+            font-size: 13px;
+            font-weight: 700;
+        }
+        .route-card h3 { margin-top: 14px; font-size: 22px; }
+        .route-card .component {
+            margin-top: 8px;
+            font-size: 13px;
+            color: var(--muted);
+            word-break: break-word;
+        }
+        .mini-tag {
+            padding: 6px 10px;
+            border: 1px solid var(--line);
+            font-size: 12px;
+            background: rgba(17, 35, 59, 0.03);
+            color: var(--muted);
+        }
+        .route-card ul {
+            margin: 14px 0 0;
+            padding-left: 18px;
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .screen-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+        .screen-meta,
+        .mobile-card .caption {
+            padding: 18px 18px 14px;
+            border-bottom: 1px solid var(--line);
+        }
+        .screen-meta {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .screen-meta h3 { font-size: 24px; }
+        .screen-meta p,
+        .mobile-card p {
+            margin-top: 4px;
+            font-size: 14px;
+            color: var(--muted);
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 7px 10px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.95);
+            font-size: 12px;
+            color: var(--muted);
+            white-space: nowrap;
+        }
+        .screen-card img,
+        .mobile-card img {
+            display: block;
+            width: 100%;
+            height: auto;
+            background: #fff;
+        }
+        .screen-foot {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+            padding: 16px 18px 18px;
+        }
+        .screen-foot div {
+            padding: 12px;
+            border-radius: var(--radius-md);
+            background: rgba(17, 35, 59, 0.03);
+            font-size: 13px;
+            color: var(--muted);
+        }
+        .screen-foot strong { display: block; margin-bottom: 6px; }
+        .overlay-card {
+            position: relative;
+            min-height: 310px;
+            padding: 18px;
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--line);
+            background:
+                linear-gradient(180deg, rgba(17, 35, 59, 0.94), rgba(17, 35, 59, 0.82)),
+                linear-gradient(135deg, rgba(31, 154, 216, 0.18), rgba(79, 163, 109, 0.12));
+            color: #f5f7fb;
+        }
+        .overlay-card::before {
+            content: "";
+            position: absolute;
+            inset: 18px;
+            border-radius: 18px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .overlay-inner {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        .overlay-kind {
+            display: inline-flex;
+            align-items: center;
+            align-self: start;
+            padding: 8px 12px;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: rgba(245, 247, 251, 0.86);
+            background: rgba(255, 255, 255, 0.06);
+        }
+        .overlay-card h3 { margin-top: 18px; font-size: 24px; }
+        .overlay-card p {
+            margin-top: 10px;
+            font-size: 14px;
+            color: rgba(245, 247, 251, 0.8);
+        }
+        .overlay-meta span {
+            padding: 7px 10px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            font-size: 12px;
+            color: rgba(245, 247, 251, 0.84);
+        }
+        .overlay-notes {
+            margin-top: auto;
+            padding-top: 18px;
+            font-size: 13px;
+            color: rgba(245, 247, 251, 0.76);
+        }
+        .mobile-card h3 { font-size: 18px; }
+        .note-box {
+            display: grid;
+            grid-template-columns: 160px minmax(0, 1fr);
+            gap: 18px;
+            padding: 20px;
+            border-radius: var(--radius-lg);
+            border: 1px dashed var(--line-strong);
+            background: rgba(255, 255, 255, 0.72);
+        }
+        .note-box h3 { font-size: 22px; }
+        .note-box p { font-size: 15px; color: var(--muted); }
+        @media (max-width: 1320px) {
+            .hero-grid,
+            .route-grid,
+            .overlay-grid,
+            .mobile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .screen-grid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 840px) {
+            .page { width: min(100vw - 24px, 100%); margin: 12px auto 32px; }
+            .hero, .section { padding: 22px; }
+            .hero-grid,
+            .route-grid,
+            .overlay-grid,
+            .mobile-grid,
+            .screen-foot,
+            .note-box { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <main class="page">
+        <section class="hero">
+            <div class="eyebrow"><span class="dot"></span>Driver Frontend to Figma</div>
+            <div class="hero-grid">
+                <div class="hero-copy">
+                    <h1>Inventario visual do frontend, com rotas, telas e overlays.</h1>
+                    <p>
+                        Esta pagina consolida a arquitetura navegavel atual do produto para ser importada ao Figma.
+                        O foco e mostrar o estado real do app hoje: telas principais, profundidades relevantes e o
+                        catalogo de modais, drawers e confirmacoes que atravessam os fluxos operacionais.
+                    </p>
+                </div>
+                <div class="hero-metrics">
+                    <article class="metric">
+                        <div class="label">Rotas Ativas</div>
+                        <div class="value">9</div>
+                        <div class="note">Contas, drive, biblioteca, jobs, IA, metadata, regras e admin.</div>
+                    </article>
+                    <article class="metric">
+                        <div class="label">Capturas Reais</div>
+                        <div class="value">13</div>
+                        <div class="note">Desktop e mobile reaproveitados do repositorio para montar o board.</div>
+                    </article>
+                    <article class="metric">
+                        <div class="label">Overlays</div>
+                        <div class="value">12</div>
+                        <div class="note">Modais, drawers e paineis compactos mapeados por superficie.</div>
+                    </article>
+                    <article class="metric">
+                        <div class="label">Fonte</div>
+                        <div class="value">Codebase</div>
+                        <div class="note">Mapeamento derivado de [src/frontend/src/App.jsx] e dos componentes de pagina.</div>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <div>
+                    <h2>Mapa de Rotas</h2>
+                    <p>
+                        Cada card abaixo representa uma entrada primaria do frontend e as superficies secundarias
+                        acopladas a ela. Isso facilita transformar o board do Figma em mapa navegacional.
+                    </p>
+                </div>
+                <div class="pill-row">
+                    <span class="pill"><strong>Layout global</strong> Sidebar, header, ActivityDrawer, ProviderPicker e launcher de IA.</span>
+                    <span class="pill"><strong>Padrao</strong> Quase todas as telas herdam [src/frontend/src/components/Layout.jsx].</span>
+                </div>
+            </div>
+
+            <div class="route-grid">
+                <article class="route-card">
+                    <div class="route">/accounts</div>
+                    <h3>Accounts Redirect</h3>
+                    <div class="component">[src/frontend/src/pages/AccountsRedirect.jsx]</div>
+                    <div class="meta">
+                        <span class="mini-tag">Workspace hub</span>
+                        <span class="mini-tag">Account cards</span>
+                        <span class="mini-tag">Quick actions</span>
+                    </div>
+                    <ul>
+                        <li>Funciona como porta de entrada do produto.</li>
+                        <li>Expoe atalhos para biblioteca, metadata, regras, jobs e IA.</li>
+                        <li>Convive com overlays globais do layout.</li>
+                    </ul>
+                </article>
+                <article class="route-card">
+                    <div class="route">/drive/:accountId[/folderId]</div>
+                    <h3>File Browser</h3>
+                    <div class="component">[src/frontend/src/pages/FileBrowser.jsx]</div>
+                    <div class="meta">
+                        <span class="mini-tag">Drive explorer</span>
+                        <span class="mini-tag">Bulk actions</span>
+                        <span class="mini-tag">Preview</span>
+                    </div>
+                    <ul>
+                        <li>Viewer por conta e pasta, com selecao e busca local.</li>
+                        <li>Hospeda modais de metadata, move, extract ZIP e image preview.</li>
+                        <li>Compartilha grande parte do modelo de acao com All Files.</li>
+                    </ul>
+                </article>
+                <article class="route-card">
+                    <div class="route">/all-files</div>
+                    <h3>All Files</h3>
+                    <div class="component">[src/frontend/src/pages/AllFiles.jsx]</div>
+                    <div class="meta">
+                        <span class="mini-tag">Cross-account</span>
+                        <span class="mini-tag">Filters</span>
+                        <span class="mini-tag">Similar files</span>
+                    </div>
+                    <ul>
+                        <li>Biblioteca transversal com filtros, colunas e tabs.</li>
+                        <li>Centraliza a maior quantidade de dialogs inline.</li>
+                        <li>Tambem ancora o fluxo de duplicados.</li>
+                    </ul>
+                </article>
+                <article class="route-card">
+                    <div class="route">/jobs</div>
+                    <h3>Jobs</h3>
+                    <div class="component">[src/frontend/src/pages/Jobs.jsx]</div>
+                    <div class="meta">
+                        <span class="mini-tag">Queue ops</span>
+                        <span class="mini-tag">Attempts</span>
+                        <span class="mini-tag">Observability</span>
+                    </div>
+                    <ul>
+                        <li>Painel operacional da fila.</li>
+                        <li>Recebe deep links do ActivityDrawer.</li>
+                        <li>Complementa o dashboard admin com detalhe por job.</li>
+                    </ul>
+                </article>
+                <article class="route-card">
+                    <div class="route">/ai</div>
+                    <h3>AI Assistant</h3>
+                    <div class="component">[src/frontend/src/pages/AIAssistant.jsx]</div>
+                    <div class="meta">
+                        <span class="mini-tag">Chat workspace</span>
+                        <span class="mini-tag">Tool traces</span>
+                        <span class="mini-tag">Compact variant</span>
+                    </div>
+                    <ul>
+                        <li>Pagina completa do assistente.</li>
+                        <li>Tem tambem uma versao compacta flutuante no layout.</li>
+                        <li>Expoe historico de sessoes e mensagens.</li>
+                    </ul>
+                </article>
+                <article class="route-card">
+                    <div class="route">/metadata</div>
+                    <h3>Metadata Manager</h3>
+                    <div class="component">[src/frontend/src/pages/MetadataManager.jsx]</div>
+                    <div class="meta">
+                        <span class="mini-tag">Categories</span>
+                        <span class="mini-tag">Libraries</span>
+                        <span class="mini-tag">Layout builder</span>
+                    </div>
+                    <ul>
+                        <li>Area mais profunda do produto em quantidade de estados.</li>
+                        <li>Alterna entre overview, dashboard por categoria e itens.</li>
+                        <li>Hospeda o builder de layout e confirmacoes destrutivas.</li>
+                    </ul>
+                </article>
+                <article class="route-card">
+                    <div class="route">/rules</div>
+                    <h3>Rules Manager</h3>
+                    <div class="component">[src/frontend/src/pages/RulesManager.jsx]</div>
+                    <div class="meta">
+                        <span class="mini-tag">Automation</span>
+                        <span class="mini-tag">Preview</span>
+                        <span class="mini-tag">Rule form</span>
+                    </div>
+                    <ul>
+                        <li>Fluxo de automacao para metadata, rename e move.</li>
+                        <li>Conversa com seletor de pasta e preview de impacto.</li>
+                        <li>Serve como ponte entre metadata e jobs.</li>
+                    </ul>
+                </article>
+                <article class="route-card">
+                    <div class="route">/admin/dashboard</div>
+                    <h3>Admin Dashboard</h3>
+                    <div class="component">[src/frontend/src/pages/AdminDashboard.jsx]</div>
+                    <div class="meta">
+                        <span class="mini-tag">Ops analytics</span>
+                        <span class="mini-tag">Health</span>
+                        <span class="mini-tag">Dead letter</span>
+                    </div>
+                    <ul>
+                        <li>Snapshot operacional macro.</li>
+                        <li>Alimenta parte do ActivityDrawer com sinais e alertas.</li>
+                        <li>Complementa Jobs com leitura agregada.</li>
+                    </ul>
+                </article>
+                <article class="route-card">
+                    <div class="route">/admin/settings</div>
+                    <h3>Admin Settings</h3>
+                    <div class="component">[src/frontend/src/pages/AdminSettings.jsx]</div>
+                    <div class="meta">
+                        <span class="mini-tag">Runtime config</span>
+                        <span class="mini-tag">Plugin settings</span>
+                        <span class="mini-tag">Folder target</span>
+                    </div>
+                    <ul>
+                        <li>Configuracao agrupada por scheduler, worker, IA e plugins.</li>
+                        <li>Usa FolderTargetPickerModal para campos de pasta alvo.</li>
+                        <li>E a ancora principal da configuracao administrativa.</li>
+                    </ul>
+                </article>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <div>
+                    <h2>Telas Principais</h2>
+                    <p>
+                        Capturas reais do frontend atual. Elas funcionam como base visual para frames no Figma e ajudam a
+                        preservar a hierarquia de informacao e o estilo operacional do produto.
+                    </p>
+                </div>
+                <div class="pill-row">
+                    <span class="pill"><strong>Desktop</strong> Estado principal de cada rota.</span>
+                    <span class="pill"><strong>Metadata</strong> Inclui um estado aprofundado do dashboard por categoria.</span>
+                </div>
+            </div>
+
+            <div class="screen-grid">
+                <article class="screen-card">
+                    <div class="screen-meta">
+                        <div>
+                            <h3>Accounts Workspace Hub</h3>
+                            <p>Rota <strong>/accounts</strong> com cards de contas e shortcuts cruzados.</p>
+                        </div>
+                        <div class="badge-row">
+                            <span class="badge">AccountsRedirect</span>
+                            <span class="badge">Hub primario</span>
+                            <span class="badge">Desktop</span>
+                        </div>
+                    </div>
+                    <img src="playwright/accounts-desktop.png" alt="Accounts workspace hub">
+                    <div class="screen-foot">
+                        <div><strong>Entradas</strong> Biblioteca, metadata, regras, jobs e IA no mesmo plano.</div>
+                        <div><strong>Dependencias</strong> Cards de conta, quota e atividade recente.</div>
+                        <div><strong>Overlays</strong> Provider picker, activity drawer, quick AI.</div>
+                    </div>
+                </article>
+
+                <article class="screen-card">
+                    <div class="screen-meta">
+                        <div>
+                            <h3>File Browser</h3>
+                            <p>Rota <strong>/drive/:accountId</strong> com navegacao por pasta e toolbar de acoes.</p>
+                        </div>
+                        <div class="badge-row">
+                            <span class="badge">FileBrowser</span>
+                            <span class="badge">Explorer</span>
+                            <span class="badge">Desktop</span>
+                        </div>
+                    </div>
+                    <img src="playwright/drive-desktop.png" alt="Drive file browser">
+                    <div class="screen-foot">
+                        <div><strong>Foco</strong> Navegacao por pasta, sync, upload e criacao de pasta.</div>
+                        <div><strong>Acoes</strong> Metadata, move, delete, extract ZIP e preview.</div>
+                        <div><strong>Relacao</strong> Compartilha linguagem com All Files.</div>
+                    </div>
+                </article>
+
+                <article class="screen-card">
+                    <div class="screen-meta">
+                        <div>
+                            <h3>All Files Library</h3>
+                            <p>Rota <strong>/all-files</strong> em visao cross-account com filtros e colunas.</p>
+                        </div>
+                        <div class="badge-row">
+                            <span class="badge">AllFiles</span>
+                            <span class="badge">Cross-account</span>
+                            <span class="badge">Desktop</span>
+                        </div>
+                    </div>
+                    <img src="playwright/all-files-desktop.png" alt="All files library">
+                    <div class="screen-foot">
+                        <div><strong>Tabs</strong> Biblioteca e arquivos similares.</div>
+                        <div><strong>Profundidade</strong> E a superficie com mais dialogs inline.</div>
+                        <div><strong>Uso</strong> Bom frame-base para mapear acao em lote.</div>
+                    </div>
+                </article>
+
+                <article class="screen-card">
+                    <div class="screen-meta">
+                        <div>
+                            <h3>Jobs Operations Queue</h3>
+                            <p>Rota <strong>/jobs</strong> para fila, tentativas e reprocessamento.</p>
+                        </div>
+                        <div class="badge-row">
+                            <span class="badge">Jobs</span>
+                            <span class="badge">Operations</span>
+                            <span class="badge">Desktop</span>
+                        </div>
+                    </div>
+                    <img src="playwright/jobs-desktop.png" alt="Jobs operations queue">
+                    <div class="screen-foot">
+                        <div><strong>Leitura</strong> Estado, retries, dead-letter e progresso.</div>
+                        <div><strong>Entrada</strong> Recebe links do ActivityDrawer e do admin.</div>
+                        <div><strong>Uso no Figma</strong> Serve para documentar o fluxo operacional.</div>
+                    </div>
+                </article>
+
+                <article class="screen-card">
+                    <div class="screen-meta">
+                        <div>
+                            <h3>Rules Engine</h3>
+                            <p>Rota <strong>/rules</strong> com form de regra e preview de impacto.</p>
+                        </div>
+                        <div class="badge-row">
+                            <span class="badge">RulesManager</span>
+                            <span class="badge">Automation</span>
+                            <span class="badge">Desktop</span>
+                        </div>
+                    </div>
+                    <img src="playwright/rules-desktop.png" alt="Rules manager">
+                    <div class="screen-foot">
+                        <div><strong>Blocos</strong> Condicoes, acoes e destino.</div>
+                        <div><strong>Vinculos</strong> Se conecta a metadata, drive e jobs.</div>
+                        <div><strong>Overlay relacionado</strong> ConfirmDialog e seletores de pasta.</div>
+                    </div>
+                </article>
+
+                <article class="screen-card">
+                    <div class="screen-meta">
+                        <div>
+                            <h3>AI Workspace</h3>
+                            <p>Rota <strong>/ai</strong> com sessoes e trilhas de ferramenta.</p>
+                        </div>
+                        <div class="badge-row">
+                            <span class="badge">AIAssistant</span>
+                            <span class="badge">Chat workspace</span>
+                            <span class="badge">Desktop</span>
+                        </div>
+                    </div>
+                    <img src="playwright/ai-desktop.png" alt="AI assistant workspace">
+                    <div class="screen-foot">
+                        <div><strong>Formato</strong> Versao longa do assistente.</div>
+                        <div><strong>Paridade</strong> Tem variante compacta flutuante no layout.</div>
+                        <div><strong>Uso</strong> Documento importante para fluxos assistidos.</div>
+                    </div>
+                </article>
+
+                <article class="screen-card">
+                    <div class="screen-meta">
+                        <div>
+                            <h3>Metadata Dashboard Deep State</h3>
+                            <p>Profundidade da rota <strong>/metadata</strong> em analise por categoria.</p>
+                        </div>
+                        <div class="badge-row">
+                            <span class="badge">MetadataManager</span>
+                            <span class="badge">Category dashboard</span>
+                            <span class="badge">Desktop</span>
+                        </div>
+                    </div>
+                    <img src="playwright/metadata-dashboard-eval/.playwright-cli/page-2026-03-16T02-27-38-259Z.png" alt="Metadata category dashboard">
+                    <div class="screen-foot">
+                        <div><strong>Camada</strong> Mostra o produto indo alem do CRUD de categorias.</div>
+                        <div><strong>Dados</strong> Cobertura media e distribuicoes por atributo.</div>
+                        <div><strong>Relacionados</strong> Layout builder, metadata modal e confirm dialog.</div>
+                    </div>
+                </article>
+
+                <article class="screen-card">
+                    <div class="screen-meta">
+                        <div>
+                            <h3>Admin Dashboard</h3>
+                            <p>Rota <strong>/admin/dashboard</strong> com snapshot de saude e capacidade.</p>
+                        </div>
+                        <div class="badge-row">
+                            <span class="badge">AdminDashboard</span>
+                            <span class="badge">Observability</span>
+                            <span class="badge">Desktop</span>
+                        </div>
+                    </div>
+                    <img src="playwright/admin-dashboard-desktop.png" alt="Admin dashboard">
+                    <div class="screen-foot">
+                        <div><strong>Leitura</strong> Queue depth, provider usage e dead-letter.</div>
+                        <div><strong>Origem</strong> Alimenta alertas e sinais do ActivityDrawer.</div>
+                        <div><strong>Uso</strong> Frame de suporte para operacao e capacidade.</div>
+                    </div>
+                </article>
+
+                <article class="screen-card">
+                    <div class="screen-meta">
+                        <div>
+                            <h3>Admin Settings</h3>
+                            <p>Rota <strong>/admin/settings</strong> com grupos de configuracao runtime.</p>
+                        </div>
+                        <div class="badge-row">
+                            <span class="badge">AdminSettings</span>
+                            <span class="badge">Runtime config</span>
+                            <span class="badge">Desktop</span>
+                        </div>
+                    </div>
+                    <img src="playwright/admin-settings-desktop.png" alt="Admin settings">
+                    <div class="screen-foot">
+                        <div><strong>Grupos</strong> Scheduler, workers, IA, interface e metadata libraries.</div>
+                        <div><strong>Overlay</strong> Usa FolderTargetPickerModal para campos especiais.</div>
+                        <div><strong>Papel</strong> Fecha o eixo administrativo do produto.</div>
+                    </div>
+                </article>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <div>
+                    <h2>Overlays e Modais</h2>
+                    <p>
+                        Catalogo das superfices temporarias do frontend. Onde nao havia captura pronta no repositorio, o
+                        board registra o overlay como componente navegacional para preservar o mapeamento no Figma.
+                    </p>
+                </div>
+                <div class="pill-row">
+                    <span class="pill"><strong>Shared</strong> Overlays acessiveis de qualquer pagina do layout.</span>
+                    <span class="pill"><strong>Contextual</strong> Modais disparados por paginas especificas.</span>
+                </div>
+            </div>
+
+            <div class="overlay-grid">
+                <article class="overlay-card">
+                    <div class="overlay-inner">
+                        <span class="overlay-kind">Shared Overlay</span>
+                        <h3>ProviderPickerModal</h3>
+                        <p>Ligacao de novas contas OneDrive, Google Drive e Dropbox pelo header global.</p>
+                        <div class="overlay-meta">
+                            <span>Layout global</span>
+                            <span>Trigger: Link Account</span>
+                            <span>Hosts: todas as rotas com Layout</span>
+                        </div>
+                        <div class="overlay-notes"><strong>Componente:</strong> [src/frontend/src/components/ProviderPickerModal.jsx]</div>
+                    </div>
+                </article>
+                <article class="overlay-card">
+                    <div class="overlay-inner">
+                        <span class="overlay-kind">Shared Overlay</span>
+                        <h3>ActivityDrawer</h3>
+                        <p>Painel lateral de alertas, jobs recentes e sinais de operacao agrupados por importancia.</p>
+                        <div class="overlay-meta">
+                            <span>Layout global</span>
+                            <span>Trigger: bell icon</span>
+                            <span>Deep links: Jobs + Admin</span>
+                        </div>
+                        <div class="overlay-notes"><strong>Componente:</strong> [src/frontend/src/components/ActivityDrawer.jsx]</div>
+                    </div>
+                </article>
+                <article class="overlay-card">
+                    <div class="overlay-inner">
+                        <span class="overlay-kind">Shared Overlay</span>
+                        <h3>AIAssistantWorkspace Compact</h3>
+                        <p>Versao reduzida e flutuante do workspace de IA, presa ao launcher circular no canto inferior.</p>
+                        <div class="overlay-meta">
+                            <span>Layout global</span>
+                            <span>Trigger: floating bot button</span>
+                            <span>Hosts: todas exceto /ai</span>
+                        </div>
+                        <div class="overlay-notes"><strong>Componente:</strong> [src/frontend/src/components/AIAssistantWorkspace.jsx]</div>
+                    </div>
+                </article>
+                <article class="overlay-card">
+                    <div class="overlay-inner">
+                        <span class="overlay-kind">File / Metadata</span>
+                        <h3>MetadataModal</h3>
+                        <p>Editor individual de metadata com historico, preview de imagem/capa e navegacao anterior/proximo.</p>
+                        <div class="overlay-meta">
+                            <span>AllFiles</span>
+                            <span>FileBrowser</span>
+                            <span>MetadataManager</span>
+                        </div>
+                        <div class="overlay-notes"><strong>Trigger:</strong> Metadata &gt; Edit Metadata</div>
+                    </div>
+                </article>
+                <article class="overlay-card">
+                    <div class="overlay-inner">
+                        <span class="overlay-kind">File / Metadata</span>
+                        <h3>BatchMetadataModal</h3>
+                        <p>Aplicacao em lote de categoria e atributos, com opcao recursiva para pastas.</p>
+                        <div class="overlay-meta">
+                            <span>AllFiles</span>
+                            <span>FileBrowser</span>
+                            <span>MetadataManager</span>
+                        </div>
+                        <div class="overlay-notes"><strong>Trigger:</strong> multi-select + Metadata</div>
+                    </div>
+                </article>
+                <article class="overlay-card">
+                    <div class="overlay-inner">
+                        <span class="overlay-kind">File / Metadata</span>
+                        <h3>RemoveMetadataModal</h3>
+                        <p>Remocao de metadata em lote, incluindo jobs recursivos para conteudo de pasta.</p>
+                        <div class="overlay-meta">
+                            <span>AllFiles</span>
+                            <span>FileBrowser</span>
+                            <span>MetadataManager</span>
+                        </div>
+                        <div class="overlay-notes"><strong>Trigger:</strong> Metadata &gt; Remove Metadata</div>
+                    </div>
+                </article>
+                <article class="overlay-card">
+                    <div class="overlay-inner">
+                        <span class="overlay-kind">File Action</span>
+                        <h3>MoveModal</h3>
+                        <p>Escolha de conta de destino e navegacao por pastas para enfileirar jobs de movimento.</p>
+                        <div class="overlay-meta">
+                            <span>AllFiles</span>
+                            <span>FileBrowser</span>
+                            <span>MetadataManager</span>
+                        </div>
+                        <div class="overlay-notes"><strong>Componente:</strong> [src/frontend/src/components/MoveModal.jsx]</div>
+                    </div>
+                </article>
+                <article class="overlay-card">
+                    <div class="overlay-inner">
+                        <span class="overlay-kind">File Action</span>
+                        <h3>ExtractZipModal</h3>
+                        <p>Definicao de destino para extracao de ZIP, com opcao de apagar a origem depois.</p>
+                        <div class="overlay-meta">
+                            <span>AllFiles</span>
+                            <span>FileBrowser</span>
+                            <span>Apenas itens .zip</span>
+                        </div>
+                        <div class="overlay-notes"><strong>Componente:</strong> [src/frontend/src/components/ExtractZipModal.jsx]</div>
+                    </div>
+                </article>
+                <article class="overlay-card">
+                    <div class="overlay-inner">
+                        <span class="overlay-kind">Preview</span>
+                        <h3>ImagePreviewModal</h3>
+                        <p>Preview de imagem com zoom, ancorado nas linhas clicaveis de arquivos visualizaveis.</p>
+                        <div class="overlay-meta">
+                            <span>AllFiles</span>
+                            <span>FileBrowser</span>
+                            <span>Previewable files</span>
+                        </div>
+                        <div class="overlay-notes"><strong>Componente:</strong> [src/frontend/src/components/ImagePreviewModal.jsx]</div>
+                    </div>
+                </article>
+                <article class="overlay-card">
+                    <div class="overlay-inner">
+                        <span class="overlay-kind">Metadata Admin</span>
+                        <h3>MetadataLayoutBuilderModal</h3>
+                        <p>Editor de grid para layout de formulario por categoria, com drag, resize e persistencia.</p>
+                        <div class="overlay-meta">
+                            <span>MetadataManager</span>
+                            <span>Form layout</span>
+                            <span>Grid builder</span>
+                        </div>
+                        <div class="overlay-notes"><strong>Componente:</strong> [src/frontend/src/components/MetadataLayoutBuilderModal.jsx]</div>
+                    </div>
+                </article>
+                <article class="overlay-card">
+                    <div class="overlay-inner">
+                        <span class="overlay-kind">Admin Settings</span>
+                        <h3>FolderTargetPickerModal</h3>
+                        <p>Selecao de conta e pasta alvo para campos de plugin com tipo <code>folder_target</code>.</p>
+                        <div class="overlay-meta">
+                            <span>AdminSettings</span>
+                            <span>Plugin runtime field</span>
+                            <span>Folder target</span>
+                        </div>
+                        <div class="overlay-notes"><strong>Componente:</strong> [src/frontend/src/components/FolderTargetPickerModal.jsx]</div>
+                    </div>
+                </article>
+                <article class="overlay-card">
+                    <div class="overlay-inner">
+                        <span class="overlay-kind">Confirmations</span>
+                        <h3>ConfirmDialog + Inline Dialogs</h3>
+                        <p>Categoria que agrupa confirmacoes destrutivas e dialogs simples de delete, rename e map all.</p>
+                        <div class="overlay-meta">
+                            <span>MetadataManager</span>
+                            <span>SimilarFilesReportTab</span>
+                            <span>AllFiles / FileBrowser</span>
+                        </div>
+                        <div class="overlay-notes"><strong>Observacao:</strong> nem todos sao componentes dedicados; parte vive inline nas paginas.</div>
+                    </div>
+                </article>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <div>
+                    <h2>Checagens Mobile</h2>
+                    <p>
+                        Estados menores que ajudam a separar quais frames tambem deveriam existir no arquivo do Figma
+                        como referencia responsiva.
+                    </p>
+                </div>
+                <div class="pill-row">
+                    <span class="pill"><strong>Uso sugerido</strong> Colocar em uma area lateral do board como referencia responsiva.</span>
+                </div>
+            </div>
+
+            <div class="mobile-grid">
+                <article class="mobile-card">
+                    <div class="caption">
+                        <h3>Accounts Mobile</h3>
+                        <p>Hub inicial reduzido.</p>
+                    </div>
+                    <img src="playwright/accounts-mobile.png" alt="Accounts mobile">
+                </article>
+                <article class="mobile-card">
+                    <div class="caption">
+                        <h3>All Files Mobile</h3>
+                        <p>Biblioteca e toolbar compactadas.</p>
+                    </div>
+                    <img src="playwright/all-files-mobile.png" alt="All files mobile">
+                </article>
+                <article class="mobile-card">
+                    <div class="caption">
+                        <h3>Jobs Mobile</h3>
+                        <p>Fila e estados em coluna unica.</p>
+                    </div>
+                    <img src="playwright/jobs-mobile.png" alt="Jobs mobile">
+                </article>
+                <article class="mobile-card">
+                    <div class="caption">
+                        <h3>Admin Settings Mobile</h3>
+                        <p>Configuracoes administrativas em painel compacto.</p>
+                    </div>
+                    <img src="playwright/admin-settings-mobile.png" alt="Admin settings mobile">
+                </article>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="note-box">
+                <h3>Lacunas controladas</h3>
+                <div>
+                    <p>
+                        O inventario privilegia as telas reais e mapeia os overlays mais importantes como componentes.
+                        Dialogos genericos e estados de submissao muito especificos nao ganharam screenshot propria, mas
+                        foram listados no catalogo de overlays para nao se perderem no board.
+                    </p>
+                    <p style="margin-top: 12px;">
+                        Se quiser, o proximo passo natural e abrir um segundo board so para estados internos de modais
+                        pesados, especialmente <strong>MetadataModal</strong>, <strong>BatchMetadataModal</strong> e
+                        <strong>MetadataLayoutBuilderModal</strong>.
+                    </p>
+                </div>
+            </div>
+        </section>
+    </main>
+</body>
+</html>
