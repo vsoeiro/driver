@@ -16,9 +16,7 @@ BACKEND_DIR = REPO_ROOT / "src" / "backend"
 FRONTEND_DIR = REPO_ROOT / "src" / "frontend"
 ALEMBIC_INI = REPO_ROOT / "src" / "alembic.ini"
 DEFAULT_WORKERS = (
-    ("worker-light", "driver:jobs:light", "3"),
-    ("worker-default", "driver:jobs", "2"),
-    ("worker-heavy", "driver:jobs:heavy", "1"),
+    ("worker", "driver:jobs", "6"),
 )
 
 

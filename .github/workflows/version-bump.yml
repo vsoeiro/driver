@@ -1,0 +1,103 @@
+name: version-bump
+
+on:
+  workflow_dispatch:
+    inputs:
+      backend_version:
+        description: "New backend version for src/backend/pyproject.toml"
+        required: true
+        type: string
+      frontend_version:
+        description: "New frontend version for src/frontend/package.json"
+        required: true
+        type: string
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Update backend and frontend versions
+        id: versions
+        env:
+          BACKEND_VERSION: ${{ inputs.backend_version }}
+          FRONTEND_VERSION: ${{ inputs.frontend_version }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import pathlib
+          import re
+
+          repo = pathlib.Path(".")
+          backend_file = repo / "src" / "backend" / "pyproject.toml"
+          frontend_file = repo / "src" / "frontend" / "package.json"
+
+          backend_version = os.environ["BACKEND_VERSION"].strip()
+          frontend_version = os.environ["FRONTEND_VERSION"].strip()
+
+          backend_text = backend_file.read_text(encoding="utf-8")
+          current_backend_match = re.search(r'(?m)^version = "([^"]+)"$', backend_text)
+          if current_backend_match is None:
+              raise SystemExit("Could not read current backend version from pyproject.toml")
+          current_backend_version = current_backend_match.group(1)
+          backend_updated, count = re.subn(
+              r'(?m)^version = "[^"]+"$',
+              f'version = "{backend_version}"',
+              backend_text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("Could not update backend version in pyproject.toml")
+          backend_file.write_text(backend_updated, encoding="utf-8")
+
+          frontend_data = json.loads(frontend_file.read_text(encoding="utf-8"))
+          current_frontend_version = str(frontend_data.get("version", "")).strip()
+          if not current_frontend_version:
+              raise SystemExit("Could not read current frontend version from package.json")
+          frontend_data["version"] = frontend_version
+          frontend_file.write_text(json.dumps(frontend_data, indent=2) + "\n", encoding="utf-8")
+
+          github_output = os.environ.get("GITHUB_OUTPUT")
+          if github_output:
+              with open(github_output, "a", encoding="utf-8") as fh:
+                  fh.write(f"backend_old={current_backend_version}\n")
+                  fh.write(f"backend_new={backend_version}\n")
+                  fh.write(f"frontend_old={current_frontend_version}\n")
+                  fh.write(f"frontend_new={frontend_version}\n")
+          PY
+
+      - name: Commit version bump
+        env:
+          BACKEND_VERSION: ${{ inputs.backend_version }}
+          FRONTEND_VERSION: ${{ inputs.frontend_version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/backend/pyproject.toml src/frontend/package.json
+          git commit -m "chore: bump backend ${BACKEND_VERSION} and frontend ${FRONTEND_VERSION}"
+          git push
+
+      - name: Write version summary
+        env:
+          BACKEND_VERSION: ${{ inputs.backend_version }}
+          FRONTEND_VERSION: ${{ inputs.frontend_version }}
+        run: |
+          {
+            echo "## Version bump"
+            echo ""
+            echo "- Backend: \`${{ steps.versions.outputs.backend_old }}\` -> \`${{ steps.versions.outputs.backend_new }}\`"
+            echo "- Frontend: \`${{ steps.versions.outputs.frontend_old }}\` -> \`${{ steps.versions.outputs.frontend_new }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

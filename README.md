@@ -47,7 +47,7 @@ It connects Microsoft OneDrive, Google Drive, and Dropbox behind a single worksp
 - AI assistant with tool traces, confirmation gates, and workspace-aware actions.
 - Admin dashboard for queue depth, success rate, provider usage, throughput, latency, and dead-letter analysis.
 - Admin settings for scheduler, worker runtime, AI provider mode, language, and plugin-backed metadata libraries.
-- Docker Compose topology with shared backend runtime image, migration service, and optional vision worker profile.
+- Docker Compose topology with shared backend runtime image, migration service, and a single general-purpose worker.
 
 ## Architecture
 
@@ -59,7 +59,7 @@ High-level flow:
 - FastAPI API for provider integration, metadata, rules, admin, and AI routes.
 - Redis-backed ARQ workers for async jobs and retries.
 - PostgreSQL-compatible database for application state.
-- Optional vision profile for heavier image-analysis workloads.
+- Image-analysis jobs can be toggled independently and are disabled by default in the sample environment.
 
 ## Screenshots
 
@@ -141,9 +141,9 @@ docker compose up -d --build --remove-orphans
 
 Default behavior:
 
-- builds the shared backend runtime image once and reuses it for API + standard workers
+- builds the shared backend runtime image once and reuses it for API + worker
 - runs database migrations in the `migrate` service before API/workers start
-- skips the heavy vision image unless you explicitly enable the `vision` profile
+- uses local Docker tags for dev compose and leaves release versioning to CI/CD
 
 Services:
 
@@ -151,22 +151,14 @@ Services:
 - Backend API: `http://localhost:8000`
 - OpenAPI: `http://localhost:8000/docs`
 - Redis: `localhost:6379`
-- Workers: `worker-light`, `worker-default`, `worker-heavy`
-
-Optional vision worker:
-
-```bash
-docker compose --profile vision up -d --build worker-vision
-```
+- Worker: `worker`
 
 Logs:
 
 ```bash
 docker compose logs -f backend
 docker compose logs -f migrate
-docker compose logs -f worker-light
-docker compose logs -f worker-default
-docker compose logs -f worker-heavy
+docker compose logs -f worker
 ```
 
 Stop:
@@ -194,9 +186,7 @@ By default this launcher starts:
 
 - backend API
 - Vite frontend
-- `worker-light`
-- `worker-default`
-- `worker-heavy`
+- `worker`
 
 Redis still needs to be running separately.
 
@@ -229,11 +219,9 @@ npm.cmd --prefix src/frontend run dev --workspaces=false
 Workers via Docker Compose:
 
 ```bash
-docker compose up -d worker-light worker-default worker-heavy
-docker compose logs -f worker-light
-docker compose logs -f worker-default
-docker compose logs -f worker-heavy
-docker compose stop worker-light worker-default worker-heavy
+docker compose up -d worker
+docker compose logs -f worker
+docker compose stop worker
 ```
 
 Dedicated scheduler process:
@@ -314,24 +302,20 @@ You can run with only Microsoft, only Google, or only Dropbox.
 
 Current strategy:
 
-- `light`: short and frequent jobs with higher concurrency
-- `default`: medium jobs and most operational flows
-- `heavy`: long-running or resource-intensive jobs
-- `vision`: optional image-analysis queue enabled only when the profile is active
+- one shared queue backed by one worker service with higher concurrency
+- sync, metadata, rules, IO, and comics jobs all resolve to `driver:jobs`
+- image-analysis jobs are intentionally disabled while the vision path is being reworked
 
 Current Compose profile:
 
-- `worker-light`: `WORKER_CONCURRENCY=3`, `DB_POOL_MODE=null`
-- `worker-default`: `WORKER_CONCURRENCY=2`, `DB_POOL_MODE=null`
-- `worker-heavy`: `WORKER_CONCURRENCY=1`, `DB_POOL_MODE=null`
-- `worker-vision` (`vision` profile): `WORKER_CONCURRENCY=1`, `DB_POOL_MODE=null`
+- `worker`: `WORKER_CONCURRENCY=6`, `DB_POOL_MODE=null`
 - backend API: `DB_POOL_MODE=null`
 
 Container and build notes:
 
-- backend and standard workers share the same `onedrive-cbr-backend:local` image
+- backend and worker share the same `driver-backend:local` image
 - the backend Docker build ignores `src/frontend` entirely to cut build context size
-- the vision image reuses cached base dependencies and installs only the `ai-vision` extra on top
+- the frontend image is tagged as `driver-frontend:local`
 - the frontend image copies only the files required for the Vite production build
 
 For managed poolers such as Supabase Session mode, prefer `DB_POOL_MODE=null` so each process does not stack its own large SQLAlchemy pool on top of the external pooler.
@@ -401,17 +385,11 @@ npm.cmd run dev --workspaces=false
 docker compose up -d --build --remove-orphans
 ```
 
-To refresh the optional vision worker too:
-
-```bash
-docker compose --profile vision up -d --build --remove-orphans
-```
-
 ### Worker is not processing jobs
 
 Checklist:
 
 - Redis is running: `docker compose logs -f redis`
 - the worker has the correct `WORKER_QUEUE_NAME`
-- the backend queue policy matches the active workers
+- the backend queue policy resolves jobs to `driver:jobs`
 - migrations completed successfully in the `migrate` service

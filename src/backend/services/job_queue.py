@@ -13,11 +13,11 @@ from backend.core.config import get_settings
 
 DEFAULT_QUEUE_ALIAS_SUFFIXES: dict[str, str] = {
     "default": "",
-    "sync": "light",
+    "sync": "",
     "io": "",
     "metadata": "",
     "rules": "",
-    "comics": "heavy",
+    "comics": "",
     "vision": "vision",
 }
 

@@ -20,7 +20,7 @@ x-backend-runtime-depends: &backend-runtime-depends
 services:
   migrate:
     <<: *backend-common
-    image: onedrive-cbr-backend:local
+    image: driver-backend:local
     build:
       context: ./src
       dockerfile: backend/Dockerfile
@@ -31,7 +31,7 @@ services:
 
   backend:
     <<: *backend-common
-    image: onedrive-cbr-backend:local
+    image: driver-backend:local
     build:
       context: ./src
       dockerfile: backend/Dockerfile
@@ -48,60 +48,20 @@ services:
     ports:
       - "8000:8000"
 
-  worker-light:
+  worker:
     <<: *backend-common
-    image: onedrive-cbr-backend:local
-    container_name: driver-worker-light
-    environment:
-      <<: *backend-env
-      WORKER_QUEUE_NAME: driver:jobs:light
-      WORKER_CONCURRENCY: 3
-    command: uv run --no-sync arq backend.workers.arq_worker.WorkerSettings
-    depends_on: *backend-runtime-depends
-
-  worker-default:
-    <<: *backend-common
-    image: onedrive-cbr-backend:local
-    container_name: driver-worker-default
+    image: driver-backend:local
+    container_name: driver-worker
     environment:
       <<: *backend-env
       WORKER_QUEUE_NAME: driver:jobs
-      WORKER_CONCURRENCY: 3
-    command: uv run --no-sync arq backend.workers.arq_worker.WorkerSettings
-    depends_on: *backend-runtime-depends
-
-  worker-heavy:
-    <<: *backend-common
-    image: onedrive-cbr-backend:local
-    container_name: driver-worker-heavy
-    environment:
-      <<: *backend-env
-      WORKER_QUEUE_NAME: driver:jobs:heavy
-      WORKER_CONCURRENCY: 3
-    command: uv run --no-sync arq backend.workers.arq_worker.WorkerSettings
-    depends_on: *backend-runtime-depends
-
-  worker-vision:
-    <<: *backend-common
-    image: onedrive-cbr-backend-vision:local
-    build:
-      context: ./src
-      dockerfile: backend/Dockerfile
-      target: backend-vision-runtime
-    container_name: driver-worker-vision
-    profiles:
-      - vision
-    environment:
-      <<: *backend-env
-      WORKER_QUEUE_NAME: driver:jobs:vision
-      WORKER_CONCURRENCY: 3
-      WORKER_ENABLE_IMAGE_HANDLERS: "true"
+      WORKER_CONCURRENCY: 6
     command: uv run --no-sync arq backend.workers.arq_worker.WorkerSettings
     depends_on: *backend-runtime-depends
 
   redis:
     image: redis:7-alpine
-    container_name: onedrive-cbr-redis
+    container_name: driver-redis
     ports:
       - "6379:6379"
     healthcheck:
@@ -112,7 +72,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: onedrive-cbr-frontend:local
+    image: driver-frontend:local
     build:
       context: ./src/frontend
       dockerfile: Dockerfile
