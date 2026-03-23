@@ -113,6 +113,17 @@ export function useJobsActions() {
         (libraryKey = 'comics_core', chunkSize = 250) => jobsService.createReindexComicCoversJob(libraryKey, chunkSize),
         [],
     );
+    const createConvertLibraryComicArchivesJob = useCallback(
+        (sourceFormat, targetFormat, chunkSize = 250, deleteSourceAfterConvert = false) => (
+            jobsService.createConvertLibraryComicArchivesJob(
+                sourceFormat,
+                targetFormat,
+                chunkSize,
+                deleteSourceAfterConvert,
+            )
+        ),
+        [],
+    );
     const createExtractLibraryComicAssetsJob = useCallback(
         (accountIds = null, chunkSize = 1000) => jobsService.createExtractLibraryComicAssetsJob(accountIds, chunkSize),
         [],
@@ -146,6 +157,7 @@ export function useJobsActions() {
         createExtractBookAssetsJob,
         createAnalyzeImageAssetsJob,
         createAnalyzeLibraryImageAssetsJob,
+        createConvertLibraryComicArchivesJob,
         createReindexComicCoversJob,
         createExtractLibraryComicAssetsJob,
         createMapLibraryBooksJob,
@@ -157,6 +169,7 @@ export function useJobsActions() {
         createAnalyzeImageAssetsJob,
         createAnalyzeLibraryImageAssetsJob,
         createApplyRuleJob,
+        createConvertLibraryComicArchivesJob,
         createExtractBookAssetsJob,
         createExtractComicAssetsJob,
         createExtractLibraryBookAssetsJob,

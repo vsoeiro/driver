@@ -82,7 +82,7 @@ async def test_list_active_metadata_library_configs_builds_public_payload():
     config = configs[0]
     assert config["plugin_key"] == COMICS_LIBRARY_KEY
     assert config["plugin_name"] == "Comics Core"
-    assert config["capabilities"]["actions"] == ["reindex_covers"]
+    assert config["capabilities"]["actions"] == ["reindex_covers", "convert_archives"]
     assert any(field["key"] == "cover_storage_target" for field in config["fields"])
 
 

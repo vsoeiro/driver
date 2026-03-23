@@ -1,10 +1,11 @@
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const getRuntimeSettingsMock = vi.fn();
 const updateRuntimeSettingsMock = vi.fn();
 const getAccountsMock = vi.fn();
 const createReindexComicCoversJobMock = vi.fn();
+const createConvertLibraryComicArchivesJobMock = vi.fn();
 const showToastMock = vi.fn();
 
 let runtimeSettingsState = null;
@@ -30,7 +31,7 @@ function buildRuntimeSettings(overrides = {}) {
                 plugin_description: 'Comics runtime settings',
                 capabilities: {
                     supported_input_types: ['number', 'folder_target'],
-                    actions: ['reindex_covers'],
+                    actions: ['reindex_covers', 'convert_archives'],
                 },
                 fields: [
                     {
@@ -86,6 +87,7 @@ vi.mock('../services/accounts', () => ({
 vi.mock('../services/jobs', () => ({
     jobsService: {
         createReindexComicCoversJob: (...args) => createReindexComicCoversJobMock(...args),
+        createConvertLibraryComicArchivesJob: (...args) => createConvertLibraryComicArchivesJobMock(...args),
     },
 }));
 
@@ -134,6 +136,7 @@ describe('AdminSettings page', () => {
         updateRuntimeSettingsMock.mockReset();
         getAccountsMock.mockReset();
         createReindexComicCoversJobMock.mockReset();
+        createConvertLibraryComicArchivesJobMock.mockReset();
         showToastMock.mockReset();
 
         getRuntimeSettingsMock.mockImplementation(async () => clone(runtimeSettingsState));
@@ -143,6 +146,7 @@ describe('AdminSettings page', () => {
             return clone(runtimeSettingsState);
         });
         createReindexComicCoversJobMock.mockResolvedValue({ total_jobs: 3, total_items: 640, chunk_size: 250, job_ids: ['job-cover-7'] });
+        createConvertLibraryComicArchivesJobMock.mockResolvedValue({ total_jobs: 2, total_items: 120, chunk_size: 100, job_ids: ['job-convert-1'] });
     });
 
     it('loads settings and saves scheduler, worker and AI changes', async () => {
@@ -184,7 +188,7 @@ describe('AdminSettings page', () => {
         expect(showToastMock).toHaveBeenCalledWith('Settings saved successfully', 'success');
     });
 
-    it('filters groups, updates plugin fields, picks folders and triggers reindex jobs', async () => {
+    it('filters groups, updates plugin fields, picks folders and triggers library actions', async () => {
         const user = userEvent.setup();
 
         renderWithProviders(<AdminSettings />);
@@ -197,7 +201,7 @@ describe('AdminSettings page', () => {
         expect(await screen.findByText('Comics')).toBeInTheDocument();
         expect(screen.getByText(/supported field types: number, folder_target/i)).toBeInTheDocument();
 
-        const candidateInput = screen.getByRole('spinbutton');
+        const candidateInput = screen.getAllByRole('spinbutton')[1];
         await user.clear(candidateInput);
         await user.type(candidateInput, '15');
 
@@ -211,6 +215,15 @@ describe('AdminSettings page', () => {
         await user.click(screen.getByRole('button', { name: /re-index covers/i }));
         await waitFor(() => expect(createReindexComicCoversJobMock).toHaveBeenCalledWith('comics_core', 250));
         expect(showToastMock).toHaveBeenCalledWith('Cover re-index started in 3 jobs for 640 items.', 'success');
+
+        await user.selectOptions(screen.getByRole('combobox', { name: /source format/i }), 'zip');
+        await user.selectOptions(screen.getByRole('combobox', { name: /target format/i }), 'cbr');
+        const conversionChunkInput = screen.getByRole('spinbutton', { name: /chunk size/i });
+        fireEvent.change(conversionChunkInput, { target: { value: '100' } });
+        await user.click(screen.getByRole('checkbox', { name: /delete source after successful conversion/i }));
+        await user.click(screen.getByRole('button', { name: /convert archives/i }));
+        await waitFor(() => expect(createConvertLibraryComicArchivesJobMock).toHaveBeenCalledWith('zip', 'cbr', 100, true));
+        expect(showToastMock).toHaveBeenCalledWith('Archive conversion zip -> cbr started in 2 jobs for 120 items.', 'success');
 
         await user.click(screen.getByRole('button', { name: /^save$/i }));
         await waitFor(() => {

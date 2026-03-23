@@ -24,6 +24,7 @@ from starlette.concurrency import run_in_threadpool
 
 from backend.api.dependencies import DBSession, JobServiceDep
 from backend.application.jobs.commands import enqueue_job_command
+from backend.core.config import get_settings
 from backend.db.models import ImageAnalysisResult, Item, ItemMetadata
 from backend.domain.errors import DomainError, NotFoundError
 from backend.schemas.jobs import (
@@ -36,6 +37,8 @@ from backend.schemas.jobs import (
     JobApplyMetadataRecursiveRequest,
     JobApplyRuleRequest,
     JobAttempt,
+    JobConvertLibraryComicArchivesRequest,
+    JobConvertLibraryComicArchivesResponse,
     JobExtractBookAssetsRequest,
     JobExtractComicAssetsRequest,
     JobExtractLibraryBookAssetsRequest,
@@ -57,6 +60,10 @@ from backend.services.metadata_libraries.service import (
     COMICS_LIBRARY_KEY,
     IMAGES_LIBRARY_KEY,
     MetadataLibraryService,
+)
+from backend.services.metadata_libraries.comics.archive_conversion_service import (
+    source_extensions_for_format,
+    validate_archive_conversion,
 )
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
@@ -723,6 +730,8 @@ async def create_analyze_image_assets_job(
     db: DBSession,
 ) -> Job:
     """Create a job that analyzes selected image files/folders."""
+    if not get_settings().image_analysis_enabled:
+        raise HTTPException(status_code=503, detail="Image analysis jobs are currently disabled.")
     library_service = MetadataLibraryService(db)
     images_category = await library_service.get_active_images_category()
     if images_category is None or images_category.plugin_key != IMAGES_LIBRARY_KEY:
@@ -754,6 +763,8 @@ async def create_analyze_library_image_assets_job(
     db: DBSession,
 ) -> JobAnalyzeLibraryImageAssetsResponse:
     """Create chunked jobs to analyze all indexed image files."""
+    if not get_settings().image_analysis_enabled:
+        raise HTTPException(status_code=503, detail="Image analysis jobs are currently disabled.")
     chunk_size = max(1, min(5000, int(request.chunk_size or 500)))
     supported_exts = tuple(IMAGE_EXTENSIONS)
 
@@ -946,6 +957,79 @@ async def create_extract_library_comic_assets_job(
 
     return JobExtractLibraryComicAssetsResponse(
         total_items=total_unmapped_items,
+        total_jobs=len(created_job_ids),
+        chunk_size=chunk_size,
+        job_ids=created_job_ids,
+    )
+
+
+@router.post(
+    "/comics/convert-library",
+    response_model=JobConvertLibraryComicArchivesResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_convert_library_comic_archives_job(
+    request: JobConvertLibraryComicArchivesRequest,
+    db: DBSession,
+) -> JobConvertLibraryComicArchivesResponse:
+    """Create chunked jobs that convert indexed comic archives to another format."""
+    try:
+        source_format, target_format = validate_archive_conversion(
+            request.source_format,
+            request.target_format,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    chunk_size = max(1, min(5000, int(request.chunk_size or 250)))
+    stmt = select(Item.account_id, Item.item_id).where(
+        Item.item_type == "file",
+        func.lower(func.coalesce(Item.extension, "")).in_(
+            source_extensions_for_format(source_format)
+        ),
+    )
+    rows = await _fetch_rows_with_limit(
+        db,
+        stmt,
+        operation_name="Library-wide comic archive conversion",
+    )
+    if not rows:
+        return JobConvertLibraryComicArchivesResponse(
+            total_items=0,
+            total_jobs=0,
+            chunk_size=chunk_size,
+            job_ids=[],
+        )
+
+    by_account: dict[UUID, list[str]] = {}
+    for account_id, item_id in rows:
+        by_account.setdefault(account_id, []).append(str(item_id))
+
+    total_items = sum(len(item_ids) for item_ids in by_account.values())
+    created_job_ids: list[UUID] = []
+    for item_groups in _chunk_indexed_items_globally(by_account, chunk_size=chunk_size):
+        job = await enqueue_job_command(
+            db,
+            job_type="convert_library_comic_archives",
+            payload={
+                "source_format": source_format,
+                "target_format": target_format,
+                "delete_source_after_convert": bool(request.delete_source_after_convert),
+                "indexed_item_groups": item_groups,
+                "use_indexed_items": True,
+            },
+            dedupe_key=_build_grouped_chunk_dedupe_key(
+                prefix=(
+                    f"comics-convert:{source_format}:{target_format}:"
+                    f"{int(bool(request.delete_source_after_convert))}"
+                ),
+                item_groups=item_groups,
+            ),
+        )
+        created_job_ids.append(job.id)
+
+    return JobConvertLibraryComicArchivesResponse(
+        total_items=total_items,
         total_jobs=len(created_job_ids),
         chunk_size=chunk_size,
         job_ids=created_job_ids,

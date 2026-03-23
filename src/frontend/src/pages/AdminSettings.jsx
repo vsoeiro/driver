@@ -11,6 +11,18 @@ import { useAccountsActions } from '../features/accounts/hooks/useAccountsData';
 import { useJobsActions } from '../features/jobs/hooks/useJobsData';
 import { useSettingsActions } from '../features/settings/hooks/useSettingsData';
 
+const COMIC_ARCHIVE_CONVERSION_OPTIONS = [
+    { value: 'zip', label: 'ZIP (.zip)' },
+    { value: 'rar', label: 'RAR (.rar)' },
+    { value: 'cbz', label: 'CBZ (.cbz)' },
+    { value: 'cbr', label: 'CBR (.cbr)' },
+];
+
+const COMIC_ARCHIVE_TARGET_OPTIONS = [
+    { value: 'cbz', label: 'CBZ (.cbz)' },
+    { value: 'cbr', label: 'CBR (.cbr)' },
+];
+
 function PluginField({ field, onChange, onOpenFolderPicker, accountLabelById, t }) {
     const inputClass = 'input-shell w-full p-2 text-sm';
     const renderers = {
@@ -80,7 +92,7 @@ export default function AdminSettings() {
     const location = useLocation();
     const { showToast } = useToast();
     const { getAccounts } = useAccountsActions();
-    const { createReindexComicCoversJob } = useJobsActions();
+    const { createConvertLibraryComicArchivesJob, createReindexComicCoversJob } = useJobsActions();
     const { getRuntimeSettings, updateRuntimeSettings } = useSettingsActions();
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -93,6 +105,12 @@ export default function AdminSettings() {
         pluginKey: '',
         fieldKey: '',
         value: null,
+    });
+    const [comicArchiveConversion, setComicArchiveConversion] = useState({
+        sourceFormat: 'zip',
+        targetFormat: 'cbz',
+        chunkSize: 250,
+        deleteSourceAfterConvert: false,
     });
     const [form, setForm] = useState({
         enable_daily_sync_scheduler: true,
@@ -153,20 +171,78 @@ export default function AdminSettings() {
 
             {(group.capabilities?.actions || []).length > 0 && (
                 <div className="mt-4 flex flex-wrap items-center gap-2">
-                    {(group.capabilities.actions || []).map((action) => (
-                        <button
-                            key={`${group.plugin_key}:${action}`}
-                            type="button"
-                            onClick={() => handlePluginAction(group, action)}
-                            disabled={!!pluginActionLoading[`${group.plugin_key}:${action}`]}
-                            className="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
-                        >
-                            {pluginActionLoading[`${group.plugin_key}:${action}`]
-                                ? <Loader2 className="h-4 w-4 animate-spin" />
-                                : <RefreshCw className="h-4 w-4" />}
-                            {action === 'reindex_covers' ? t('adminSettings.reindexCovers') : action}
-                        </button>
-                    ))}
+                    {(group.capabilities.actions || []).map((action) => {
+                        if (action === 'convert_archives' && group.plugin_key === 'comics_core') {
+                            return (
+                                <div key={`${group.plugin_key}:${action}`} className="flex flex-wrap items-center gap-2 rounded-md border px-2 py-2">
+                                    <select
+                                        className="input-shell rounded-md px-2 py-1.5 text-sm"
+                                        value={comicArchiveConversion.sourceFormat}
+                                        onChange={(e) => setComicArchiveConversion((prev) => ({ ...prev, sourceFormat: e.target.value }))}
+                                        aria-label={t('adminSettings.sourceFormat')}
+                                    >
+                                        {COMIC_ARCHIVE_CONVERSION_OPTIONS.map((option) => (
+                                            <option key={option.value} value={option.value}>{option.label}</option>
+                                        ))}
+                                    </select>
+                                    <span className="text-xs text-muted-foreground">{t('adminSettings.convertArrow')}</span>
+                                    <select
+                                        className="input-shell rounded-md px-2 py-1.5 text-sm"
+                                        value={comicArchiveConversion.targetFormat}
+                                        onChange={(e) => setComicArchiveConversion((prev) => ({ ...prev, targetFormat: e.target.value }))}
+                                        aria-label={t('adminSettings.targetFormat')}
+                                    >
+                                        {COMIC_ARCHIVE_TARGET_OPTIONS.map((option) => (
+                                            <option key={option.value} value={option.value}>{option.label}</option>
+                                        ))}
+                                    </select>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max="5000"
+                                        className="input-shell w-24 rounded-md px-2 py-1.5 text-sm"
+                                        value={comicArchiveConversion.chunkSize}
+                                        onChange={(e) => setComicArchiveConversion((prev) => ({ ...prev, chunkSize: Number(e.target.value) || 250 }))}
+                                        aria-label={t('adminSettings.chunkSize')}
+                                    />
+                                    <label className="inline-flex items-center gap-2 px-1 text-sm text-muted-foreground">
+                                        <input
+                                            type="checkbox"
+                                            checked={comicArchiveConversion.deleteSourceAfterConvert}
+                                            onChange={(e) => setComicArchiveConversion((prev) => ({ ...prev, deleteSourceAfterConvert: e.target.checked }))}
+                                            aria-label={t('adminSettings.deleteSourceAfterConvert')}
+                                        />
+                                        <span>{t('adminSettings.deleteSourceAfterConvert')}</span>
+                                    </label>
+                                    <button
+                                        type="button"
+                                        onClick={() => handlePluginAction(group, action)}
+                                        disabled={!!pluginActionLoading[`${group.plugin_key}:${action}`]}
+                                        className="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
+                                    >
+                                        {pluginActionLoading[`${group.plugin_key}:${action}`]
+                                            ? <Loader2 className="h-4 w-4 animate-spin" />
+                                            : <RefreshCw className="h-4 w-4" />}
+                                        {t('adminSettings.convertArchives')}
+                                    </button>
+                                </div>
+                            );
+                        }
+                        return (
+                            <button
+                                key={`${group.plugin_key}:${action}`}
+                                type="button"
+                                onClick={() => handlePluginAction(group, action)}
+                                disabled={!!pluginActionLoading[`${group.plugin_key}:${action}`]}
+                                className="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
+                            >
+                                {pluginActionLoading[`${group.plugin_key}:${action}`]
+                                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                                    : <RefreshCw className="h-4 w-4" />}
+                                {action === 'reindex_covers' ? t('adminSettings.reindexCovers') : action}
+                            </button>
+                        );
+                    })}
                 </div>
             )}
 
@@ -336,19 +412,42 @@ export default function AdminSettings() {
     };
 
     const handlePluginAction = async (group, action) => {
-        if (action !== 'reindex_covers') return;
         setPluginActionLoading((prev) => ({ ...prev, [`${group.plugin_key}:${action}`]: true }));
         try {
-            const summary = await createReindexComicCoversJob(group.plugin_key);
-            showToast(
-                t('adminSettings.reindexStarted', {
-                    count: summary.total_jobs,
-                    items: summary.total_items,
-                }),
-                'success',
-            );
+            if (action === 'reindex_covers') {
+                const summary = await createReindexComicCoversJob(group.plugin_key);
+                showToast(
+                    t('adminSettings.reindexStarted', {
+                        count: summary.total_jobs,
+                        items: summary.total_items,
+                    }),
+                    'success',
+                );
+                return;
+            }
+            if (action === 'convert_archives' && group.plugin_key === 'comics_core') {
+                const summary = await createConvertLibraryComicArchivesJob(
+                    comicArchiveConversion.sourceFormat,
+                    comicArchiveConversion.targetFormat,
+                    comicArchiveConversion.chunkSize,
+                    comicArchiveConversion.deleteSourceAfterConvert,
+                );
+                showToast(
+                    t('adminSettings.convertStarted', {
+                        count: summary.total_jobs,
+                        items: summary.total_items,
+                        source: comicArchiveConversion.sourceFormat,
+                        target: comicArchiveConversion.targetFormat,
+                    }),
+                    'success',
+                );
+            }
         } catch (error) {
-            const message = error?.response?.data?.detail || t('adminSettings.failedReindex');
+            const message = error?.response?.data?.detail || t(
+                action === 'convert_archives'
+                    ? 'adminSettings.failedConvertArchives'
+                    : 'adminSettings.failedReindex'
+            );
             showToast(message, 'error');
         } finally {
             setPluginActionLoading((prev) => ({ ...prev, [`${group.plugin_key}:${action}`]: false }));

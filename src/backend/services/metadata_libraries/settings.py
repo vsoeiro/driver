@@ -253,9 +253,13 @@ class MetadataLibrarySettingsService:
                         "supported_input_types": sorted(
                             {field.input_type for field in spec.fields}
                         ),
-                        "actions": ["reindex_covers"]
-                        if spec.library_key in {COMICS_LIBRARY_KEY, BOOKS_LIBRARY_KEY}
-                        else [],
+                        "actions": (
+                            ["reindex_covers", "convert_archives"]
+                            if spec.library_key == COMICS_LIBRARY_KEY
+                            else ["reindex_covers"]
+                            if spec.library_key == BOOKS_LIBRARY_KEY
+                            else []
+                        ),
                     },
                     "fields": fields,
                 }

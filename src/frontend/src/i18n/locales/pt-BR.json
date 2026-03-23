@@ -99,7 +99,8 @@
     "reindex_book_covers": "Reindexar capas de livros",
     "analyze_image_assets": "Analisar imagens selecionadas",
     "analyze_library_image_assets": "Analisar imagens da biblioteca",
-    "remove_duplicate_files": "Remover arquivos duplicados"
+    "remove_duplicate_files": "Remover arquivos duplicados",
+    "convert_library_comic_archives": "Converter arquivos da biblioteca de quadrinhos"
   },
   "dashboard": {
     "title": "Contas conectadas",
@@ -163,7 +164,15 @@
       "folder": "Pasta:",
       "selectAccountFolder": "Selecione conta e pasta",
       "unsupported": "Tipo de entrada não suportado `{{inputType}}`. Renderizando como substituto de texto simples."
-    }
+    },
+    "failedConvertArchives": "Falha ao iniciar o job de conversao de arquivos",
+    "convertStarted": "Conversao de arquivos {{source}} -> {{target}} iniciada em {{count}} jobs para {{items}} itens.",
+    "convertArchives": "Converter arquivos",
+    "sourceFormat": "Formato de origem",
+    "targetFormat": "Formato de destino",
+    "chunkSize": "Tamanho do lote",
+    "deleteSourceAfterConvert": "Apagar original apos conversao bem-sucedida",
+    "convertArrow": "para"
   },
   "adminDashboard": {
     "last24h": "�altimas 24h",
@@ -317,7 +326,8 @@
       "reindex_book_covers": "Reindexar capas de livros",
       "analyze_image_assets": "Analisar imagens selecionadas",
       "analyze_library_image_assets": "Analisar imagens da biblioteca",
-      "remove_duplicate_files": "Remover arquivos duplicados"
+      "remove_duplicate_files": "Remover arquivos duplicados",
+      "convert_library_comic_archives": "Converter arquivos da biblioteca de quadrinhos"
     }
   },
   "allFiles": {
@@ -585,16 +595,16 @@
       "min": "Minimo",
       "max": "Maximo",
       "average": "Media",
-        "earliest": "Mais antigo",
-        "latest": "Mais recente",
-        "booleanPieChart": "Distribuicao de valores booleanos",
-        "valueBarChart": "Grafico de barras da distribuicao de valores",
-        "valueHorizontalBarChart": "Grafico horizontal da distribuicao de valores",
-        "booleanChart": "Divisao booleana",
-        "topValuesShown": "Mostrando os {{count}} valores principais.",
-        "noValues": "Nenhum valor encontrado no escopo atual.",
-        "failedLoad": "Falha ao carregar o dashboard de metadata",
-        "failedLoadHelp": "Nao foi possivel concluir a consulta do dashboard."
+      "earliest": "Mais antigo",
+      "latest": "Mais recente",
+      "booleanPieChart": "Distribuicao de valores booleanos",
+      "valueBarChart": "Grafico de barras da distribuicao de valores",
+      "valueHorizontalBarChart": "Grafico horizontal da distribuicao de valores",
+      "booleanChart": "Divisao booleana",
+      "topValuesShown": "Mostrando os {{count}} valores principais.",
+      "noValues": "Nenhum valor encontrado no escopo atual.",
+      "failedLoad": "Falha ao carregar o dashboard de metadata",
+      "failedLoadHelp": "Nao foi possivel concluir a consulta do dashboard."
     },
     "requiredField": "Campo obrigatório",
     "optionsCommaSeparated": "Opções (separadas por vírgula)",

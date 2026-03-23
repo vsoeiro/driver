@@ -202,6 +202,21 @@ export const createReindexComicCoversJob = async (libraryKey = 'comics_core', ch
     return response.data;
 };
 
+export const createConvertLibraryComicArchivesJob = async (
+    sourceFormat,
+    targetFormat,
+    chunkSize = 250,
+    deleteSourceAfterConvert = false,
+) => {
+    const response = await api.post('/jobs/comics/convert-library', {
+        source_format: sourceFormat,
+        target_format: targetFormat,
+        chunk_size: chunkSize,
+        delete_source_after_convert: deleteSourceAfterConvert,
+    });
+    return response.data;
+};
+
 export const createExtractLibraryComicAssetsJob = async (accountIds = null, chunkSize = 1000) => {
     const payload = {};
     if (Array.isArray(accountIds) && accountIds.length > 0) {
@@ -258,6 +273,7 @@ export const jobsService = {
     createMapLibraryBooksJob,
     createExtractLibraryBookAssetsJob,
     createReindexComicCoversJob,
+    createConvertLibraryComicArchivesJob,
     createRemoveDuplicatesJob,
 };
 

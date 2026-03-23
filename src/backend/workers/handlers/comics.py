@@ -9,6 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.common.error_items import ErrorItemsCollector
 from backend.db.models import Item
+from backend.services.metadata_libraries.comics.archive_conversion_service import (
+    ComicArchiveConversionService,
+    IndexedArchiveItem,
+    validate_archive_conversion,
+)
 from backend.services.metadata_libraries.comics.metadata_service import ComicMetadataService, IndexedComicItem
 from backend.services.metadata_libraries.implementations.comics.schema import COMICS_LIBRARY_KEY
 from backend.workers.dispatcher import register_handler
@@ -61,6 +66,40 @@ async def _load_indexed_items(
             size=int(size) if size is not None else None,
         )
         for item_id, name, extension, item_type, size in rows
+    ]
+
+
+async def _load_indexed_archive_items(
+    session: AsyncSession,
+    *,
+    account_id: UUID,
+    item_ids: list[str],
+) -> list[IndexedArchiveItem]:
+    stmt = select(
+        Item.item_id,
+        Item.name,
+        Item.extension,
+        Item.item_type,
+        Item.parent_id,
+        Item.path,
+        Item.size,
+    ).where(
+        Item.account_id == account_id,
+        Item.item_id.in_(item_ids),
+        Item.item_type == "file",
+    )
+    rows = (await session.execute(stmt)).all()
+    return [
+        IndexedArchiveItem(
+            id=str(item_id),
+            name=str(name or item_id),
+            extension=str(extension).lower() if extension else None,
+            item_type=str(item_type or "file"),
+            parent_id=str(parent_id) if parent_id is not None else None,
+            path=str(path) if path is not None else None,
+            size=int(size) if size is not None else None,
+        )
+        for item_id, name, extension, item_type, parent_id, path, size in rows
     ]
 
 
@@ -278,5 +317,70 @@ async def extract_library_comic_assets_handler(payload: dict, session: AsyncSess
         error_items_truncated=stats.get("error_items_truncated", 0),
     )
     progress.current = stats["total"]
+    await progress.flush(force=True)
+    return stats
+
+
+@register_handler("convert_library_comic_archives")
+async def convert_library_comic_archives_handler(payload: dict, session: AsyncSession) -> dict:
+    source_format, target_format = validate_archive_conversion(
+        payload.get("source_format"),
+        payload.get("target_format"),
+    )
+    delete_source_after_convert = bool(payload.get("delete_source_after_convert"))
+    progress = JobProgressReporter.from_payload(session, payload)
+    progress.flush_every_items = 5
+    item_groups = _normalize_indexed_item_groups(payload)
+    total_requested = sum(len(item_ids) for _account_id, item_ids in item_groups)
+    await progress.set_total(total_requested)
+
+    service = ComicArchiveConversionService(session)
+    stats = {
+        "total": total_requested,
+        "converted": 0,
+        "skipped": 0,
+        "failed": 0,
+        "accounts": len(item_groups),
+        "source_format": source_format,
+        "target_format": target_format,
+        "deleted_source": 0,
+        "error_items": [],
+        "error_items_truncated": 0,
+    }
+    error_collector = ErrorItemsCollector(stats, limit=COMIC_ERROR_ITEMS_LIMIT)
+
+    for account_id, item_ids in item_groups:
+        indexed_items = await _load_indexed_archive_items(
+            session,
+            account_id=account_id,
+            item_ids=item_ids,
+        )
+        account_stats = await service.convert_indexed_items(
+            account_id=account_id,
+            indexed_items=indexed_items,
+            source_format=source_format,
+            target_format=target_format,
+            delete_source_after_convert=delete_source_after_convert,
+            progress_reporter=progress,
+        )
+        stats["converted"] += account_stats.get("converted", 0)
+        stats["skipped"] += account_stats.get("skipped", 0)
+        stats["failed"] += account_stats.get("failed", 0)
+        stats["deleted_source"] += account_stats.get("deleted_source", 0)
+        error_collector.merge(account_stats)
+
+    await session.commit()
+    await progress.update_metrics(
+        converted=stats["converted"],
+        skipped=stats["skipped"],
+        failed=stats["failed"],
+        accounts=stats["accounts"],
+        source_format=source_format,
+        target_format=target_format,
+        deleted_source=stats["deleted_source"],
+        error_items=stats.get("error_items", []),
+        error_items_truncated=stats.get("error_items_truncated", 0),
+    )
+    progress.current = total_requested
     await progress.flush(force=True)
     return stats

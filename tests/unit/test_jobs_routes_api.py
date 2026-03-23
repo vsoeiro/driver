@@ -16,6 +16,7 @@ from backend.schemas.jobs import (
     JobAnalyzeLibraryImageAssetsRequest,
     JobApplyMetadataRecursiveRequest,
     JobApplyRuleRequest,
+    JobConvertLibraryComicArchivesRequest,
     JobExtractBookAssetsRequest,
     JobExtractComicAssetsRequest,
     JobExtractLibraryBookAssetsRequest,
@@ -296,6 +297,11 @@ async def test_create_extract_and_analyze_routes_validate_active_libraries(monke
     db = object()
     enqueue_mock = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
     validate_mock = AsyncMock()
+    monkeypatch.setattr(
+        jobs_routes,
+        "get_settings",
+        lambda: SimpleNamespace(image_analysis_enabled=True),
+    )
     monkeypatch.setattr(jobs_routes, "enqueue_job_command", enqueue_mock)
     monkeypatch.setattr(jobs_routes, "_validate_selected_extensions", validate_mock)
 
@@ -330,6 +336,11 @@ async def test_create_extract_and_analyze_routes_reject_inactive_libraries(monke
     db = object()
     monkeypatch.setattr(
         jobs_routes,
+        "get_settings",
+        lambda: SimpleNamespace(image_analysis_enabled=True),
+    )
+    monkeypatch.setattr(
+        jobs_routes,
         "MetadataLibraryService",
         lambda db_session: SimpleNamespace(
             get_active_books_category=AsyncMock(return_value=None),
@@ -357,6 +368,11 @@ async def test_create_analyze_library_image_assets_job_chunks_items(monkeypatch)
     account_a = uuid4()
     account_b = uuid4()
     image_category = SimpleNamespace(id=uuid4())
+    monkeypatch.setattr(
+        jobs_routes,
+        "get_settings",
+        lambda: SimpleNamespace(image_analysis_enabled=True),
+    )
     enqueue_mock = AsyncMock(side_effect=[
         SimpleNamespace(id=uuid4()),
         SimpleNamespace(id=uuid4()),
@@ -466,6 +482,87 @@ async def test_create_reindex_and_library_chunk_routes(monkeypatch):
     assert extract_response.total_items == 3
     assert extract_response.total_jobs == 2
     assert enqueue_mock.await_args_list[2].kwargs["job_type"] == "reindex_book_covers"
+
+
+@pytest.mark.asyncio
+async def test_create_convert_library_comic_archives_job_chunks_items(monkeypatch):
+    account_id = uuid4()
+    enqueue_mock = AsyncMock(side_effect=[
+        SimpleNamespace(id=uuid4()),
+        SimpleNamespace(id=uuid4()),
+    ])
+    monkeypatch.setattr(jobs_routes, "enqueue_job_command", enqueue_mock)
+    monkeypatch.setattr(
+        jobs_routes,
+        "_fetch_rows_with_limit",
+        AsyncMock(return_value=[
+            (account_id, "item-1"),
+            (account_id, "item-2"),
+            (account_id, "item-3"),
+        ]),
+    )
+
+    response = await jobs_routes.create_convert_library_comic_archives_job(
+        JobConvertLibraryComicArchivesRequest(
+            source_format="zip",
+            target_format="cbz",
+            chunk_size=2,
+        ),
+        db=object(),
+    )
+
+    assert response.total_items == 3
+    assert response.total_jobs == 2
+    first_payload = enqueue_mock.await_args_list[0].kwargs["payload"]
+    assert first_payload == {
+        "source_format": "zip",
+        "target_format": "cbz",
+        "delete_source_after_convert": False,
+        "indexed_item_groups": [
+            {"account_id": str(account_id), "item_ids": ["item-1", "item-2"]},
+        ],
+        "use_indexed_items": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_create_convert_library_comic_archives_job_forwards_delete_flag(monkeypatch):
+    account_id = uuid4()
+    enqueue_mock = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
+    monkeypatch.setattr(jobs_routes, "enqueue_job_command", enqueue_mock)
+    monkeypatch.setattr(
+        jobs_routes,
+        "_fetch_rows_with_limit",
+        AsyncMock(return_value=[(account_id, "item-1")]),
+    )
+
+    await jobs_routes.create_convert_library_comic_archives_job(
+        JobConvertLibraryComicArchivesRequest(
+            source_format="zip",
+            target_format="cbz",
+            chunk_size=50,
+            delete_source_after_convert=True,
+        ),
+        db=object(),
+    )
+
+    payload = enqueue_mock.await_args.kwargs["payload"]
+    assert payload["delete_source_after_convert"] is True
+    assert "comics-convert:zip:cbz:1" in enqueue_mock.await_args.kwargs["dedupe_key"]
+
+
+@pytest.mark.asyncio
+async def test_create_convert_library_comic_archives_job_rejects_invalid_pair():
+    with pytest.raises(HTTPException) as exc_info:
+        await jobs_routes.create_convert_library_comic_archives_job(
+            JobConvertLibraryComicArchivesRequest(
+                source_format="cbz",
+                target_format="cbz",
+            ),
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 400
 
 
 @pytest.mark.asyncio

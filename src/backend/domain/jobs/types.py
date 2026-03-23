@@ -18,6 +18,7 @@ class JobType(StrEnum):
     EXTRACT_COMIC_ASSETS = "extract_comic_assets"
     EXTRACT_BOOK_ASSETS = "extract_book_assets"
     EXTRACT_LIBRARY_COMIC_ASSETS = "extract_library_comic_assets"
+    CONVERT_LIBRARY_COMIC_ARCHIVES = "convert_library_comic_archives"
     REINDEX_COMIC_COVERS = "reindex_comic_covers"
     REINDEX_BOOK_COVERS = "reindex_book_covers"
     ANALYZE_IMAGE_ASSETS = "analyze_image_assets"

@@ -206,6 +206,24 @@ class JobExtractLibraryComicAssetsResponse(BaseModel):
     job_ids: list[UUID]
 
 
+class JobConvertLibraryComicArchivesRequest(BaseModel):
+    """Schema for chunked comic archive conversion over indexed files."""
+
+    source_format: Literal["rar", "zip", "cbz", "cbr"]
+    target_format: Literal["cbz", "cbr"]
+    chunk_size: int = 250
+    delete_source_after_convert: bool = False
+
+
+class JobConvertLibraryComicArchivesResponse(BaseModel):
+    """Summary of chunked comic archive conversion jobs."""
+
+    total_items: int
+    total_jobs: int
+    chunk_size: int
+    job_ids: list[UUID]
+
+
 class JobExtractLibraryBookAssetsRequest(BaseModel):
     """Schema for library-wide book extraction (all supported books already synced)."""
 
