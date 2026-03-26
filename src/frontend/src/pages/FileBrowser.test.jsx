@@ -4,9 +4,11 @@ import { fireEvent, screen, waitFor } from '@testing-library/react';
 const useDriveMock = vi.fn();
 const useUploadMock = vi.fn();
 const useAccountsQueryMock = vi.fn();
+const useMetadataCategoriesQueryMock = vi.fn();
 const useMetadataLibrariesQueryMock = vi.fn();
 const getDownloadUrlMock = vi.fn();
 const updateItemMock = vi.fn();
+const getItemMetadataMock = vi.fn();
 const showToastMock = vi.fn();
 const batchDeleteMetadataMock = vi.fn();
 const batchUpdateMetadataMock = vi.fn();
@@ -36,6 +38,7 @@ vi.mock('../hooks/useUpload', () => ({
 
 vi.mock('../hooks/useAppQueries', () => ({
     useAccountsQuery: (...args) => useAccountsQueryMock(...args),
+    useMetadataCategoriesQuery: (...args) => useMetadataCategoriesQueryMock(...args),
     useMetadataLibrariesQuery: (...args) => useMetadataLibrariesQueryMock(...args),
 }));
 
@@ -51,7 +54,7 @@ vi.mock('../services/metadata', () => ({
     metadataService: {
         batchDeleteMetadata: (...args) => batchDeleteMetadataMock(...args),
         getCategories: vi.fn(() => Promise.resolve([])),
-        getItemMetadata: vi.fn(() => Promise.resolve(null)),
+        getItemMetadata: (...args) => getItemMetadataMock(...args),
         listFormLayouts: vi.fn(() => Promise.resolve([])),
         getItemMetadataHistory: vi.fn(() => Promise.resolve([])),
         saveItemMetadata: vi.fn(() => Promise.resolve(undefined)),
@@ -140,6 +143,16 @@ vi.mock('../components/ExtractZipModal.jsx', () => ({
     ),
 }));
 
+vi.mock('../components/ComicReaderModal', () => ({
+    __esModule: true,
+    default: ({ isOpen }) => (isOpen ? <div>Comic Reader Modal</div> : null),
+}));
+
+vi.mock('../components/ComicReaderModal.jsx', () => ({
+    __esModule: true,
+    default: ({ isOpen }) => (isOpen ? <div>Comic Reader Modal</div> : null),
+}));
+
 import { renderWithProviders } from '../test/render';
 import FileBrowser from './FileBrowser';
 
@@ -178,6 +191,7 @@ describe('FileBrowser page', () => {
         applyMetadataRecursiveMock.mockReset();
         getDownloadUrlMock.mockReset();
         updateItemMock.mockReset();
+        getItemMetadataMock.mockReset();
         useUploadMock.mockReturnValue({
             upload: vi.fn(),
             uploading: false,
@@ -185,6 +199,9 @@ describe('FileBrowser page', () => {
         });
         useAccountsQueryMock.mockReturnValue({
             data: [{ id: 'acc-1', email: 'reader@example.com' }],
+        });
+        useMetadataCategoriesQueryMock.mockReturnValue({
+            data: [{ id: 'cat-comics', plugin_key: 'comics_core', name: 'Comics' }],
         });
         batchDeleteMetadataMock.mockResolvedValue(undefined);
         batchUpdateMetadataMock.mockResolvedValue(undefined);
@@ -197,6 +214,7 @@ describe('FileBrowser page', () => {
         applyMetadataRecursiveMock.mockResolvedValue({ id: 'job-recursive' });
         getDownloadUrlMock.mockResolvedValue('https://example.test/download');
         updateItemMock.mockResolvedValue({ id: 'file-1', name: 'issue-02.epub' });
+        getItemMetadataMock.mockResolvedValue(null);
         useMetadataLibrariesQueryMock.mockReturnValue({
             data: [],
         });
@@ -246,6 +264,33 @@ describe('FileBrowser page', () => {
         await user.click(screen.getByRole('button', { name: 'cover.png' }));
 
         await waitFor(() => expect(screen.getByAltText('cover.png')).toBeInTheDocument());
+    });
+
+    it('enables the comic reader only for comics metadata items with supported archives', async () => {
+        const user = userEvent.setup();
+        getItemMetadataMock.mockResolvedValue({ category_id: 'cat-comics' });
+        useDriveMock.mockReturnValue(
+            makeDriveState({
+                files: [
+                    {
+                        id: 'file-1',
+                        name: 'issue-01.cbz',
+                        item_type: 'file',
+                        size: 2048,
+                        modified_at: '2026-03-10T12:00:00Z',
+                    },
+                ],
+            }),
+        );
+
+        renderWithProviders(<FileBrowser />);
+
+        await user.click(screen.getByText('2 KB'));
+
+        await waitFor(() => expect(screen.getByRole('button', { name: /read/i })).toBeEnabled());
+        await user.click(screen.getByRole('button', { name: /read/i }));
+
+        expect(await screen.findByText('Comic Reader Modal')).toBeInTheDocument();
     });
 
     it('syncs, creates folders and opens metadata actions for single and batch selections', async () => {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router-dom';
 import { getCategoryLibraryView } from '../metadataLibraries/categoryViews';
@@ -10,6 +10,7 @@ import {
     sortAttributesForCategory,
     tagsToInputValue,
 } from '../utils/metadata';
+import { getComicReaderEligibility } from '../utils/comicReader';
 import {
     Plus, Trash2, ChevronRight, ChevronDown, ChevronLeft,
     Database, Loader2, Tag, Hash, ArrowLeft, BarChart3,
@@ -38,6 +39,8 @@ import {
     useMetadataCategoryStatsQuery,
     useMetadataLibrariesQuery,
 } from '../features/metadata/hooks/useMetadataData';
+
+const ComicReaderModal = lazy(() => import('../components/ComicReaderModal'));
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 const BASE_SORT_OPTIONS = [
@@ -193,6 +196,7 @@ const CategoryItemsTable = ({ category, onBack }) => {
     const [searchScope, setSearchScope] = useState('both');
     const [viewMode, setViewMode] = useState('table');
     const [coverUrlsByItemId, setCoverUrlsByItemId] = useState({});
+    const [comicReaderItem, setComicReaderItem] = useState(null);
     const [editingCell, setEditingCell] = useState(null);
     const [editingValue, setEditingValue] = useState('');
     const [savingCellKey, setSavingCellKey] = useState(null);
@@ -1079,6 +1083,32 @@ const CategoryItemsTable = ({ category, onBack }) => {
     const singleSelectedItem = selectedItems.size === 1
         ? items.find((i) => i.id === Array.from(selectedItems)[0]) || null
         : null;
+    const selectedComicReaderEligibility = getComicReaderEligibility(
+        singleSelectedItem,
+        category?.plugin_key,
+    );
+    const canReadSelectedComic = selectedItems.size === 1 && selectedComicReaderEligibility.canRead;
+    const comicReaderActionTitle = useMemo(() => {
+        if (selectedItems.size !== 1) return t('comicReader.selectSingleItem');
+        if (singleSelectedItem?.item_type !== 'file') return t('comicReader.fileOnly');
+        if (selectedComicReaderEligibility.isLibraryOnly && selectedComicReaderEligibility.hasComicsMetadata) {
+            return t('comicReader.archiveOnly');
+        }
+        if (!selectedComicReaderEligibility.hasComicsMetadata) {
+            return t('comicReader.requiresComicsMetadata');
+        }
+        if (!selectedComicReaderEligibility.isSupported) {
+            return t('comicReader.unsupportedFormat');
+        }
+        return t('comicReader.open');
+    }, [
+        selectedComicReaderEligibility.hasComicsMetadata,
+        selectedComicReaderEligibility.isLibraryOnly,
+        selectedComicReaderEligibility.isSupported,
+        selectedItems.size,
+        singleSelectedItem?.item_type,
+        t,
+    ]);
     const metadataNavigationItems = useMemo(() => items, [items]);
     const currentMetadataItemIndex = useMemo(
         () => metadataNavigationItems.findIndex((candidate) => candidate.id === metadataModalItemId),
@@ -1529,6 +1559,21 @@ const CategoryItemsTable = ({ category, onBack }) => {
                         title={t('allFiles.move')}
                     >
                         <ArrowRightLeft size={16} /> <span className="hidden sm:inline">{t('allFiles.move')}</span>
+                    </button>
+                    <button
+                        onClick={() => {
+                            if (!canReadSelectedComic || !singleSelectedItem) return;
+                            setComicReaderItem({
+                                accountId: singleSelectedItem.account_id,
+                                itemId: singleSelectedItem.item_id,
+                                filename: singleSelectedItem.name,
+                            });
+                        }}
+                        disabled={!canReadSelectedComic}
+                        className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={comicReaderActionTitle}
+                    >
+                        <BookOpen size={16} /> <span className="hidden sm:inline">{t('comicReader.open')}</span>
                     </button>
                     <div
                         className={`relative ${selectedItems.size === 0 ? 'pointer-events-none opacity-50' : ''}`}
@@ -2023,6 +2068,18 @@ const CategoryItemsTable = ({ category, onBack }) => {
                     fetchItems();
                 }}
             />
+
+            {comicReaderItem && (
+                <Suspense fallback={null}>
+                    <ComicReaderModal
+                        isOpen={Boolean(comicReaderItem)}
+                        onClose={() => setComicReaderItem(null)}
+                        accountId={comicReaderItem?.accountId}
+                        itemId={comicReaderItem?.itemId}
+                        filename={comicReaderItem?.filename}
+                    />
+                </Suspense>
+            )}
 
             <Modal
                 isOpen={deleteModalOpen}

@@ -138,6 +138,7 @@ vi.mock('../components/BatchMetadataModal', () => ({ default: () => null }));
 vi.mock('../components/RemoveMetadataModal', () => ({ default: () => null }));
 vi.mock('../components/MetadataModal', () => ({ default: () => null }));
 vi.mock('../components/MoveModal', () => ({ default: () => null }));
+vi.mock('../components/ComicReaderModal', () => ({ default: ({ isOpen }) => (isOpen ? <div>Comic Reader Modal</div> : null) }));
 
 import { renderWithProviders } from '../test/render';
 import MetadataManager from './MetadataManager';
@@ -761,6 +762,9 @@ describe('MetadataManager page', () => {
         expect(await screen.findByText('Drama')).toBeInTheDocument();
 
         fireEvent.click(screen.getByText('Renamed Comic.cbz'));
+        await user.click(screen.getByRole('button', { name: /read/i }));
+        expect(await screen.findByText('Comic Reader Modal')).toBeInTheDocument();
+
         await user.click(screen.getByTitle(/delete/i));
         await user.click(screen.getAllByRole('button', { name: /^delete$/i })[1]);
         await waitFor(() => expect(batchDeleteItemsMock).toHaveBeenCalledWith('acc-1', ['item-1']));

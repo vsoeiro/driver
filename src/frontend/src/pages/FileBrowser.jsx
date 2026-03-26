@@ -10,8 +10,13 @@ import {
 import Modal from '../components/Modal';
 import { useToast } from '../contexts/ToastContext';
 import { useWorkspacePage } from '../contexts/WorkspaceContext';
-import { useAccountsQuery, useMetadataLibrariesQuery } from '../hooks/useAppQueries';
+import { useAccountsQuery, useMetadataCategoriesQuery, useMetadataLibrariesQuery } from '../hooks/useAppQueries';
 import { isPreviewableFileName } from '../utils/imagePreview';
+import {
+    getComicFileExtension,
+    getComicReaderEligibility,
+    isComicReaderKnownExtension,
+} from '../utils/comicReader';
 import { formatDateTime } from '../utils/dateTime';
 import { useDriveActions } from '../features/drive/hooks/useDriveData';
 import { useJobsActions } from '../features/jobs/hooks/useJobsData';
@@ -22,6 +27,7 @@ const BatchMetadataModal = lazy(() => import('../components/BatchMetadataModal')
 const MoveModal = lazy(() => import('../components/MoveModal'));
 const ExtractZipModal = lazy(() => import('../components/ExtractZipModal'));
 const ImagePreviewModal = lazy(() => import('../components/ImagePreviewModal'));
+const ComicReaderModal = lazy(() => import('../components/ComicReaderModal'));
 let metadataModulePromise;
 let batchMetadataModulePromise;
 let moveModalModulePromise;
@@ -76,7 +82,7 @@ export default function FileBrowser() {
         createExtractZipJob,
         createSyncJob,
     } = useJobsActions();
-    const { batchDeleteMetadata } = useMetadataActions();
+    const { batchDeleteMetadata, getItemMetadata } = useMetadataActions();
     const { accountId, folderId } = useParams();
     const location = useLocation();
     const [pageSize, setPageSize] = useState(50);
@@ -145,6 +151,12 @@ export default function FileBrowser() {
     const [sortOrder, setSortOrder] = useState('asc');
     const [isNavDropActive, setIsNavDropActive] = useState(false);
     const [imagePreviewItem, setImagePreviewItem] = useState(null);
+    const [comicReaderItem, setComicReaderItem] = useState(null);
+    const [selectedItemMetadataState, setSelectedItemMetadataState] = useState({
+        itemId: null,
+        status: 'idle',
+        categoryId: null,
+    });
     const resizeStateRef = useRef(null);
     const [columnWidths, setColumnWidths] = useState(() => {
         const defaults = FILE_BROWSER_COLUMNS.reduce((acc, column) => ({ ...acc, [column.id]: column.width }), {});
@@ -165,6 +177,7 @@ export default function FileBrowser() {
         }
     });
     const { data: accounts = [] } = useAccountsQuery();
+    const { data: metadataCategories = [] } = useMetadataCategoriesQuery();
     const { data: metadataLibraries = [] } = useMetadataLibrariesQuery();
     const isComicsLibraryActive = Boolean(metadataLibraries.find((library) => library.key === 'comics_core')?.is_active);
     const isImagesLibraryActive = Boolean(metadataLibraries.find((library) => library.key === 'images_core')?.is_active);
@@ -570,6 +583,93 @@ export default function FileBrowser() {
         : null;
     const canMoveSelected = selectedItems.size === 1;
     const canRenameSelected = selectedItems.size === 1;
+    const selectedItemExtension = getComicFileExtension(singleSelectedItem?.name || '');
+    const metadataCategoriesById = useMemo(
+        () => metadataCategories.reduce((acc, category) => {
+            acc[category.id] = category;
+            return acc;
+        }, {}),
+        [metadataCategories],
+    );
+
+    useEffect(() => {
+        let cancelled = false;
+        if (!accountId || !singleSelectedItem || singleSelectedItem.item_type !== 'file') {
+            setSelectedItemMetadataState({ itemId: null, status: 'idle', categoryId: null });
+            return undefined;
+        }
+        if (!isComicReaderKnownExtension(selectedItemExtension)) {
+            setSelectedItemMetadataState({
+                itemId: singleSelectedItem.id,
+                status: 'idle',
+                categoryId: null,
+            });
+            return undefined;
+        }
+
+        setSelectedItemMetadataState({
+            itemId: singleSelectedItem.id,
+            status: 'loading',
+            categoryId: null,
+        });
+
+        (async () => {
+            try {
+                const metadata = await getItemMetadata(accountId, singleSelectedItem.id);
+                if (cancelled) return;
+                setSelectedItemMetadataState({
+                    itemId: singleSelectedItem.id,
+                    status: 'ready',
+                    categoryId: metadata?.category_id || null,
+                });
+            } catch {
+                if (cancelled) return;
+                setSelectedItemMetadataState({
+                    itemId: singleSelectedItem.id,
+                    status: 'ready',
+                    categoryId: null,
+                });
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [accountId, getItemMetadata, selectedItemExtension, singleSelectedItem]);
+
+    const selectedItemCategory = selectedItemMetadataState.categoryId
+        ? metadataCategoriesById[selectedItemMetadataState.categoryId] || null
+        : null;
+    const selectedComicReaderEligibility = getComicReaderEligibility(
+        singleSelectedItem,
+        selectedItemCategory?.plugin_key,
+    );
+    const canReadSelectedComic = selectedItems.size === 1
+        && selectedItemMetadataState.status !== 'loading'
+        && selectedComicReaderEligibility.canRead;
+    const comicReaderActionTitle = useMemo(() => {
+        if (selectedItems.size !== 1) return t('comicReader.selectSingleItem');
+        if (singleSelectedItem?.item_type !== 'file') return t('comicReader.fileOnly');
+        if (selectedItemMetadataState.status === 'loading') return t('comicReader.checkingMetadata');
+        if (selectedComicReaderEligibility.isLibraryOnly && selectedComicReaderEligibility.hasComicsMetadata) {
+            return t('comicReader.archiveOnly');
+        }
+        if (!selectedComicReaderEligibility.hasComicsMetadata) {
+            return t('comicReader.requiresComicsMetadata');
+        }
+        if (!selectedComicReaderEligibility.isSupported) {
+            return t('comicReader.unsupportedFormat');
+        }
+        return t('comicReader.open');
+    }, [
+        selectedComicReaderEligibility.hasComicsMetadata,
+        selectedComicReaderEligibility.isLibraryOnly,
+        selectedComicReaderEligibility.isSupported,
+        selectedItemMetadataState.status,
+        selectedItems.size,
+        singleSelectedItem?.item_type,
+        t,
+    ]);
 
     const currentFolderPath = breadcrumbs.length > 0
         ? `/${breadcrumbs.map((crumb) => crumb.name).join('/')}`
@@ -853,6 +953,22 @@ export default function FileBrowser() {
                         title={t('fileBrowser.move')}
                     >
                         <ArrowRightLeft size={16} /> <span className="hidden sm:inline">{t('fileBrowser.move')}</span>
+                    </button>
+
+                    <button
+                        onClick={() => {
+                            if (!canReadSelectedComic || !singleSelectedItem) return;
+                            setComicReaderItem({
+                                accountId,
+                                itemId: singleSelectedItem.id,
+                                filename: singleSelectedItem.name,
+                            });
+                        }}
+                        disabled={!canReadSelectedComic}
+                        className="p-2 hover:bg-background rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={comicReaderActionTitle}
+                    >
+                        <BookOpen size={16} /> <span className="hidden sm:inline">{t('comicReader.open')}</span>
                     </button>
 
                     <button
@@ -1267,6 +1383,18 @@ export default function FileBrowser() {
                         accountId={imagePreviewItem?.accountId}
                         itemId={imagePreviewItem?.itemId}
                         filename={imagePreviewItem?.filename}
+                    />
+                </Suspense>
+            )}
+
+            {comicReaderItem && (
+                <Suspense fallback={null}>
+                    <ComicReaderModal
+                        isOpen={Boolean(comicReaderItem)}
+                        onClose={() => setComicReaderItem(null)}
+                        accountId={comicReaderItem?.accountId}
+                        itemId={comicReaderItem?.itemId}
+                        filename={comicReaderItem?.filename}
                     />
                 </Suspense>
             )}

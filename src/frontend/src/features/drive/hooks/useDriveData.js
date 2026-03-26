@@ -68,6 +68,8 @@ export function useDriveActions() {
     );
     const getDownloadUrl = useCallback((accountId, itemId, options = {}) => driveService.getDownloadUrl(accountId, itemId, options), []);
     const getDownloadContentUrl = useCallback((accountId, itemId, options = {}) => driveService.getDownloadContentUrl(accountId, itemId, options), []);
+    const createComicReaderSession = useCallback((accountId, itemId) => driveService.createComicReaderSession(accountId, itemId), []);
+    const getComicReaderPageUrl = useCallback((accountId, sessionId, pageIndex) => driveService.getComicReaderPageUrl(accountId, sessionId, pageIndex), []);
     const getQuota = useCallback((accountId, options = {}) => driveService.getQuota(accountId, options), []);
     const searchFiles = useCallback((accountId, query, options = {}) => driveService.searchFiles(accountId, query, options), []);
     const updateItem = useCallback((accountId, itemId, payload) => driveService.updateItem(accountId, itemId, payload), []);
@@ -90,6 +92,8 @@ export function useDriveActions() {
         uploadChunkProxy,
         getDownloadUrl,
         getDownloadContentUrl,
+        createComicReaderSession,
+        getComicReaderPageUrl,
         getQuota,
         searchFiles,
         updateItem,
@@ -101,6 +105,8 @@ export function useDriveActions() {
         deleteItem,
         getDownloadContentUrl,
         getDownloadUrl,
+        createComicReaderSession,
+        getComicReaderPageUrl,
         getFiles,
         getFolderFiles,
         getPath,

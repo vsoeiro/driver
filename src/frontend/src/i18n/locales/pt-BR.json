@@ -1006,6 +1006,25 @@
     "zoomOut": "Diminuir zoom",
     "failed": "Falha ao carregar a visualizacao"
   },
+  "comicReader": {
+    "title": "Leitor de quadrinhos",
+    "open": "Ler",
+    "readingMode": "Modo livro",
+    "preparing": "Preparando leitor...",
+    "selectSingleItem": "Selecione exatamente um item para ler.",
+    "fileOnly": "O leitor de quadrinhos funciona apenas com arquivos.",
+    "checkingMetadata": "Validando metadata de quadrinhos...",
+    "archiveOnly": "O leitor de quadrinhos v1 suporta apenas quadrinhos em arquivo compactado. PDF e EPUB continuam no fluxo atual de preview.",
+    "requiresComicsMetadata": "O item selecionado precisa estar mapeado na biblioteca de quadrinhos.",
+    "unsupportedFormat": "O formato selecionado nao e suportado pelo leitor de quadrinhos.",
+    "failedLoad": "Falha ao carregar o leitor de quadrinhos.",
+    "failedTitle": "Leitor indisponivel",
+    "retry": "Tentar novamente",
+    "previous": "Anterior",
+    "next": "Proximo",
+    "pageCounter": "Paginas {{current}} de {{total}}",
+    "pageAlt": "{{name}} pagina {{page}}"
+  },
   "activity": {
     "title": "Atividade",
     "subtitle": "Alertas, jobs relevantes e sinais operacionais agrupados por importancia.",

@@ -129,6 +129,15 @@ export const getDownloadContentUrl = (accountId, itemId, options = {}) => {
     return `/api/v1/drive/${encodeURIComponent(accountId)}/download/${encodeURIComponent(itemId)}/content${query}`;
 };
 
+export const createComicReaderSession = async (accountId, itemId) => {
+    const response = await api.post(`/drive/${accountId}/reader/comics/${itemId}/sessions`);
+    return response.data;
+};
+
+export const getComicReaderPageUrl = (accountId, sessionId, pageIndex) => (
+    `/api/v1/drive/${encodeURIComponent(accountId)}/reader/comics/sessions/${encodeURIComponent(sessionId)}/pages/${encodeURIComponent(pageIndex)}`
+);
+
 /**
  * Get storage quota
  */
@@ -176,6 +185,8 @@ export const driveService = {
     uploadChunkProxy,
     getDownloadUrl,
     getDownloadContentUrl,
+    createComicReaderSession,
+    getComicReaderPageUrl,
     getQuota,
     searchFiles,
     updateItem

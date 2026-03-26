@@ -23,7 +23,7 @@ from backend.services.item_index import (
     delete_item_and_descendants,
     upsert_item_record,
 )
-from backend.services.metadata_libraries.comics.metadata_service import (
+from backend.services.metadata_libraries.comics.archive_reader import (
     _rar_cli_subprocess_env,
     _temporary_rar_cli_locale,
 )

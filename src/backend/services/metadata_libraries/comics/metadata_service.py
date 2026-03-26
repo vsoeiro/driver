@@ -3,33 +3,37 @@
 from __future__ import annotations
 
 import io
+import inspect
 import logging
-import os
-import posixpath
 import shutil
 import subprocess
-import tarfile
 import tempfile
-import zipfile
-from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any
 from uuid import UUID
-from xml.etree import ElementTree
 
 from PIL import Image, ImageOps, UnidentifiedImageError
-from pypdf import PdfReader
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.application.drive.transfer_service import DriveTransferService
 from backend.common.error_items import ErrorItemsCollector
-from backend.core.exceptions import DriveOrganizerError
 from backend.core.config import get_settings
+from backend.core.exceptions import DriveOrganizerError
 from backend.db.models import ItemMetadata, LinkedAccount
 from backend.security.token_manager import TokenManager
 from backend.services.item_index import parent_id_from_breadcrumb
+from backend.services.metadata_libraries.comics import archive_reader
+from backend.services.metadata_libraries.comics.archive_reader import (
+    ComicExtractionResult,
+    SUPPORTED_COMIC_EXTENSIONS,
+    file_extension,
+    is_non_comic_extraction_error,
+    _pick_first_non_empty_payload,
+    _rar_cli_subprocess_env,
+    _temporary_rar_cli_locale,
+)
 from backend.services.metadata_libraries.implementations.comics.schema import (
     COMICS_LIBRARY_KEY,
 )
@@ -41,8 +45,6 @@ from backend.services.metadata_libraries.settings import (
 from backend.services.metadata_versioning import apply_metadata_change
 from backend.services.providers.base import DriveProviderClient
 from backend.services.providers.factory import build_drive_client
-from backend.services.rar_tools import ensure_rar_backend
-
 logger = logging.getLogger(__name__)
 COMIC_MAPPING_COMMIT_BATCH_SIZE = 10
 COMIC_DOWNLOAD_BASE_TIMEOUT_SECONDS = 120.0
@@ -51,50 +53,6 @@ COMIC_DOWNLOAD_BYTES_PER_SECOND = (
     1.5 * 1024 * 1024
 )  # 1.5 MB/s baseline for timeout scaling.
 COMIC_ERROR_ITEMS_LIMIT = 50
-
-SUPPORTED_COMIC_EXTENSIONS = {
-    "cbz",
-    "zip",
-    "cbw",
-    "pdf",
-    "epub",
-    "cbr",
-    "rar",
-    "cb7",
-    "7z",
-    "cbt",
-    "tar",
-}
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
-NON_COMIC_EXTRACTION_MARKERS = (
-    "archive has no image pages",
-    "no image pages",
-    "extracted only empty cover files",
-    "epub has no cover image",
-    "epub missing",
-    "epub container has no rootfile",
-    "epub opf manifest not found",
-    "cannot open the file as archive",
-    "is not rar archive",
-    "not a rar archive",
-    "not a rar file",
-)
-RAR_BACKEND_FAILURE_MARKERS = (
-    "pathname cannot be converted",
-    "unsupported method",
-)
-RAR_UTF8_LOCALE = "C.UTF-8"
-
-
-@dataclass(slots=True)
-class ComicExtractionResult:
-    """Extraction payload with cover bytes and basic page metadata."""
-
-    format: str
-    page_count: int | None
-    cover_bytes: bytes | None = None
-    cover_extension: str | None = None
-    details: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -117,47 +75,181 @@ class ComicProcessOutcome:
     skip_stage: str | None = None
 
 
-def file_extension(filename: str | None) -> str:
-    """Return filename extension in lowercase without leading dot."""
-    if not filename:
-        return ""
-    return filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+def _is_non_comic_extraction_error(error_text: str) -> bool:
+    return is_non_comic_extraction_error(error_text)
 
 
-def _container_from_extension(ext: str) -> str | None:
-    if ext in {"zip", "cbz", "cbw"}:
-        return "zip"
-    if ext in {"rar", "cbr"}:
-        return "rar"
-    if ext in {"7z", "cb7"}:
-        return "7z"
-    if ext in {"tar", "cbt"}:
-        return "tar"
-    if ext == "epub":
-        return "epub"
-    if ext == "pdf":
-        return "pdf"
-    return None
+_extract_from_zip = archive_reader._extract_from_zip
+_extract_from_tar = archive_reader._extract_from_tar
+_extract_from_pdf = archive_reader._extract_from_pdf
+_extract_from_epub = archive_reader._extract_from_epub
+_extract_from_7z = archive_reader._extract_from_7z
+_detect_archive_container = archive_reader._detect_archive_container
+ensure_rar_backend = archive_reader.ensure_rar_backend
 
 
-def _detect_archive_container(local_path: str) -> str | None:
+def _find_rar_cli_tools() -> list[tuple[str, str]]:
+    settings = get_settings()
+    candidates: list[tuple[str, str]] = []
+    explicit_tool = getattr(settings, "comic_rar_tool_path", None)
+    tools_dir_raw = getattr(settings, "comic_rar_tools_dir", None)
+
+    if explicit_tool:
+        explicit_path = Path(explicit_tool).expanduser()
+        if explicit_path.exists():
+            tool_name = explicit_path.name.lower()
+            if tool_name.startswith("unar"):
+                candidates.append((str(explicit_path), "unar"))
+            elif tool_name.startswith("unrar"):
+                candidates.append((str(explicit_path), "unrar"))
+            else:
+                candidates.append((str(explicit_path), "7z"))
+
+    if tools_dir_raw:
+        tools_dir = Path(tools_dir_raw).expanduser()
+        for name, kind in (
+            ("unar", "unar"),
+            ("unar.exe", "unar"),
+            ("unrar", "unrar"),
+            ("unrar.exe", "unrar"),
+            ("7z", "7z"),
+            ("7z.exe", "7z"),
+        ):
+            candidate = tools_dir / name
+            if candidate.exists():
+                candidates.append((str(candidate), kind))
+
+    for name, kind in (
+        ("unar", "unar"),
+        ("unar.exe", "unar"),
+        ("unrar", "unrar"),
+        ("unrar.exe", "unrar"),
+        ("7z", "7z"),
+        ("7z.exe", "7z"),
+    ):
+        resolved = shutil.which(name)
+        if resolved:
+            candidates.append((resolved, kind))
+
+    unique: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for tool, kind in candidates:
+        if tool in seen:
+            continue
+        seen.add(tool)
+        unique.append((tool, kind))
+    return unique
+
+
+def _extract_from_rar_with_7z(local_path: str, *, fmt: str) -> ComicExtractionResult:
+    failures: list[str] = []
+    tools = _find_rar_cli_tools()
+    if not tools:
+        return archive_reader._extract_from_rar_with_7z(local_path, fmt=fmt)
+
+    for tool, kind in tools:
+        with tempfile.TemporaryDirectory(prefix="comic_rar_cli_") as extract_dir:
+            if kind == "unar":
+                command = [
+                    tool,
+                    "-force-overwrite",
+                    "-output-directory",
+                    extract_dir,
+                    local_path,
+                ]
+            elif kind == "unrar":
+                command = [tool, "x", "-idq", "-o+", local_path, extract_dir]
+            else:
+                return archive_reader._extract_from_rar_with_7z(local_path, fmt=fmt)
+
+            process = subprocess.run(
+                command,
+                capture_output=True,
+                check=False,
+                env=_rar_cli_subprocess_env(),
+            )
+            stderr = process.stderr.decode("utf-8", errors="ignore").strip()
+            root = Path(extract_dir)
+            image_paths = [
+                path
+                for path in root.rglob("*")
+                if path.is_file() and path.suffix.lower() in archive_reader.IMAGE_EXTENSIONS
+            ]
+            image_paths.sort(key=lambda path: path.relative_to(root).as_posix().lower())
+            cover_path = next((path for path in image_paths if path.stat().st_size > 0), None)
+            if cover_path is not None:
+                cover_bytes = cover_path.read_bytes()
+                cover_member = cover_path.relative_to(root).as_posix()
+                cover_extension = cover_path.suffix.lower().lstrip(".") or "jpg"
+                return ComicExtractionResult(
+                    format=fmt,
+                    page_count=len(image_paths),
+                    cover_bytes=cover_bytes,
+                    cover_extension=cover_extension,
+                    details={
+                        "cover_member": cover_member,
+                        "backend": "rar_cli_fallback",
+                        "cli_tool": tool,
+                        "cli_kind": kind,
+                        "cli_return_code": process.returncode,
+                        "cli_stderr": stderr[:2000] if stderr else "",
+                    },
+                )
+            failures.append(
+                f"{Path(tool).name}: code={process.returncode} stderr={stderr[:400]}"
+            )
+
+    raise ValueError(
+        "RAR CLI extraction failed across available tools: "
+        + " | ".join(failures[:4])
+    )
+
+
+def _extract_from_rar(local_path: str, *, fmt: str) -> ComicExtractionResult:
     try:
-        with open(local_path, "rb") as handle:
-            head = handle.read(560)
-    except OSError:
-        return None
+        import rarfile  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise ValueError("RAR support requires optional dependency 'rarfile'") from exc
+    if not ensure_rar_backend():
+        raise ValueError(
+            "RAR backend tool not available. Configure COMIC_RAR_TOOLS_DIR and optionally "
+            "COMIC_RAR_TOOL_DOWNLOAD_URL / COMIC_RAR_TOOL_PATH."
+        )
 
-    if head.startswith((b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")):
-        return "zip"
-    if head.startswith((b"Rar!\x1a\x07\x00", b"Rar!\x1a\x07\x01\x00")):
-        return "rar"
-    if head.startswith(b"\x37\x7a\xbc\xaf\x27\x1c"):
-        return "7z"
-    if head.startswith(b"%PDF-"):
-        return "pdf"
-    if len(head) >= 262 and head[257:262] == b"ustar":
-        return "tar"
-    return None
+    try:
+        with _temporary_rar_cli_locale():
+            with rarfile.RarFile(local_path, "r") as archive:
+                image_names = [
+                    info.filename
+                    for info in archive.infolist()
+                    if not info.is_dir()
+                    and Path(info.filename).suffix.lower()
+                    in archive_reader.IMAGE_EXTENSIONS
+                ]
+                ordered_names, page_count = archive_reader._ordered_image_names_and_count(
+                    image_names
+                )
+                cover_name, cover_bytes = _pick_first_non_empty_payload(
+                    ordered_names, reader=archive.read, source_label="RAR"
+                )
+                cover_extension = Path(cover_name).suffix.lower().lstrip(".") or "jpg"
+                return ComicExtractionResult(
+                    format=fmt,
+                    page_count=page_count,
+                    cover_bytes=cover_bytes,
+                    cover_extension=cover_extension,
+                    details={"cover_member": cover_name},
+                )
+    except Exception as exc:  # noqa: BLE001
+        error_text = str(exc).lower()
+        if any(marker in error_text for marker in archive_reader.RAR_BACKEND_FAILURE_MARKERS):
+            logger.warning(
+                "RAR Python backend failed for %s (%s). Trying CLI fallback.",
+                local_path,
+                exc,
+            )
+            return _extract_from_rar_with_7z(local_path, fmt=fmt)
+        raise
 
 
 def _run_container_extractor(
@@ -194,16 +286,16 @@ def _extract_archive_with_fallback(
         candidate_containers.append(detected)
 
     for container in ("zip", "rar", "7z", "tar", "pdf"):
-        if container == primary_container:
-            continue
-        if container in candidate_containers:
+        if container == primary_container or container in candidate_containers:
             continue
         candidate_containers.append(container)
 
     for container in candidate_containers:
         try:
             extracted = _run_container_extractor(
-                local_path, fmt=fmt, container=container
+                local_path,
+                fmt=fmt,
+                container=container,
             )
             extracted.details["fallback_used"] = container
             if detected:
@@ -231,7 +323,7 @@ def _extract_archive_with_fallback(
 
 
 def extract_comic_asset(local_path: str, extension: str) -> ComicExtractionResult:
-    """Extract cover/page metadata from a supported comic container."""
+    """Compatibility wrapper so legacy tests can patch module-level helpers."""
     ext = extension.lower()
     if ext in {"zip", "cbz", "cbw"}:
         try:
@@ -280,353 +372,11 @@ def extract_comic_asset(local_path: str, extension: str) -> ComicExtractionResul
                 primary_container="tar",
                 primary_error=exc,
             )
-    if ext == "epub":
-        return _extract_from_epub(local_path)
     if ext == "pdf":
         return _extract_from_pdf(local_path)
+    if ext == "epub":
+        return _extract_from_epub(local_path)
     raise ValueError(f"Unsupported comic extension: {ext}")
-
-
-def _extract_from_zip(local_path: str, *, fmt: str) -> ComicExtractionResult:
-    with zipfile.ZipFile(local_path, "r") as archive:
-        image_names = [
-            name
-            for name in archive.namelist()
-            if not name.endswith("/") and Path(name).suffix.lower() in IMAGE_EXTENSIONS
-        ]
-        ordered_names, page_count = _ordered_image_names_and_count(image_names)
-        cover_name, cover_bytes = _pick_first_non_empty_payload(
-            ordered_names, reader=archive.read, source_label="ZIP"
-        )
-        cover_extension = Path(cover_name).suffix.lower().lstrip(".") or "jpg"
-        return ComicExtractionResult(
-            format=fmt,
-            page_count=page_count,
-            cover_bytes=cover_bytes,
-            cover_extension=cover_extension,
-            details={"cover_member": cover_name},
-        )
-
-
-def _extract_from_tar(local_path: str, *, fmt: str) -> ComicExtractionResult:
-    with tarfile.open(local_path, "r:*") as archive:
-        image_members = [
-            member
-            for member in archive.getmembers()
-            if member.isfile() and Path(member.name).suffix.lower() in IMAGE_EXTENSIONS
-        ]
-        member_by_name = {member.name: member for member in image_members}
-        ordered_names, page_count = _ordered_image_names_and_count(member_by_name.keys())
-
-        def _read_member(name: str) -> bytes:
-            member = member_by_name[name]
-            extracted = archive.extractfile(member)
-            if extracted is None:
-                return b""
-            return extracted.read()
-
-        cover_name, cover_bytes = _pick_first_non_empty_payload(
-            ordered_names, reader=_read_member, source_label="TAR"
-        )
-        cover_extension = Path(cover_name).suffix.lower().lstrip(".") or "jpg"
-        return ComicExtractionResult(
-            format=fmt,
-            page_count=page_count,
-            cover_bytes=cover_bytes,
-            cover_extension=cover_extension,
-            details={"cover_member": cover_name},
-        )
-
-
-def _extract_from_rar(local_path: str, *, fmt: str) -> ComicExtractionResult:
-    try:
-        import rarfile  # type: ignore[import-not-found]
-    except ImportError as exc:
-        raise ValueError("RAR support requires optional dependency 'rarfile'") from exc
-    if not ensure_rar_backend():
-        raise ValueError(
-            "RAR backend tool not available. Configure COMIC_RAR_TOOLS_DIR and optionally "
-            "COMIC_RAR_TOOL_DOWNLOAD_URL / COMIC_RAR_TOOL_PATH."
-        )
-
-    try:
-        with _temporary_rar_cli_locale():
-            with rarfile.RarFile(local_path, "r") as archive:
-                image_names = [
-                    info.filename
-                    for info in archive.infolist()
-                    if not info.is_dir()
-                    and Path(info.filename).suffix.lower() in IMAGE_EXTENSIONS
-                ]
-                ordered_names, page_count = _ordered_image_names_and_count(image_names)
-                cover_name, cover_bytes = _pick_first_non_empty_payload(
-                    ordered_names, reader=archive.read, source_label="RAR"
-                )
-                cover_extension = Path(cover_name).suffix.lower().lstrip(".") or "jpg"
-                return ComicExtractionResult(
-                    format=fmt,
-                    page_count=page_count,
-                    cover_bytes=cover_bytes,
-                    cover_extension=cover_extension,
-                    details={"cover_member": cover_name, "backend": "rarfile"},
-                )
-    except Exception as exc:
-        logger.warning(
-            "rarfile extraction failed for %s: %s. Falling back to RAR CLI tools.",
-            local_path,
-            exc,
-        )
-        return _extract_from_rar_with_7z(local_path, fmt=fmt)
-
-
-def _classify_rar_cli_tool(tool_path: str) -> str:
-    name = Path(tool_path).name.lower()
-    if name.startswith("unar"):
-        return "unar"
-    if name.startswith(("7z", "7za", "7zr")):
-        return "7z"
-    if "unrar" in name:
-        return "unrar"
-    if name.startswith("rar"):
-        return "rar"
-    return "unknown"
-
-
-def _find_rar_cli_tools() -> list[tuple[str, str]]:
-    settings = get_settings()
-    candidates: list[str] = []
-    found_tools: list[tuple[str, str]] = []
-
-    # Prefer explicit configured path first.
-    if settings.comic_rar_tool_path:
-        explicit = str(Path(settings.comic_rar_tool_path).expanduser())
-        if Path(explicit).exists():
-            candidates.append(explicit)
-
-    # Prefer unar first for better Unicode/RAR5 handling, then unrar/rar,
-    # and only then 7z-family tools.
-    for name in ("unar", "unrar", "rar", "7z", "7za", "7zr"):
-        path = shutil.which(name)
-        if path:
-            candidates.append(path)
-
-    tools_dir = Path(settings.comic_rar_tools_dir).expanduser()
-    local_candidates = [
-        tools_dir / "unar.exe",
-        tools_dir / "unrar.exe",
-        tools_dir / "rar.exe",
-        Path(r"C:\Program Files\7-Zip\7z.exe"),
-        Path(r"C:\Program Files (x86)\7-Zip\7z.exe"),
-        tools_dir / "unar",
-        tools_dir / "unrar",
-        tools_dir / "rar",
-        tools_dir / "7z.exe",
-        tools_dir / "7za.exe",
-        tools_dir / "7zr.exe",
-        tools_dir / "7z",
-        tools_dir / "7za",
-        tools_dir / "7zr",
-    ]
-    for candidate in local_candidates:
-        if candidate.exists():
-            candidates.append(str(candidate))
-
-    seen: set[str] = set()
-    for candidate in candidates:
-        if candidate in seen:
-            continue
-        seen.add(candidate)
-        kind = _classify_rar_cli_tool(candidate)
-        if kind in {"7z", "unar", "unrar", "rar"}:
-            found_tools.append((candidate, kind))
-
-    return found_tools
-
-
-def _build_rar_cli_extract_command(
-    tool: str, kind: str, *, extract_dir: str, local_path: str
-) -> list[str]:
-    if kind == "7z":
-        return [tool, "x", "-y", f"-o{extract_dir}", local_path]
-    if kind == "unar":
-        return [
-            tool,
-            "-force-overwrite",
-            "-output-directory",
-            extract_dir,
-            local_path,
-        ]
-    return [tool, "x", "-y", "-o+", local_path, extract_dir]
-
-
-def _extract_from_rar_with_7z(local_path: str, *, fmt: str) -> ComicExtractionResult:
-    tool_order = _find_rar_cli_tools()
-    if not tool_order:
-        raise ValueError("RAR CLI tool not found for fallback extraction")
-
-    failures: list[str] = []
-    for tool, kind in tool_order:
-        with tempfile.TemporaryDirectory(prefix="comic_rar_7z_") as extract_dir:
-            extract_cmd = _build_rar_cli_extract_command(
-                tool,
-                kind,
-                extract_dir=extract_dir,
-                local_path=local_path,
-            )
-            extract_proc = subprocess.run(
-                extract_cmd,
-                capture_output=True,
-                check=False,
-                env=_rar_cli_subprocess_env(),
-            )
-            stderr = extract_proc.stderr.decode("utf-8", errors="ignore").strip()
-            stdout = extract_proc.stdout.decode("utf-8", errors="ignore").strip()
-
-            root = Path(extract_dir)
-            image_paths = [
-                path
-                for path in root.rglob("*")
-                if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
-            ]
-            image_paths.sort(key=lambda path: path.relative_to(root).as_posix().lower())
-            cover_path = next(
-                (path for path in image_paths if path.stat().st_size > 0),
-                None,
-            )
-            if cover_path is not None:
-                cover_bytes = cover_path.read_bytes()
-                cover_member = cover_path.relative_to(root).as_posix()
-                cover_extension = cover_path.suffix.lower().lstrip(".") or "jpg"
-                return ComicExtractionResult(
-                    format=fmt,
-                    page_count=len(image_paths),
-                    cover_bytes=cover_bytes,
-                    cover_extension=cover_extension,
-                    details={
-                        "cover_member": cover_member,
-                        "backend": "rar_cli_fallback",
-                        "cli_tool": tool,
-                        "cli_kind": kind,
-                        "cli_return_code": extract_proc.returncode,
-                        "cli_stderr": stderr[:2000] if stderr else "",
-                    },
-                )
-
-            if extract_proc.returncode not in (0, 1):
-                failures.append(
-                    f"{Path(tool).name}: code={extract_proc.returncode} stderr={stderr[:400]}"
-                )
-            elif image_paths:
-                failures.append(
-                    f"{Path(tool).name}: extracted only empty image files"
-                )
-            else:
-                failures.append(
-                    f"{Path(tool).name}: no image pages (stderr={stderr[:200]})"
-                )
-
-    raise ValueError(
-        "RAR CLI extraction failed across available tools: "
-        + " | ".join(failures[:4])
-    )
-
-
-def _extract_from_7z(local_path: str, *, fmt: str) -> ComicExtractionResult:
-    try:
-        import py7zr  # type: ignore[import-not-found]
-    except ImportError as exc:
-        raise ValueError("7Z support requires optional dependency 'py7zr'") from exc
-
-    with py7zr.SevenZipFile(local_path, "r") as archive:
-        image_names = [
-            name
-            for name in archive.getnames()
-            if Path(name).suffix.lower() in IMAGE_EXTENSIONS
-        ]
-        ordered_names, page_count = _ordered_image_names_and_count(image_names)
-        with tempfile.TemporaryDirectory(prefix="comic_7z_cover_") as temp_dir:
-            cover_name = ""
-            cover_bytes = b""
-            for candidate in ordered_names:
-                archive.extract(path=temp_dir, targets=[candidate])
-                candidate_path = Path(temp_dir) / Path(candidate)
-                if not candidate_path.exists():
-                    continue
-                candidate_bytes = candidate_path.read_bytes()
-                if candidate_bytes:
-                    cover_name = candidate
-                    cover_bytes = candidate_bytes
-                    break
-            if not cover_name:
-                raise ValueError("7Z extracted only empty cover files")
-        cover_extension = Path(cover_name).suffix.lower().lstrip(".") or "jpg"
-        return ComicExtractionResult(
-            format=fmt,
-            page_count=page_count,
-            cover_bytes=cover_bytes,
-            cover_extension=cover_extension,
-            details={"cover_member": cover_name},
-        )
-
-
-def _ordered_image_names_and_count(image_names: Iterable[str]) -> tuple[list[str], int]:
-    ordered = [name for name in image_names if name]
-    ordered.sort(key=lambda value: value.lower())
-    if not ordered:
-        raise ValueError("Archive has no image pages")
-    return ordered, len(ordered)
-
-
-def _pick_first_non_empty_payload(
-    ordered_names: list[str], *, reader: Callable[[str], bytes], source_label: str
-) -> tuple[str, bytes]:
-    for candidate_name in ordered_names:
-        payload = reader(candidate_name)
-        if payload:
-            return candidate_name, payload
-    raise ValueError(f"{source_label} extracted only empty cover files")
-
-
-def _rar_cli_locale_overrides() -> dict[str, str]:
-    return {
-        "LANG": RAR_UTF8_LOCALE,
-        "LC_ALL": RAR_UTF8_LOCALE,
-        "LC_CTYPE": RAR_UTF8_LOCALE,
-    }
-
-
-def _rar_cli_subprocess_env() -> dict[str, str]:
-    env = os.environ.copy()
-    env.update(_rar_cli_locale_overrides())
-    return env
-
-
-@contextmanager
-def _temporary_rar_cli_locale() -> Iterator[None]:
-    overrides = _rar_cli_locale_overrides()
-    if not overrides:
-        yield
-        return
-
-    previous = {key: os.environ.get(key) for key in overrides}
-    os.environ.update(overrides)
-    try:
-        yield
-    finally:
-        for key, value in previous.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-
-
-def _is_non_comic_extraction_error(error_text: str) -> bool:
-    normalized = (error_text or "").strip().lower()
-    if not normalized:
-        return False
-    if any(marker in normalized for marker in RAR_BACKEND_FAILURE_MARKERS):
-        return False
-    return any(marker in normalized for marker in NON_COMIC_EXTRACTION_MARKERS)
 
 
 def _existing_comic_mapping_skip_reason(
@@ -655,127 +405,6 @@ def _existing_comic_mapping_skip_reason(
         if value is not None and value != "":
             return "Item already mapped"
     return None
-
-
-def _extract_from_epub(local_path: str) -> ComicExtractionResult:
-    with zipfile.ZipFile(local_path, "r") as archive:
-        names = set(archive.namelist())
-        if "META-INF/container.xml" not in names:
-            raise ValueError("EPUB missing META-INF/container.xml")
-
-        container_xml = archive.read("META-INF/container.xml")
-        container_root = ElementTree.fromstring(container_xml)
-        rootfile = container_root.find(".//{*}rootfile")
-        if rootfile is None:
-            raise ValueError("EPUB container has no rootfile")
-        opf_path = rootfile.attrib.get("full-path")
-        if not opf_path or opf_path not in names:
-            raise ValueError("EPUB OPF manifest not found")
-
-        opf_xml = archive.read(opf_path)
-        opf_root = ElementTree.fromstring(opf_xml)
-
-        manifest_items = {}
-        for item in opf_root.findall(".//{*}manifest/{*}item"):
-            item_id = item.attrib.get("id")
-            href = item.attrib.get("href")
-            if item_id and href:
-                manifest_items[item_id] = item.attrib
-
-        spine_items = opf_root.findall(".//{*}spine/{*}itemref")
-        page_count = len(spine_items) if spine_items else None
-
-        opf_dir = posixpath.dirname(opf_path)
-        cover_href = None
-
-        cover_meta = opf_root.find(".//{*}metadata/{*}meta[@name='cover']")
-        if cover_meta is not None:
-            cover_id = cover_meta.attrib.get("content")
-            cover_item = manifest_items.get(cover_id) if cover_id else None
-            if cover_item is not None:
-                cover_href = cover_item.get("href")
-
-        if not cover_href:
-            for item in opf_root.findall(".//{*}manifest/{*}item"):
-                props = (item.attrib.get("properties") or "").lower()
-                media = (item.attrib.get("media-type") or "").lower()
-                if "cover-image" in props or media.startswith("image/"):
-                    cover_href = item.attrib.get("href")
-                    if cover_href:
-                        break
-
-        cover_bytes = None
-        cover_extension = None
-        resolved_cover_member = None
-        if cover_href:
-            cover_member = posixpath.normpath(posixpath.join(opf_dir, cover_href))
-            if cover_member in names:
-                cover_bytes = archive.read(cover_member)
-                cover_extension = Path(cover_member).suffix.lower().lstrip(".") or "jpg"
-                resolved_cover_member = cover_member
-
-        if cover_bytes is None:
-            image_names = [
-                name
-                for name in archive.namelist()
-                if not name.endswith("/")
-                and Path(name).suffix.lower() in IMAGE_EXTENSIONS
-            ]
-            image_names.sort(key=lambda value: value.lower())
-            if image_names:
-                resolved_cover_member = image_names[0]
-                cover_bytes = archive.read(resolved_cover_member)
-                cover_extension = (
-                    Path(resolved_cover_member).suffix.lower().lstrip(".") or "jpg"
-                )
-
-        if cover_bytes is None:
-            raise ValueError("EPUB has no cover image")
-
-        return ComicExtractionResult(
-            format="epub",
-            page_count=page_count,
-            cover_bytes=cover_bytes,
-            cover_extension=cover_extension,
-            details={"cover_member": resolved_cover_member},
-        )
-
-
-def _extract_from_pdf(local_path: str) -> ComicExtractionResult:
-    reader = PdfReader(local_path)
-    cover_bytes: bytes | None = None
-    cover_extension: str | None = None
-    cover_page_index: int | None = None
-
-    for page_index, page in enumerate(reader.pages):
-        images = getattr(page, "images", None)
-        if not images:
-            continue
-        for image in images:
-            data = getattr(image, "data", None)
-            if not data:
-                continue
-            cover_bytes = bytes(data)
-            image_name = getattr(image, "name", "") or ""
-            suffix = Path(image_name).suffix.lower().lstrip(".")
-            cover_extension = suffix or "jpg"
-            cover_page_index = page_index
-            break
-        if cover_bytes:
-            break
-
-    return ComicExtractionResult(
-        format="pdf",
-        page_count=len(reader.pages),
-        cover_bytes=cover_bytes,
-        cover_extension=cover_extension,
-        details={
-            "cover": "extracted_from_embedded_image"
-            if cover_bytes
-            else "embedded_image_not_found",
-            "cover_page_index": cover_page_index,
-        },
-    )
 
 
 def optimize_cover_image(
@@ -1365,7 +994,10 @@ class ComicMetadataService:
             ItemMetadata.category_id == category_id,
             ItemMetadata.item_id.in_(item_ids),
         )
-        rows = (await self.session.execute(stmt)).all()
+        result = await self.session.execute(stmt)
+        rows = result.all()
+        if inspect.isawaitable(rows):
+            rows = await rows
         return {
             str(item_id): dict(values or {})
             for item_id, values in rows

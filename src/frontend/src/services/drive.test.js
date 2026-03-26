@@ -12,8 +12,10 @@ import api from './api';
 import {
     batchDeleteItems,
     createFolder,
+    createComicReaderSession,
     createUploadSession,
     deleteItem,
+    getComicReaderPageUrl,
     getDownloadContentUrl,
     getDownloadUrl,
     getFiles,
@@ -85,6 +87,16 @@ describe('drive service', () => {
         expect(api.get).toHaveBeenNthCalledWith(1, '/drive/acc 1/download/item/1?auto_resolve_account=true');
         expect(api.get).toHaveBeenNthCalledWith(2, '/drive/acc-1/search?q=Dylan%20Dog', { signal: 'signal' });
         expect(api.get).toHaveBeenNthCalledWith(3, '/drive/acc-1/quota', { signal: 'signal' });
+    });
+
+    it('creates reader sessions and builds page urls', async () => {
+        api.post.mockResolvedValue({ data: { session_id: 'session-1' } });
+
+        await expect(createComicReaderSession('acc-1', 'item-9')).resolves.toEqual({ session_id: 'session-1' });
+        expect(getComicReaderPageUrl('acc 1', 'session/1', 3)).toBe(
+            '/api/v1/drive/acc%201/reader/comics/sessions/session%2F1/pages/3',
+        );
+        expect(api.post).toHaveBeenCalledWith('/drive/acc-1/reader/comics/item-9/sessions');
     });
 
     it('deletes, batch deletes and updates items', async () => {

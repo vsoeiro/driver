@@ -208,6 +208,27 @@ class PathResponse(BaseModel):
     breadcrumb: list[BreadcrumbItem] = Field(default_factory=list)
 
 
+class ComicReaderPage(BaseModel):
+    """One extracted comic page."""
+
+    index: int
+    width: int | None = None
+    height: int | None = None
+
+
+class ComicReaderSession(BaseModel):
+    """Manifest returned when a comic reader session is created."""
+
+    session_id: str
+    item_id: str
+    item_name: str
+    extension: str
+    page_count: int
+    pages: list[ComicReaderPage] = Field(default_factory=list)
+    expires_at: datetime
+    cache_hit: bool = False
+
+
 class SearchRequest(BaseModel):
     """Search request parameters.
 

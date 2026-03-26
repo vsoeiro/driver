@@ -1002,6 +1002,25 @@
     "zoomOut": "Zoom out",
     "failed": "Failed to load preview"
   },
+  "comicReader": {
+    "title": "Comic reader",
+    "open": "Read",
+    "readingMode": "Book mode",
+    "preparing": "Preparing reader...",
+    "selectSingleItem": "Select exactly one item to read.",
+    "fileOnly": "The comic reader works only with files.",
+    "checkingMetadata": "Checking comics metadata...",
+    "archiveOnly": "Comic reading v1 supports archive-based comics only. PDF and EPUB still use the existing preview flow.",
+    "requiresComicsMetadata": "The selected item must be mapped to the comics library.",
+    "unsupportedFormat": "The selected file format is not supported by the comic reader.",
+    "failedLoad": "Failed to load comic reader content.",
+    "failedTitle": "Reader unavailable",
+    "retry": "Retry",
+    "previous": "Previous",
+    "next": "Next",
+    "pageCounter": "Pages {{current}} of {{total}}",
+    "pageAlt": "{{name}} page {{page}}"
+  },
   "activity": {
     "title": "Activity",
     "subtitle": "Alerts, relevant jobs, and operational signals grouped by importance.",

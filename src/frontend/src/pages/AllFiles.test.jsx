@@ -88,6 +88,10 @@ vi.mock('../components/ExtractZipModal', () => ({
     },
 }));
 
+vi.mock('../components/ComicReaderModal', () => ({
+    default: ({ isOpen }) => (isOpen ? <div>Comic Reader Modal</div> : null),
+}));
+
 import { renderWithProviders } from '../test/render';
 import AllFiles from './AllFiles';
 
@@ -106,8 +110,8 @@ const metadataLibraries = [
 ];
 
 const metadataCategories = [
-    { id: 'cat-1', name: 'Comics' },
-    { id: 'cat-2', name: 'Books' },
+    { id: 'cat-1', name: 'Comics', plugin_key: 'comics_core' },
+    { id: 'cat-2', name: 'Books', plugin_key: 'books_core' },
 ];
 
 const rootItemsResponse = {
@@ -122,7 +126,7 @@ const rootItemsResponse = {
             size: 1024,
             modified_at: '2026-03-10T12:00:00Z',
             path: '/Books/cover.png',
-            metadata: { category_name: 'Comics' },
+            metadata: { category_id: 'cat-1', category_name: 'Comics' },
         },
         {
             id: 'row-folder-1',
@@ -153,7 +157,7 @@ const folderItemsResponse = {
             size: 2048,
             modified_at: '2026-03-10T12:10:00Z',
             path: '/Books/issue-01.cbz',
-            metadata: { category_name: 'Comics' },
+            metadata: { category_id: 'cat-1', category_name: 'Comics' },
         },
     ],
     total: 1,
@@ -238,6 +242,34 @@ describe('AllFiles page', () => {
             expect(screen.getByText('issue-01.cbz')).toBeInTheDocument();
         });
     }, 15000);
+
+    it('enables comic reading for comics metadata archives', async () => {
+        const user = userEvent.setup();
+        useItemsListQueryMock.mockReturnValue({
+            data: {
+                items: [
+                    {
+                        ...rootItemsResponse.items[0],
+                        name: 'issue-01.cbz',
+                        size: 2048,
+                        path: '/Books/issue-01.cbz',
+                        metadata: { category_id: 'cat-1', category_name: 'Comics' },
+                    },
+                ],
+                total: 1,
+                total_pages: 1,
+            },
+            isPending: false,
+        });
+
+        renderWithProviders(<AllFiles />);
+
+        await user.click(screen.getByText('2 KB'));
+        expect(screen.getByRole('button', { name: /read/i })).toBeEnabled();
+
+        await user.click(screen.getByRole('button', { name: /read/i }));
+        expect(await screen.findByText('Comic Reader Modal')).toBeInTheDocument();
+    });
 
     it('allows uploads after opening a folder path even when the source item has no parent id', async () => {
         const user = userEvent.setup();

@@ -13,6 +13,7 @@ from backend.api.routes import drive as drive_routes
 from backend.schemas.drive import (
     BatchDeleteRequest,
     BulkDownloadRequest,
+    ComicReaderSession,
     CopyItemRequest,
     CreateFolderRequest,
     UpdateItemRequest,
@@ -254,3 +255,69 @@ async def test_create_update_copy_delete_and_batch_delete_manage_index(monkeypat
     assert collect_ids_mock.await_count == 3
     delete_calls = [call.kwargs["item_id"] for call in delete_item_and_descendants_mock.await_args_list]
     assert delete_calls[-2:] == ["folder-1", "folder-2"]
+
+
+@pytest.mark.asyncio
+async def test_comic_reader_routes_delegate_and_translate_errors(monkeypatch, tmp_path):
+    account = SimpleNamespace(id=uuid4())
+    page_path = tmp_path / "page-0001.jpg"
+    page_path.write_bytes(b"page")
+    service = SimpleNamespace(
+        create_session=AsyncMock(
+            return_value=ComicReaderSession(
+                session_id="session-1",
+                item_id="item-1",
+                item_name="Saga.cbz",
+                extension="cbz",
+                page_count=1,
+                pages=[],
+                expires_at="2026-03-22T12:00:00Z",
+                cache_hit=False,
+            )
+        ),
+        get_page_payload=AsyncMock(
+            return_value=SimpleNamespace(path=str(page_path), media_type="image/jpeg")
+        ),
+    )
+    monkeypatch.setattr(drive_routes, "ComicReaderSessionService", lambda db: service)
+
+    manifest = await drive_routes.create_comic_reader_session(
+        account,
+        graph_client=object(),
+        db=object(),
+        item_id="item-1",
+    )
+    assert manifest.session_id == "session-1"
+
+    response = await drive_routes.get_comic_reader_page(
+        account,
+        db=object(),
+        session_id="session-1",
+        page_index=0,
+    )
+    assert response.path == str(page_path)
+    assert response.media_type == "image/jpeg"
+
+    service.create_session = AsyncMock(
+        side_effect=drive_routes.ComicReaderValidationError("bad comic"),
+    )
+    with pytest.raises(HTTPException) as create_exc:
+        await drive_routes.create_comic_reader_session(
+            account,
+            graph_client=object(),
+            db=object(),
+            item_id="item-1",
+        )
+    assert create_exc.value.status_code == 400
+
+    service.get_page_payload = AsyncMock(
+        side_effect=drive_routes.ComicReaderSessionNotFoundError("missing"),
+    )
+    with pytest.raises(HTTPException) as page_exc:
+        await drive_routes.get_comic_reader_page(
+            account,
+            db=object(),
+            session_id="session-1",
+            page_index=0,
+        )
+    assert page_exc.value.status_code == 404

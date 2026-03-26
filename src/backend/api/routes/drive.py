@@ -30,6 +30,7 @@ from backend.schemas.drive import (
     BatchDeleteRequest,
     BreadcrumbItem,
     BulkDownloadRequest,
+    ComicReaderSession,
     CopyItemRequest,
     CreateFolderRequest,
     DriveItem,
@@ -47,6 +48,11 @@ from backend.services.item_index import (
     path_from_breadcrumb,
     update_descendant_paths,
     upsert_item_record,
+)
+from backend.services.metadata_libraries.comics.reader_session_service import (
+    ComicReaderSessionNotFoundError,
+    ComicReaderSessionService,
+    ComicReaderValidationError,
 )
 
 logger = logging.getLogger(__name__)
@@ -205,6 +211,58 @@ async def download_content(
         content=content,
         media_type=media_type,
         headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@router.post(
+    "/{account_id}/reader/comics/{item_id}/sessions",
+    response_model=ComicReaderSession,
+    tags=["Reader"],
+)
+async def create_comic_reader_session(
+    account: LinkedAccountDep,
+    graph_client: DriveClientDep,
+    db: DBSession,
+    item_id: str,
+) -> ComicReaderSession:
+    """Create or reuse a temporary comic reader session for one archive item."""
+    service = ComicReaderSessionService(db)
+    try:
+        return await service.create_session(
+            account_id=account.id,
+            item_id=item_id,
+            account=account,
+            graph_client=graph_client,
+        )
+    except ComicReaderValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/{account_id}/reader/comics/sessions/{session_id}/pages/{page_index}",
+    tags=["Reader"],
+)
+async def get_comic_reader_page(
+    account: LinkedAccountDep,
+    db: DBSession,
+    session_id: str,
+    page_index: int,
+) -> FileResponse:
+    """Return one extracted comic page for an active reader session."""
+    service = ComicReaderSessionService(db)
+    try:
+        payload = await service.get_page_payload(
+            account_id=account.id,
+            session_id=session_id,
+            page_index=page_index,
+        )
+    except ComicReaderSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return FileResponse(
+        path=payload.path,
+        media_type=payload.media_type,
+        headers={"Cache-Control": "private, max-age=900"},
     )
 
 
